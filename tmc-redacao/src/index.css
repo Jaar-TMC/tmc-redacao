@@ -1,0 +1,296 @@
+@import "tailwindcss";
+
+@theme {
+  /* TMC Brand Colors */
+  --color-tmc-orange: #E87722;
+  --color-tmc-dark-green: #1A4D2E;
+  --color-tmc-light-green: #2D5A3D;
+
+  /* Neutral Colors */
+  --color-white: #FFFFFF;
+  --color-off-white: #F5F5F5;
+  --color-dark-gray: #333333;
+  --color-medium-gray: #666666;
+  --color-light-gray: #E0E0E0;
+
+  /* Accent Colors */
+  --color-live-red: #E53935;
+  --color-alert-orange: #FF6B35;
+
+  /* Semantic Colors */
+  --color-success: #10B981;
+  --color-warning: #F59E0B;
+  --color-error: #EF4444;
+
+  /* Font Family */
+  --font-sans: 'Inter', 'Roboto', Arial, Helvetica, sans-serif;
+}
+
+/* Base Styles - Must be in @layer base so Tailwind utilities can override */
+@layer base {
+  * {
+    box-sizing: border-box;
+  }
+
+  body {
+    font-family: var(--font-sans);
+    background-color: var(--color-off-white);
+    color: var(--color-dark-gray);
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  #root {
+    min-height: 100vh;
+  }
+}
+
+/* Scrollbar Styling */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--color-off-white);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--color-light-gray);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-medium-gray);
+}
+
+/* Screen Reader Only Utility */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border-width: 0;
+}
+
+/* Focus Visible Styles for Keyboard Navigation */
+*:focus-visible {
+  outline: 2px solid var(--color-tmc-orange);
+  outline-offset: 2px;
+}
+
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible {
+  outline: 2px solid var(--color-tmc-orange);
+  outline-offset: 2px;
+}
+
+/* Reduced Motion Support */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/*
+ * WCAG 2.1 Audio Control (1.4.2)
+ * If audio is added to the application in the future:
+ * - Provide pause, stop, or mute controls for any audio that plays automatically
+ * - Audio controls must be keyboard accessible
+ * - Controls should appear before or near the audio content
+ * - If audio plays for more than 3 seconds, a mechanism to pause/stop must be provided
+ * - Consider using <audio controls> or custom controls with proper ARIA labels
+ */
+
+/*
+ * WCAG 2.1 Three Flashes (2.3.1)
+ * Current implementation:
+ * - No flashing content present in the application
+ * - All animations respect prefers-reduced-motion
+ * - If flashing animations are added, ensure they flash no more than 3 times per second
+ * - Avoid large bright flashes that could trigger photosensitive seizures
+ */
+
+/*
+ * WCAG 2.1 Timing Adjustable (2.2.1)
+ * Current implementation:
+ * - TrendsSidebar auto-refresh can be paused via pause button
+ * - Users have full control over automatic content updates
+ * - No session timeouts or time limits are enforced
+ * - If timeouts are added in the future:
+ *   - Allow users to turn off, adjust, or extend the time limit
+ *   - Warn users before timeout occurs (at least 20 seconds before)
+ *   - Provide at least 10 times the default time limit for extended periods
+ */
+
+/* High Contrast Mode Support (Windows High Contrast Mode) */
+@media (forced-colors: active) {
+  /* Ensure buttons have visible borders */
+  button,
+  .btn-primary,
+  .btn-secondary,
+  a[role="button"] {
+    border: 2px solid currentColor;
+  }
+
+  /* Ensure focus indicators are visible */
+  *:focus,
+  *:focus-visible {
+    outline: 3px solid currentColor;
+    outline-offset: 2px;
+  }
+
+  /* Ensure icons are visible */
+  svg,
+  img:not([alt=""]) {
+    forced-color-adjust: auto;
+  }
+
+  /* Ensure decorative elements don't interfere */
+  [aria-hidden="true"] {
+    forced-color-adjust: preserve-parent-color;
+  }
+}
+
+/* Print Styles */
+@media print {
+  /* Hide non-essential elements */
+  .no-print,
+  header[role="banner"],
+  nav,
+  aside,
+  button,
+  .filter-bar,
+  [role="complementary"] {
+    display: none !important;
+  }
+
+  /* Optimize typography */
+  body {
+    font-size: 12pt;
+    line-height: 1.5;
+    color: #000;
+    background: #fff;
+  }
+
+  /* Ensure links are visible */
+  a {
+    text-decoration: underline;
+    color: #000;
+  }
+
+  a[href^="http"]::after {
+    content: " (" attr(href) ")";
+    font-size: 10pt;
+  }
+
+  /* Optimize page breaks */
+  h1, h2, h3, h4, h5, h6 {
+    page-break-after: avoid;
+    page-break-inside: avoid;
+  }
+
+  article,
+  section,
+  .article-card {
+    page-break-inside: avoid;
+  }
+
+  /* Show main content */
+  main {
+    width: 100%;
+    margin: 0;
+    padding: 0;
+  }
+
+  /* Remove shadows and backgrounds */
+  * {
+    box-shadow: none !important;
+    background: transparent !important;
+  }
+}
+
+/* Enhanced Focus Indicators */
+/* Increase focus contrast for better visibility */
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible,
+[tabindex="0"]:focus-visible,
+[role="button"]:focus-visible,
+[role="checkbox"]:focus-visible,
+[role="switch"]:focus-visible {
+  outline: 3px solid var(--color-tmc-orange);
+  outline-offset: 2px;
+  position: relative;
+  z-index: 1;
+}
+
+/* Ensure focus is visible on interactive elements within containers */
+.article-card:focus-visible,
+[role="article"]:focus-visible {
+  outline: 3px solid var(--color-tmc-orange);
+  outline-offset: 2px;
+}
+
+/* Keyboard navigation helper - show focus on any focusable element */
+*:focus {
+  scroll-margin: 8rem; /* Ensure focused elements aren't hidden behind fixed headers */
+}
+
+/* Scrollable region indicators */
+[role="region"][tabindex="0"],
+.scrollable-region {
+  position: relative;
+}
+
+/* Tooltip and hover content accessibility */
+[role="tooltip"],
+.tooltip {
+  /* Ensure tooltips are dismissible and hoverable */
+  pointer-events: auto;
+}
+
+/* Character key shortcuts - none currently implemented */
+/* If shortcuts are added, ensure they can be disabled or remapped */
+
+/* Ensure consistent navigation order */
+nav a,
+nav button {
+  /* Navigation items maintain consistent order across pages */
+  order: initial;
+}
+
+/*
+ * WCAG 2.1 Focus Order (2.4.3)
+ * Current implementation:
+ * - Tab order follows visual order (left to right, top to bottom)
+ * - Interactive elements are in logical sequence
+ * - No use of positive tabindex values that would disrupt natural order
+ * - All components verified:
+ *   - Header: Logo -> Navigation -> Actions -> User menu
+ *   - FilterBar: Search -> Category -> Source -> Period filters
+ *   - ArticleCard: Card container -> Expand button -> External link
+ *   - Modals: Close button -> Form inputs -> Action buttons
+ *   - TrendsSidebar: Pause -> Refresh -> Scrollable content
+ *
+ * All keyboard navigation:
+ * - Tab/Shift+Tab for navigation
+ * - Enter/Space for activation
+ * - Escape to close modals and dropdowns
+ * - Arrow keys for lists and menus (where implemented)
+ */
