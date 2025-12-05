@@ -136,9 +136,9 @@ const CriarPostPage = () => {
 
       <div className="flex flex-col lg:flex-row h-[calc(100vh-8rem)]">
         {/* Editor Area */}
-        <div className="flex-1 flex flex-col lg:border-r border-light-gray">
+        <div className="flex-1 flex flex-col lg:border-r border-light-gray overflow-visible">
           {/* Toolbar */}
-          <div className="bg-white border-b border-light-gray p-2 md:p-3 space-y-2 overflow-visible">
+          <div className="bg-white border-b border-light-gray p-2 md:p-3 space-y-2 overflow-visible relative z-30 isolate">
             {/* Formatting */}
             <div className="flex items-center gap-1">
               <button className="p-2 hover:bg-off-white rounded transition-colors">
@@ -174,7 +174,7 @@ const CriarPostPage = () => {
             </div>
 
             {/* AI Tools */}
-            <div className="flex items-center gap-2 overflow-x-auto pb-2">
+            <div className="flex flex-wrap items-center gap-2 pb-2">
               {/* Tone Dropdown */}
               <div className="relative flex-shrink-0">
                 <button
