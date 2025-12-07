@@ -123,6 +123,17 @@ export const mockTwitterTrends = [
   { id: 5, hashtag: "#ClimateAction", mentions: "45K" }
 ];
 
+export const mockFeedThemes = [
+  { id: 1, theme: "Dólar", count: 24, trend: "up" },
+  { id: 2, theme: "Petrobras", count: 18, trend: "up" },
+  { id: 3, theme: "Brasil vs Argentina", count: 15, trend: "stable" },
+  { id: 4, theme: "Selic", count: 12, trend: "up" },
+  { id: 5, theme: "OpenAI", count: 10, trend: "up" },
+  { id: 6, theme: "Inflação", count: 8, trend: "down" },
+  { id: 7, theme: "Copa do Mundo", count: 7, trend: "stable" },
+  { id: 8, theme: "Anvisa", count: 5, trend: "stable" }
+];
+
 export const mockSources = [
   { id: 1, name: "G1", url: "g1.globo.com", favicon: "https://www.google.com/s2/favicons?domain=g1.globo.com&sz=32", active: true, frequency: "1h", lastFetch: new Date(Date.now() - 15 * 60 * 1000) },
   { id: 2, name: "Folha de S.Paulo", url: "folha.uol.com.br", favicon: "https://www.google.com/s2/favicons?domain=folha.uol.com.br&sz=32", active: true, frequency: "30min", lastFetch: new Date(Date.now() - 30 * 60 * 1000) },

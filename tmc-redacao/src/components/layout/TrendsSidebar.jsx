@@ -1,6 +1,6 @@
 import { useState, useCallback } from 'react';
-import { TrendingUp, Twitter, RefreshCw, Pause, Play } from 'lucide-react';
-import { mockGoogleTrends, mockTwitterTrends } from '../../data/mockData';
+import { TrendingUp, Twitter, RefreshCw, Pause, Play, Hash } from 'lucide-react';
+import { mockGoogleTrends, mockTwitterTrends, mockFeedThemes } from '../../data/mockData';
 import Skeleton from '../ui/Skeleton';
 import EmptyState from '../ui/EmptyState';
 import PropTypes from 'prop-types';
@@ -18,6 +18,7 @@ const TrendsSidebar = ({ isOpen, onClose }) => {
   const [isPaused, setIsPaused] = useState(false);
   const [googleTrends] = useState(mockGoogleTrends);
   const [twitterTrends] = useState(mockTwitterTrends);
+  const [feedThemes] = useState(mockFeedThemes);
 
   const handleRefresh = useCallback(() => {
     setIsLoading(true);
@@ -176,6 +177,50 @@ const TrendsSidebar = ({ isOpen, onClose }) => {
                     </span>
                     <span className="text-xs text-medium-gray bg-off-white px-2 py-0.5 rounded" aria-label={`${trend.mentions} menções`}>
                       {trend.mentions}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
+
+          {/* Divider */}
+          <div className="border-t border-light-gray" role="separator"></div>
+
+          {/* Feed Themes Trending */}
+          <section aria-labelledby="feed-themes-heading">
+            <div className="flex items-center gap-2 mb-3">
+              <Hash size={18} className="text-tmc-dark-green" aria-hidden="true" />
+              <h3 id="feed-themes-heading" className="font-semibold text-dark-gray text-sm">Temas no Feed</h3>
+            </div>
+            {isLoading ? (
+              <div className="space-y-2">
+                {[...Array(5)].map((_, i) => (
+                  <div key={i} className="flex items-center justify-between p-2">
+                    <Skeleton className="h-3 w-28" />
+                    <Skeleton className="h-4 w-16" />
+                  </div>
+                ))}
+              </div>
+            ) : feedThemes.length === 0 ? (
+              <EmptyState
+                icon={Hash}
+                title="Nenhum tema"
+                description="Não há temas em destaque no momento."
+                className="py-6"
+              />
+            ) : (
+              <ul className="space-y-1">
+                {feedThemes.map((item) => (
+                  <li
+                    key={item.id}
+                    className="flex items-center justify-between p-2 hover:bg-off-white rounded-lg cursor-pointer transition-colors group"
+                  >
+                    <span className="text-sm font-medium text-dark-gray truncate group-hover:text-tmc-dark-green transition-colors">
+                      {item.theme}
+                    </span>
+                    <span className="text-xs text-medium-gray bg-off-white px-2 py-0.5 rounded" aria-label={`${item.count} matérias`}>
+                      {item.count} mat.
                     </span>
                   </li>
                 ))}

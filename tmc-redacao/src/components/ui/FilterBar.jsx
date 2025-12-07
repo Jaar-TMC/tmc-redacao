@@ -76,7 +76,7 @@ const FilterBar = () => {
             aria-label="Buscar matérias por título ou conteúdo"
           />
           {!searchTerm && (
-            <p className="hidden lg:block absolute top-full mt-1 left-0 text-xs text-medium-gray">
+            <p className="hidden xl:block absolute top-full mt-1 left-0 text-xs text-medium-gray whitespace-nowrap">
               Busque por palavras-chave, temas ou tags para filtrar em tempo real
             </p>
           )}
