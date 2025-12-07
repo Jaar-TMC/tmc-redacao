@@ -10,6 +10,7 @@ import PropTypes from 'prop-types';
 const RedacaoPage = lazy(() => import('./pages/RedacaoPage'));
 const CriarPostPage = lazy(() => import('./pages/CriarPostPage'));
 const CriarInspiracaoPage = lazy(() => import('./pages/CriarInspiracaoPage'));
+const MinhasMaterias = lazy(() => import('./pages/MinhasMaterias'));
 const ConfiguracoesPage = lazy(() => import('./pages/ConfiguracoesPage'));
 const BuscadorPage = lazy(() => import('./pages/config/BuscadorPage'));
 const TrendsPage = lazy(() => import('./pages/config/TrendsPage'));
@@ -121,7 +122,7 @@ function App() {
                       <Route path="/" element={<RedacaoPage />} />
                       <Route path="/criar" element={<CriarPostPage />} />
                       <Route path="/criar-inspiracao" element={<CriarInspiracaoPage />} />
-                      <Route path="/minhas-materias" element={<RedacaoPage />} />
+                      <Route path="/minhas-materias" element={<MinhasMaterias />} />
 
                       {/* Configuration Pages */}
                       <Route path="/configuracoes" element={<ConfiguracoesPage />}>
