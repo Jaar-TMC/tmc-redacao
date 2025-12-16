@@ -121,6 +121,42 @@ Entretanto, críticos apontam para possíveis riscos fiscais no médio prazo. A 
     setStep(1);
   }, []);
 
+  /**
+   * Add more articles to the selection
+   * @param {Array} newArticles - Articles to add
+   */
+  const handleAddArticles = useCallback((newArticles) => {
+    setArticles((prev) => {
+      const existingIds = new Set(prev.map((a) => a.id));
+      const uniqueNewArticles = newArticles.filter((a) => !existingIds.has(a.id));
+      return [...prev, ...uniqueNewArticles];
+    });
+
+    // Initialize paragraphs for new articles
+    setSelectedParagraphs((prev) => {
+      const newSelections = { ...prev };
+      newArticles.forEach((article) => {
+        if (!newSelections[article.id]) {
+          newSelections[article.id] = article.content.split('. ').map((_, i) => i);
+        }
+      });
+      return newSelections;
+    });
+  }, []);
+
+  /**
+   * Remove an article from the selection
+   * @param {string|number} articleId - Article ID to remove
+   */
+  const handleRemoveArticle = useCallback((articleId) => {
+    setArticles((prev) => prev.filter((a) => a.id !== articleId));
+    setSelectedParagraphs((prev) => {
+      const newSelections = { ...prev };
+      delete newSelections[articleId];
+      return newSelections;
+    });
+  }, []);
+
   // Render appropriate step component
   if (step === 1) {
     return (
@@ -136,6 +172,8 @@ Entretanto, críticos apontam para possíveis riscos fiscais no médio prazo. A 
         onSelectPersona={setSelectedPersona}
         onCancel={handleCancel}
         onGenerate={handleGenerate}
+        onAddArticles={handleAddArticles}
+        onRemoveArticle={handleRemoveArticle}
       />
     );
   }
