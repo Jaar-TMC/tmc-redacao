@@ -198,12 +198,20 @@ function TranscriptionCard({
             )}
           </div>
 
-          {/* Timestamp clicável */}
-          <ClickableTimestamp
-            time={segment.startTime}
-            onClick={onGoToMoment}
-            showIcon
-          />
+          {/* Timestamps clicáveis - intervalo */}
+          <div className="flex items-center gap-1">
+            <ClickableTimestamp
+              time={segment.startTime}
+              onClick={onGoToMoment}
+              showIcon
+            />
+            <span className="text-medium-gray text-xs">-</span>
+            <ClickableTimestamp
+              time={segment.endTime}
+              onClick={onGoToMoment}
+              showIcon
+            />
+          </div>
         </div>
 
         <div className="flex items-center gap-2">

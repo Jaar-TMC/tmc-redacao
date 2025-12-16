@@ -28,6 +28,18 @@ function MiniPlayer({
   const playerRef = useRef(null);
   const containerRef = useRef(null);
   const youtubePlayerRef = useRef(null);
+  const timeUpdateIntervalRef = useRef(null);
+  const currentTimeRef = useRef(currentTime);
+  const onTimeUpdateRef = useRef(onTimeUpdate);
+
+  // Manter refs atualizadas
+  useEffect(() => {
+    currentTimeRef.current = currentTime;
+  }, [currentTime]);
+
+  useEffect(() => {
+    onTimeUpdateRef.current = onTimeUpdate;
+  }, [onTimeUpdate]);
 
   // Controlar visibilidade baseado no player principal
   useEffect(() => {
@@ -48,28 +60,40 @@ function MiniPlayer({
     }
   }, [isMainPlayerVisible]);
 
+  // Limpar interval de time update
+  const clearTimeUpdateInterval = useCallback(() => {
+    if (timeUpdateIntervalRef.current) {
+      clearInterval(timeUpdateIntervalRef.current);
+      timeUpdateIntervalRef.current = null;
+    }
+  }, []);
+
+  // Iniciar interval de time update
+  const startTimeUpdateInterval = useCallback(() => {
+    clearTimeUpdateInterval();
+
+    timeUpdateIntervalRef.current = setInterval(() => {
+      if (youtubePlayerRef.current?.getCurrentTime && onTimeUpdateRef.current) {
+        const time = youtubePlayerRef.current.getCurrentTime();
+        onTimeUpdateRef.current(time);
+      }
+    }, 1000);
+  }, [clearTimeUpdateInterval]);
+
   // Inicializar YouTube Player API
   useEffect(() => {
     if (!isVisible || !videoId) return;
 
-    // Verificar se a API do YouTube já está carregada
-    if (!window.YT) {
-      // Carregar script da API do YouTube
-      const tag = document.createElement('script');
-      tag.src = 'https://www.youtube.com/iframe_api';
-      const firstScriptTag = document.getElementsByTagName('script')[0];
-      firstScriptTag.parentNode.insertBefore(tag, firstScriptTag);
-
-      // Callback quando a API estiver pronta
-      window.onYouTubeIframeAPIReady = () => {
-        initializePlayer();
-      };
-    } else {
-      initializePlayer();
-    }
+    let isMounted = true;
 
     function initializePlayer() {
-      if (!playerRef.current) return;
+      if (!playerRef.current || !isMounted) return;
+
+      // Destruir player anterior se existir
+      if (youtubePlayerRef.current?.destroy) {
+        youtubePlayerRef.current.destroy();
+        youtubePlayerRef.current = null;
+      }
 
       youtubePlayerRef.current = new window.YT.Player(playerRef.current, {
         videoId: videoId,
@@ -78,7 +102,7 @@ function MiniPlayer({
           controls: 1,
           modestbranding: 1,
           rel: 0,
-          start: Math.floor(currentTime)
+          start: Math.floor(currentTimeRef.current)
         },
         events: {
           onReady: onPlayerReady,
@@ -88,36 +112,56 @@ function MiniPlayer({
     }
 
     function onPlayerReady() {
-      // Player pronto
-      if (currentTime > 0 && youtubePlayerRef.current) {
-        youtubePlayerRef.current.seekTo(currentTime, true);
+      // Player pronto - seek para tempo atual se necessário
+      if (currentTimeRef.current > 0 && youtubePlayerRef.current) {
+        youtubePlayerRef.current.seekTo(currentTimeRef.current, true);
       }
     }
 
     function onPlayerStateChange(event) {
-      // Atualizar estado de playing
-      setIsPlaying(event.data === window.YT.PlayerState.PLAYING);
+      if (!isMounted) return;
 
-      // Callback de time update
-      if (event.data === window.YT.PlayerState.PLAYING && onTimeUpdate) {
-        const interval = setInterval(() => {
-          if (youtubePlayerRef.current && youtubePlayerRef.current.getCurrentTime) {
-            const time = youtubePlayerRef.current.getCurrentTime();
-            onTimeUpdate(time);
-          }
-        }, 1000);
+      const isNowPlaying = event.data === window.YT.PlayerState.PLAYING;
+      setIsPlaying(isNowPlaying);
 
-        return () => clearInterval(interval);
+      // Gerenciar interval de time update
+      if (isNowPlaying) {
+        startTimeUpdateInterval();
+      } else {
+        clearTimeUpdateInterval();
       }
     }
 
+    // Verificar se a API do YouTube já está carregada
+    if (window.YT?.Player) {
+      initializePlayer();
+    } else {
+      // Carregar script da API do YouTube se não existir
+      if (!document.querySelector('script[src*="youtube.com/iframe_api"]')) {
+        const tag = document.createElement('script');
+        tag.src = 'https://www.youtube.com/iframe_api';
+        const firstScriptTag = document.getElementsByTagName('script')[0];
+        firstScriptTag.parentNode.insertBefore(tag, firstScriptTag);
+      }
+
+      // Usar callback chain para não sobrescrever outros handlers
+      const existingCallback = window.onYouTubeIframeAPIReady;
+      window.onYouTubeIframeAPIReady = () => {
+        existingCallback?.();
+        initializePlayer();
+      };
+    }
+
     return () => {
-      if (youtubePlayerRef.current && youtubePlayerRef.current.destroy) {
+      isMounted = false;
+      clearTimeUpdateInterval();
+
+      if (youtubePlayerRef.current?.destroy) {
         youtubePlayerRef.current.destroy();
         youtubePlayerRef.current = null;
       }
     };
-  }, [isVisible, videoId, currentTime, onTimeUpdate]);
+  }, [isVisible, videoId, startTimeUpdateInterval, clearTimeUpdateInterval]);
 
   // Toggle play/pause
   const togglePlayPause = useCallback(() => {
@@ -137,12 +181,14 @@ function MiniPlayer({
 
   // Fechar mini player
   const handleClose = useCallback(() => {
+    clearTimeUpdateInterval();
     setIsClosed(true);
     setIsVisible(false);
-    if (youtubePlayerRef.current && youtubePlayerRef.current.pauseVideo) {
+
+    if (youtubePlayerRef.current?.pauseVideo) {
       youtubePlayerRef.current.pauseVideo();
     }
-  }, []);
+  }, [clearTimeUpdateInterval]);
 
   // Atalhos de teclado
   useEffect(() => {
@@ -158,15 +204,19 @@ function MiniPlayer({
         togglePlayPause();
       }
 
-      // Esc - Minimizar se expandido
-      if (e.key === 'Escape' && isExpanded) {
-        setIsExpanded(false);
+      // Esc - Minimizar se expandido, ou fechar se minimizado
+      if (e.key === 'Escape') {
+        if (isExpanded) {
+          setIsExpanded(false);
+        } else {
+          handleClose();
+        }
       }
     };
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isVisible, isExpanded, togglePlayPause]);
+  }, [isVisible, isExpanded, togglePlayPause, handleClose]);
 
   // Não renderizar se não estiver visível
   if (!isVisible) return null;
@@ -181,8 +231,8 @@ function MiniPlayer({
 
   // Tamanhos
   const sizeClasses = isExpanded
-    ? 'w-[90vw] max-w-2xl h-auto'
-    : 'w-80 h-auto';
+    ? 'w-[90vw] max-w-2xl'
+    : 'w-80';
 
   return (
     <div
@@ -228,7 +278,7 @@ function MiniPlayer({
             onClick={toggleExpand}
             className="p-1.5 hover:bg-white/20 rounded transition-colors"
             aria-label={isExpanded ? 'Minimizar player' : 'Expandir player'}
-            title={isExpanded ? 'Minimizar' : 'Expandir'}
+            title={isExpanded ? 'Minimizar (Esc)' : 'Expandir'}
           >
             {isExpanded ? (
               <Minimize2 className="w-4 h-4" aria-hidden="true" />
@@ -243,7 +293,7 @@ function MiniPlayer({
             onClick={handleClose}
             className="p-1.5 hover:bg-white/20 rounded transition-colors"
             aria-label="Fechar mini player"
-            title="Fechar (Esc)"
+            title="Fechar"
           >
             <X className="w-4 h-4" aria-hidden="true" />
           </button>
@@ -251,10 +301,7 @@ function MiniPlayer({
       </div>
 
       {/* Player embed */}
-      <div className={`
-        relative bg-black overflow-hidden rounded-b-xl
-        ${isExpanded ? 'aspect-video' : 'aspect-video'}
-      `}>
+      <div className="relative bg-black overflow-hidden rounded-b-xl aspect-video">
         <div
           ref={playerRef}
           className="w-full h-full"

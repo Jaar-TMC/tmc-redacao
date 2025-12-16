@@ -1,9 +1,6 @@
 import { useState, useCallback } from 'react';
 import PropTypes from 'prop-types';
 import {
-  FileText,
-  Clock,
-  Hash,
   ChevronDown,
   ChevronUp,
   ExternalLink,
@@ -50,39 +47,8 @@ function ConfigPanel({
     { value: 'influencer', label: 'Influencer', description: 'Comunicação próxima e engajadora' }
   ];
 
-  // Estimar palavras baseado na seleção
-  const estimatedWords = selection.selectedCount * 150;
-  const estimatedMinutes = Math.ceil(estimatedWords / 200);
-
   return (
     <div className="bg-white rounded-xl border border-light-gray p-6 sticky top-24">
-      {/* Resumo da Seleção */}
-      <div className="bg-off-white rounded-xl p-4 mb-5">
-        <h3 className="text-sm font-semibold text-dark-gray mb-3">
-          Resumo da Seleção
-        </h3>
-        <div className="space-y-2.5 text-sm">
-          <div className="flex items-center gap-2.5 text-medium-gray">
-            <FileText className="w-4 h-4 flex-shrink-0" aria-hidden="true" />
-            <span>
-              <strong className="text-dark-gray font-semibold">{selection.selectedCount}</strong> trechos selecionados
-            </span>
-          </div>
-          <div className="flex items-center gap-2.5 text-medium-gray">
-            <Clock className="w-4 h-4 flex-shrink-0" aria-hidden="true" />
-            <span>
-              ~<strong className="text-dark-gray font-semibold">{estimatedMinutes}</strong> min de conteúdo
-            </span>
-          </div>
-          <div className="flex items-center gap-2.5 text-medium-gray">
-            <Hash className="w-4 h-4 flex-shrink-0" aria-hidden="true" />
-            <span>
-              ~<strong className="text-dark-gray font-semibold">{estimatedWords}</strong> palavras estimadas
-            </span>
-          </div>
-        </div>
-      </div>
-
       {/* Tom da Matéria */}
       <div className="mb-5">
         <label className="block text-sm font-semibold text-dark-gray mb-2">
