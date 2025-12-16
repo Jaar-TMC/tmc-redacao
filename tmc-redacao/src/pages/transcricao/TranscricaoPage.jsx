@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { ArrowLeft, Youtube, CheckSquare, Square, Search } from 'lucide-react';
 
@@ -11,7 +11,9 @@ import {
   TranscriptionCard,
   ConfigPanel,
   ProgressOverlay,
-  StepIndicator
+  StepIndicator,
+  SelectionSidebar,
+  MiniPlayer
 } from './components';
 
 import { useMultiSelect, useSteps } from './hooks';
@@ -30,35 +32,35 @@ const MOCK_TRANSCRIPTION = [
     startTime: '00:00',
     endTime: '00:45',
     text: 'Olá, sejam bem-vindos ao nosso canal. Hoje vamos falar sobre um tema muito importante que tem chamado a atenção de todos.',
-    speaker: 'Apresentador'
+    topic: 'Introdução'
   },
   {
     id: '2',
     startTime: '00:45',
     endTime: '02:12',
     text: 'Nos últimos meses, observamos uma mudança significativa no comportamento do mercado. As empresas estão cada vez mais focadas em inovação.',
-    speaker: 'Apresentador'
+    topic: 'Tendências de Mercado'
   },
   {
     id: '3',
     startTime: '02:12',
     endTime: '04:30',
     text: 'Especialistas apontam que essa tendência deve continuar pelos próximos anos. A tecnologia está transformando todos os setores da economia.',
-    speaker: 'Especialista'
+    topic: 'Transformação Digital'
   },
   {
     id: '4',
     startTime: '04:30',
     endTime: '06:15',
     text: 'Os dados mostram um crescimento de 45% em investimentos nessa área. Isso representa uma oportunidade única para quem está atento.',
-    speaker: 'Especialista'
+    topic: 'Dados e Investimentos'
   },
   {
     id: '5',
     startTime: '06:15',
     endTime: '08:00',
     text: 'Para finalizar, gostaria de destacar três pontos principais que discutimos hoje e como eles podem impactar o seu dia a dia.',
-    speaker: 'Apresentador'
+    topic: 'Conclusão'
   }
 ];
 
@@ -83,8 +85,19 @@ function TranscricaoPage() {
   const [transcriptionProgress, setTranscriptionProgress] = useState(0);
   const [isGenerating, setIsGenerating] = useState(false);
 
-  // Seleção de trechos
+  // Seleção de cards inteiros
   const selection = useMultiSelect();
+
+  // Seleção de texto dentro dos cards (por cardId)
+  const [cardHighlights, setCardHighlights] = useState({}); // { [segmentId]: [texto1, texto2, ...] }
+
+  // Seleções unificadas para o SelectionSidebar
+  const [unifiedSelections, setUnifiedSelections] = useState([]);
+
+  // Refs e estados para MiniPlayer
+  const mainPlayerRef = useRef(null);
+  const [isMainPlayerVisible, setIsMainPlayerVisible] = useState(true);
+  const [currentVideoTime, setCurrentVideoTime] = useState(0);
 
   // Configurações da matéria
   const [config, setConfig] = useState({
@@ -101,6 +114,59 @@ function TranscricaoPage() {
   const filteredTranscription = transcription.filter(segment =>
     segment.text.toLowerCase().includes(searchQuery.toLowerCase())
   );
+
+  // Sincronizar seleções unificadas quando mudam cards ou highlights
+  useEffect(() => {
+    const selections = [];
+
+    // Cards inteiros selecionados
+    selection.selectedIds.forEach(id => {
+      const segment = transcription.find(s => s.id === id);
+      if (segment) {
+        selections.push({
+          id: `card-${id}`,
+          text: segment.text,
+          source: 'cards',
+          topic: segment.topic,
+          timestamp: segment.startTime
+        });
+      }
+    });
+
+    // Highlights de texto dentro dos cards
+    Object.entries(cardHighlights).forEach(([segmentId, highlights]) => {
+      const segment = transcription.find(s => s.id === segmentId);
+      if (segment && highlights.length > 0) {
+        highlights.forEach((text, index) => {
+          selections.push({
+            id: `text-${segmentId}-${index}`,
+            text: text,
+            source: 'full',
+            topic: segment.topic,
+            timestamp: segment.startTime
+          });
+        });
+      }
+    });
+
+    setUnifiedSelections(selections);
+  }, [selection.selectedIds, cardHighlights, transcription]);
+
+  // Observer para detectar visibilidade do player principal
+  useEffect(() => {
+    if (!mainPlayerRef.current || currentStep !== 3) return;
+
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        setIsMainPlayerVisible(entry.isIntersecting);
+      },
+      { threshold: 0.3 }
+    );
+
+    observer.observe(mainPlayerRef.current);
+
+    return () => observer.disconnect();
+  }, [currentStep]);
 
   // Handler para URL válida
   const handleValidURL = useCallback((data) => {
@@ -158,7 +224,7 @@ function TranscricaoPage() {
 
   // Gerar matéria
   const handleGenerate = useCallback(async () => {
-    if (!selection.hasSelection) return;
+    if (unifiedSelections.length === 0) return;
 
     setIsGenerating(true);
 
@@ -172,7 +238,7 @@ function TranscricaoPage() {
 
     // Redirecionar para editor
     navigate(`/criar?from=transcription&id=${articleId}`);
-  }, [selection.hasSelection, navigate]);
+  }, [unifiedSelections.length, navigate]);
 
   // Selecionar/desselecionar todos
   const handleSelectAll = useCallback(() => {
@@ -190,11 +256,82 @@ function TranscricaoPage() {
     // Em produção, controlar o player do YouTube
   }, []);
 
-  // Go to moment (mock)
-  const handleGoToMoment = useCallback((timestamp) => {
-    console.log('Go to moment:', timestamp);
-    // Em produção, seek no player do YouTube
+  // Go to moment - pula para timestamp no vídeo
+  const handleGoToMoment = useCallback((seconds) => {
+    // Se receber string (formato MM:SS), converter para segundos
+    let timeInSeconds = seconds;
+    if (typeof seconds === 'string') {
+      const parts = seconds.split(':').map(p => parseInt(p, 10));
+      if (parts.length === 2) {
+        timeInSeconds = parts[0] * 60 + parts[1];
+      } else if (parts.length === 3) {
+        timeInSeconds = parts[0] * 3600 + parts[1] * 60 + parts[2];
+      }
+    }
+
+    setCurrentVideoTime(timeInSeconds);
+
+    // Scroll para o player principal se não estiver visível
+    if (mainPlayerRef.current && !isMainPlayerVisible) {
+      mainPlayerRef.current.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+
+    // Em produção, usar YouTube IFrame API para seek
+    console.log('Seek to:', timeInSeconds, 'seconds');
+  }, [isMainPlayerVisible]);
+
+  // Handler para seleção de texto dentro dos cards
+  const handleTextSelect = useCallback((segmentId, selectedText, isRemove = false) => {
+    setCardHighlights(prev => {
+      const current = prev[segmentId] || [];
+
+      if (isRemove) {
+        // Remover highlight
+        const filtered = current.filter(h => h !== selectedText);
+        if (filtered.length === 0) {
+          const { [segmentId]: _, ...rest } = prev;
+          return rest;
+        }
+        return { ...prev, [segmentId]: filtered };
+      } else {
+        // Adicionar highlight
+        if (current.includes(selectedText)) return prev;
+        return { ...prev, [segmentId]: [...current, selectedText] };
+      }
+    });
   }, []);
+
+  // Handlers para SelectionSidebar
+  const handleRemoveSelection = useCallback((selectionId) => {
+    if (selectionId.startsWith('card-')) {
+      // Remover seleção de card inteiro
+      const cardId = selectionId.replace('card-', '');
+      selection.toggle(cardId);
+    } else if (selectionId.startsWith('text-')) {
+      // Remover highlight de texto (formato: text-segmentId-index)
+      const parts = selectionId.split('-');
+      const segmentId = parts[1];
+      // Encontrar o texto pelo índice na lista atual
+      const segment = unifiedSelections.find(s => s.id === selectionId);
+      if (segment) {
+        handleTextSelect(segmentId, segment.text, true);
+      }
+    }
+  }, [selection, unifiedSelections, handleTextSelect]);
+
+  const handleReorderSelections = useCallback((fromIndex, toIndex) => {
+    setUnifiedSelections(prev => {
+      const newSelections = [...prev];
+      const [moved] = newSelections.splice(fromIndex, 1);
+      newSelections.splice(toIndex, 0, moved);
+      return newSelections;
+    });
+  }, []);
+
+  const handleClearAllSelections = useCallback(() => {
+    selection.deselectAll();
+    setCardHighlights({});
+  }, [selection]);
 
   // Atalhos de teclado globais
   useEffect(() => {
@@ -214,7 +351,7 @@ function TranscricaoPage() {
         if (currentStep === 1 && videoData) {
           e.preventDefault();
           handleStartTranscription();
-        } else if (currentStep === 3 && selection.hasSelection && !isGenerating) {
+        } else if (currentStep === 3 && unifiedSelections.length > 0 && !isGenerating) {
           e.preventDefault();
           handleGenerate();
         }
@@ -248,7 +385,7 @@ function TranscricaoPage() {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [currentStep, videoData, selection.hasSelection, isGenerating, isTranscribing, handleStartTranscription, handleGenerate, handleSelectAll, handleDeselectAll, handleCancelTranscription, resetSteps]);
+  }, [currentStep, videoData, unifiedSelections.length, isGenerating, isTranscribing, handleStartTranscription, handleGenerate, handleSelectAll, handleDeselectAll, handleCancelTranscription, resetSteps]);
 
   return (
     <div className="min-h-screen bg-off-white pt-16">
@@ -379,9 +516,12 @@ function TranscricaoPage() {
             <div className="w-full lg:w-3/5">
               {/* Player embed (simplificado) */}
               {videoData && (
-                <div className="bg-black rounded-xl overflow-hidden mb-4 aspect-video">
+                <div
+                  ref={mainPlayerRef}
+                  className="bg-black rounded-xl overflow-hidden mb-4 aspect-video"
+                >
                   <iframe
-                    src={`https://www.youtube.com/embed/${videoData.videoId}`}
+                    src={`https://www.youtube.com/embed/${videoData.videoId}${currentVideoTime > 0 ? `?start=${Math.floor(currentVideoTime)}` : ''}`}
                     title={videoData.title}
                     className="w-full h-full"
                     allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
@@ -399,7 +539,7 @@ function TranscricaoPage() {
                     className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-medium-gray hover:text-dark-gray hover:bg-off-white rounded-lg transition-colors"
                   >
                     <CheckSquare className="w-4 h-4" />
-                    Selecionar Tudo
+                    <span className="hidden sm:inline">Selecionar Tudo</span>
                   </button>
                   <button
                     type="button"
@@ -407,7 +547,7 @@ function TranscricaoPage() {
                     className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-medium-gray hover:text-dark-gray hover:bg-off-white rounded-lg transition-colors"
                   >
                     <Square className="w-4 h-4" />
-                    Limpar
+                    <span className="hidden sm:inline">Limpar</span>
                   </button>
                 </div>
 
@@ -424,7 +564,7 @@ function TranscricaoPage() {
                 </div>
               </div>
 
-              {/* Lista de trechos */}
+              {/* Cards de transcrição */}
               <div className="space-y-3">
                 {filteredTranscription.map(segment => (
                   <TranscriptionCard
@@ -434,6 +574,8 @@ function TranscricaoPage() {
                     onToggle={selection.toggle}
                     onPlaySegment={handlePlaySegment}
                     onGoToMoment={handleGoToMoment}
+                    onTextSelect={handleTextSelect}
+                    textHighlights={cardHighlights[segment.id] || []}
                   />
                 ))}
 
@@ -445,14 +587,23 @@ function TranscricaoPage() {
               </div>
             </div>
 
-            {/* Coluna direita: Configurações */}
-            <div className="w-full lg:w-2/5">
+            {/* Coluna direita: Seleções + Configurações */}
+            <div className="w-full lg:w-2/5 space-y-4">
+              {/* Painel de seleções */}
+              <SelectionSidebar
+                selections={unifiedSelections}
+                onRemove={handleRemoveSelection}
+                onReorder={handleReorderSelections}
+                onClear={handleClearAllSelections}
+              />
+
+              {/* Configurações da matéria */}
               <ConfigPanel
                 config={config}
                 onChange={setConfig}
                 selection={{
-                  selectedCount: selection.selectedCount,
-                  hasSelection: selection.hasSelection
+                  selectedCount: unifiedSelections.length,
+                  hasSelection: unifiedSelections.length > 0
                 }}
                 video={videoData}
                 onGenerate={handleGenerate}
@@ -463,23 +614,34 @@ function TranscricaoPage() {
         )}
       </main>
 
+      {/* MiniPlayer - aparece quando o player principal sai de vista */}
+      {currentStep === 3 && videoData && (
+        <MiniPlayer
+          videoId={videoData.videoId}
+          isMainPlayerVisible={isMainPlayerVisible}
+          currentTime={currentVideoTime}
+          onTimeUpdate={setCurrentVideoTime}
+          position="bottom-right"
+        />
+      )}
+
       {/* Footer fixo mobile (step 3) */}
       {currentStep === 3 && (
         <div className="lg:hidden fixed bottom-0 left-0 right-0 bg-white border-t border-light-gray p-4 z-30">
           <button
             type="button"
             onClick={handleGenerate}
-            disabled={!selection.hasSelection || isGenerating}
+            disabled={unifiedSelections.length === 0 || isGenerating}
             className={`
               w-full py-3 px-4 rounded-lg font-semibold text-white
               transition-all duration-200
-              ${selection.hasSelection && !isGenerating
+              ${unifiedSelections.length > 0 && !isGenerating
                 ? 'bg-tmc-orange hover:bg-tmc-orange-dark'
                 : 'bg-light-gray text-medium-gray cursor-not-allowed'
               }
             `}
           >
-            {isGenerating ? 'Gerando...' : `Gerar Matéria (${selection.selectedCount} trechos)`}
+            {isGenerating ? 'Gerando...' : `Gerar Matéria (${unifiedSelections.length} trechos)`}
           </button>
         </div>
       )}
