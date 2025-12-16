@@ -10,6 +10,7 @@ import PropTypes from 'prop-types';
 const RedacaoPage = lazy(() => import('./pages/RedacaoPage'));
 const CriarPostPage = lazy(() => import('./pages/CriarPostPage'));
 const CriarInspiracaoPage = lazy(() => import('./pages/CriarInspiracaoPage'));
+const TranscricaoPage = lazy(() => import('./pages/transcricao/TranscricaoPage'));
 const MinhasMaterias = lazy(() => import('./pages/MinhasMaterias'));
 const ConfiguracoesPage = lazy(() => import('./pages/ConfiguracoesPage'));
 const BuscadorPage = lazy(() => import('./pages/config/BuscadorPage'));
@@ -24,6 +25,7 @@ function DocumentTitleUpdater() {
       '/': 'Redação',
       '/criar': 'Criar Matéria',
       '/criar-inspiracao': 'Criar com Inspiração',
+      '/transcricao': 'Transcrever Vídeo',
       '/minhas-materias': 'Minhas Matérias',
       '/configuracoes': 'Configurações',
       '/configuracoes/buscador': 'Buscador de Notícias - Configurações',
@@ -122,6 +124,7 @@ function App() {
                       <Route path="/" element={<RedacaoPage />} />
                       <Route path="/criar" element={<CriarPostPage />} />
                       <Route path="/criar-inspiracao" element={<CriarInspiracaoPage />} />
+                      <Route path="/transcricao" element={<TranscricaoPage />} />
                       <Route path="/minhas-materias" element={<MinhasMaterias />} />
 
                       {/* Configuration Pages */}

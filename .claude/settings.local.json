@@ -15,7 +15,13 @@
       "mcp__playwright__browser_wait_for",
       "mcp__playwright__browser_evaluate",
       "mcp__playwright__browser_click",
-      "mcp__playwright__browser_snapshot"
+      "mcp__playwright__browser_snapshot",
+      "Bash(gh --version:*)",
+      "Bash(gh repo create:*)",
+      "Bash(az:*)",
+      "Bash(swa --version:*)",
+      "Bash(powershell -Command \"Add-Type -AssemblyName System.IO.Compression.FileSystem; $zip = [System.IO.Compression.ZipFile]::OpenRead(''tmc-redacao-analise-ideias-projeto.docx''); $entry = $zip.Entries | Where-Object { $_FullName -eq ''word/document.xml'' }; $stream = $entry.Open(); $reader = New-Object System.IO.StreamReader($stream); $xml = $reader.ReadToEnd(); $reader.Close(); $zip.Dispose(); [xml]$doc = $xml; $doc.SelectNodes(''//w:t'', @{w=''http://schemas.openxmlformats.org/wordprocessingml/2006/main''}) | ForEach-Object { $_InnerText }\")",
+      "WebSearch"
     ],
     "deny": [],
     "ask": []

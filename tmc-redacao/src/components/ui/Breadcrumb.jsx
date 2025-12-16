@@ -32,7 +32,7 @@ const Breadcrumb = ({ items }) => {
                 </span>
               ) : (
                 <Link
-                  to={item.path}
+                  to={item.path || item.href}
                   className="text-medium-gray hover:text-tmc-orange transition-colors min-h-[44px] flex items-center px-2"
                 >
                   {item.label}
