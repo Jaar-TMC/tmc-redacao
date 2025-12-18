@@ -248,7 +248,7 @@ function MiniPlayer({
       aria-label="Mini player de vídeo"
     >
       {/* Header com controles */}
-      <div className="flex items-center justify-between px-3 py-2 bg-dark-green text-white rounded-t-xl">
+      <div className="flex items-center justify-between px-3 py-2 bg-tmc-dark-green text-white rounded-t-xl">
         <div className="flex items-center gap-2 flex-1 min-w-0">
           <Play className="w-4 h-4 flex-shrink-0" aria-hidden="true" />
           <span className="text-sm font-medium truncate">

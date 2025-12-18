@@ -97,7 +97,7 @@ const TrendsSidebar = ({ isOpen, onClose }) => {
         </div>
 
         <div
-          className="space-y-6 overflow-y-auto h-[calc(100%-120px)] pb-4"
+          className="space-y-6 overflow-y-auto h-[calc(100%-120px)] pb-14"
           aria-live="polite"
           aria-atomic="false"
           tabIndex={0}
@@ -112,7 +112,7 @@ const TrendsSidebar = ({ isOpen, onClose }) => {
                   <Flame size={16} className="text-white" aria-hidden="true" />
                 </div>
                 <div>
-                  <h3 id="feed-themes-heading" className="font-bold text-dark-gray text-sm">Temas Quentes</h3>
+                  <h3 id="feed-themes-heading" className="font-bold text-dark-gray text-sm">Feed em Alta</h3>
                 </div>
               </div>
               {/* Tooltip de Informação */}

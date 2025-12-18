@@ -1,5 +1,5 @@
-import { Search, ChevronDown, Calendar, Building2, Tag } from 'lucide-react';
-import { useState, useCallback, useEffect, useMemo } from 'react';
+import { Search, ChevronDown, Building2, Tag } from 'lucide-react';
+import { useState, useCallback, useEffect } from 'react';
 import { mockCategories, mockSources } from '../../data/mockData';
 import { useFilters } from '../../context';
 
@@ -17,12 +17,6 @@ const FilterBar = () => {
   const [searchTerm, setSearchTerm] = useState(filters.searchQuery || '');
   const [openDropdown, setOpenDropdown] = useState(null);
   const [isExternalUpdate, setIsExternalUpdate] = useState(false);
-
-  const periods = useMemo(() => [
-    { id: 'today', label: 'Hoje' },
-    { id: 'week', label: 'Esta semana' },
-    { id: 'month', label: 'Este mês' }
-  ], []);
 
   // Sync local state when filters.searchQuery changes externally (e.g., from TrendsSidebar)
   useEffect(() => {
@@ -97,7 +91,7 @@ const FilterBar = () => {
         </div>
 
         {/* Filter Buttons */}
-        <div className="flex items-center gap-4" role="group" aria-label="Filtros de categoria, origem e período">
+        <div className="flex items-center gap-4" role="group" aria-label="Filtros de categoria e origem">
           {/* Category Filter */}
           <div className="relative">
             <button
@@ -194,68 +188,6 @@ const FilterBar = () => {
             )}
           </div>
 
-          {/* Period Filter */}
-          <div className="relative">
-            <button
-              type="button"
-              onClick={() => handleFilterClick('period')}
-              aria-expanded={openDropdown === 'period'}
-              aria-haspopup="listbox"
-              aria-label={`Filtrar por período: ${periods.find(p => p.id === filters.period)?.label}`}
-              className="flex items-center gap-2 px-4 py-2.5 text-dark-gray rounded-lg font-medium border border-light-gray hover:bg-light-gray transition-colors"
-            >
-              <Calendar style={{ width: '18px', height: '18px' }} aria-hidden="true" />
-              <span>{periods.find(p => p.id === filters.period)?.label}</span>
-              <ChevronDown style={{ width: '14px', height: '14px' }} aria-hidden="true" />
-            </button>
-
-            {openDropdown === 'period' && (
-              <div className="absolute top-full right-0 mt-2 w-40 bg-white rounded-lg border border-light-gray py-2 z-20" role="listbox" aria-label="Períodos disponíveis">
-                {periods.map((period) => (
-                  <button
-                    type="button"
-                    key={period.id}
-                    onClick={() => handleSelectFilter('period', period.id)}
-                    className={`w-full px-4 py-2 text-left text-sm hover:bg-off-white ${
-                      filters.period === period.id ? 'text-tmc-orange font-medium' : ''
-                    }`}
-                    role="option"
-                    aria-selected={filters.period === period.id}
-                  >
-                    {period.label}
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-        </div>
-
-        {/* Top 10 Toggle */}
-        <div className="flex items-center bg-off-white rounded-lg p-1" role="group" aria-label="Top 10 matérias">
-          <button
-            type="button"
-            onClick={() => handleSelectFilter('period', 'today')}
-            className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
-              filters.period === 'today'
-                ? 'bg-tmc-orange text-white'
-                : 'text-medium-gray hover:text-dark-gray'
-            }`}
-            aria-pressed={filters.period === 'today'}
-          >
-            Top 10 do dia
-          </button>
-          <button
-            type="button"
-            onClick={() => handleSelectFilter('period', 'week')}
-            className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
-              filters.period === 'week'
-                ? 'bg-tmc-orange text-white'
-                : 'text-medium-gray hover:text-dark-gray'
-            }`}
-            aria-pressed={filters.period === 'week'}
-          >
-            Top 10 da semana
-          </button>
         </div>
       </div>
 

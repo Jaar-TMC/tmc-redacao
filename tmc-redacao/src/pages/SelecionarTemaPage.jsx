@@ -257,7 +257,7 @@ const SelecionarTemaPage = () => {
               }`}
             >
               <Flame size={18} />
-              <span>Temas Quentes</span>
+              <span>Feed em Alta</span>
               <span className={`px-1.5 py-0.5 rounded text-xs ${
                 activeTab === 'feed' ? 'bg-white/20' : 'bg-off-white'
               }`}>
