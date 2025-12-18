@@ -8,6 +8,7 @@ import PropTypes from 'prop-types';
 
 // Lazy load page components for code splitting
 const RedacaoPage = lazy(() => import('./pages/RedacaoPage'));
+const SelecionarTemaPage = lazy(() => import('./pages/SelecionarTemaPage'));
 const CriarPostPage = lazy(() => import('./pages/CriarPostPage'));
 const CriarInspiracaoPage = lazy(() => import('./pages/CriarInspiracaoPage'));
 const TranscricaoPage = lazy(() => import('./pages/transcricao/TranscricaoPage'));
@@ -23,7 +24,8 @@ function DocumentTitleUpdater() {
   useEffect(() => {
     const titles = {
       '/': 'Redação',
-      '/criar': 'Criar Matéria',
+      '/criar': 'Selecionar Tema',
+      '/criar/editor': 'Criar Matéria',
       '/criar-inspiracao': 'Criar com Inspiração',
       '/transcricao': 'Transcrever Vídeo',
       '/minhas-materias': 'Minhas Matérias',
@@ -122,7 +124,8 @@ function App() {
                     <Routes>
                       {/* Main Pages */}
                       <Route path="/" element={<RedacaoPage />} />
-                      <Route path="/criar" element={<CriarPostPage />} />
+                      <Route path="/criar" element={<SelecionarTemaPage />} />
+                      <Route path="/criar/editor" element={<CriarPostPage />} />
                       <Route path="/criar-inspiracao" element={<CriarInspiracaoPage />} />
                       <Route path="/transcricao" element={<TranscricaoPage />} />
                       <Route path="/minhas-materias" element={<MinhasMaterias />} />

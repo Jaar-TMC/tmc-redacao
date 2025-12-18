@@ -16,6 +16,7 @@ const FilterBar = () => {
   const { filters, updateFilter } = useFilters();
   const [searchTerm, setSearchTerm] = useState(filters.searchQuery || '');
   const [openDropdown, setOpenDropdown] = useState(null);
+  const [isExternalUpdate, setIsExternalUpdate] = useState(false);
 
   const periods = useMemo(() => [
     { id: 'today', label: 'Hoje' },
@@ -23,8 +24,21 @@ const FilterBar = () => {
     { id: 'month', label: 'Este mês' }
   ], []);
 
-  // Debounce search term updates
+  // Sync local state when filters.searchQuery changes externally (e.g., from TrendsSidebar)
   useEffect(() => {
+    if (filters.searchQuery !== searchTerm) {
+      setIsExternalUpdate(true);
+      setSearchTerm(filters.searchQuery);
+    }
+  }, [filters.searchQuery]);
+
+  // Debounce search term updates (only for user input, not external updates)
+  useEffect(() => {
+    if (isExternalUpdate) {
+      setIsExternalUpdate(false);
+      return;
+    }
+
     const timeoutId = setTimeout(() => {
       if (searchTerm !== filters.searchQuery) {
         updateFilter('searchQuery', searchTerm);
@@ -32,7 +46,7 @@ const FilterBar = () => {
     }, 300);
 
     return () => clearTimeout(timeoutId);
-  }, [searchTerm, filters.searchQuery, updateFilter]);
+  }, [searchTerm, filters.searchQuery, updateFilter, isExternalUpdate]);
 
   const handleFilterClick = useCallback((type) => {
     setOpenDropdown(prev => prev === type ? null : type);

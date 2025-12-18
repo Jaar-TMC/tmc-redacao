@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useState, useEffect, useMemo } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
   ArrowLeft,
   Bold,
@@ -21,7 +21,10 @@ import {
   Trash2,
   Bot,
   ChevronDown,
-  Newspaper
+  Newspaper,
+  Flame,
+  X,
+  ExternalLink
 } from 'lucide-react';
 import { mockTones, mockPersonas } from '../data/mockData';
 
@@ -38,6 +41,25 @@ const articleTypes = [
 
 const CriarPostPage = () => {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+
+  // Extrair parâmetros da URL (vindos da tela de seleção de tema)
+  const themeContext = useMemo(() => {
+    const tema = searchParams.get('tema');
+    const fonte = searchParams.get('fonte');
+    const linksParam = searchParams.get('links');
+    const instrucoes = searchParams.get('instrucoes');
+    const tipo = searchParams.get('tipo');
+
+    return {
+      tema,
+      fonte,
+      links: linksParam ? JSON.parse(linksParam) : [],
+      instrucoes,
+      tipo
+    };
+  }, [searchParams]);
+
   const [title, setTitle] = useState('');
   const [content, setContent] = useState('');
   const [selectedTone, setSelectedTone] = useState(null);
@@ -47,21 +69,72 @@ const CriarPostPage = () => {
   const [spellCheck, setSpellCheck] = useState(false);
   const [isSavingDraft, setIsSavingDraft] = useState(false);
   const [isPublishing, setIsPublishing] = useState(false);
-  const [chatMessages, setChatMessages] = useState([
-    {
-      id: 1,
-      type: 'ai',
-      content: 'Olá! Sou seu assistente de redação. Como posso ajudá-lo hoje? Posso pesquisar informações, sugerir melhorias ou ajudar com SEO.'
+
+  // Mensagem inicial baseada no contexto do tema
+  const getInitialMessages = () => {
+    if (themeContext.tema) {
+      const messages = [
+        {
+          id: 1,
+          type: 'ai',
+          content: `Olá! Vejo que você quer criar uma matéria sobre **"${themeContext.tema}"**. Estou pronto para ajudar!`
+        }
+      ];
+
+      if (themeContext.links?.length > 0) {
+        messages.push({
+          id: 2,
+          type: 'ai',
+          content: `📎 Você forneceu ${themeContext.links.length} link(s) de referência. Vou usar essas fontes como base para sugestões.`
+        });
+      }
+
+      if (themeContext.instrucoes) {
+        messages.push({
+          id: messages.length + 1,
+          type: 'ai',
+          content: `📝 Suas instruções: "${themeContext.instrucoes}"\n\nVou considerar isso ao fazer sugestões. Como deseja começar?`
+        });
+      } else {
+        messages.push({
+          id: messages.length + 1,
+          type: 'ai',
+          content: 'Como deseja começar? Posso sugerir uma introdução, pesquisar dados atuais sobre o tema, ou criar um esboço da estrutura.'
+        });
+      }
+
+      return messages;
     }
-  ]);
+
+    return [
+      {
+        id: 1,
+        type: 'ai',
+        content: 'Olá! Sou seu assistente de redação. Como posso ajudá-lo hoje? Posso pesquisar informações, sugerir melhorias ou ajudar com SEO.'
+      }
+    ];
+  };
+
+  const [chatMessages, setChatMessages] = useState(getInitialMessages);
   const [chatInput, setChatInput] = useState('');
 
-  const quickSuggestions = [
-    'Pesquise sobre o tema',
-    'Sugira uma introdução',
-    'Melhore este parágrafo',
-    'Crie um resumo'
-  ];
+  // Sugestões rápidas contextualizadas
+  const quickSuggestions = useMemo(() => {
+    if (themeContext.tema) {
+      return [
+        `Pesquise sobre ${themeContext.tema}`,
+        'Crie uma introdução impactante',
+        'Sugira um título chamativo',
+        'Monte a estrutura da matéria'
+      ];
+    }
+    return [
+      'Pesquise sobre o tema',
+      'Sugira uma introdução',
+      'Melhore este parágrafo',
+      'Crie um resumo'
+    ];
+  }, [themeContext.tema]);
 
   const handleSendMessage = () => {
     if (!chatInput.trim()) return;
@@ -99,11 +172,11 @@ const CriarPostPage = () => {
       <div className="bg-white border-b border-light-gray sticky top-16 z-40">
         <div className="flex items-center justify-between px-4 md:px-6 py-3">
           <button
-            onClick={() => navigate('/')}
+            onClick={() => navigate('/criar')}
             className="flex items-center gap-2 text-medium-gray hover:text-dark-gray transition-colors"
           >
             <ArrowLeft size={20} />
-            <span className="text-sm font-medium hidden sm:inline">Voltar para redação</span>
+            <span className="text-sm font-medium hidden sm:inline">Voltar</span>
           </button>
 
           <div className="flex-1 max-w-xl mx-4 md:mx-8 relative">
@@ -147,7 +220,41 @@ const CriarPostPage = () => {
         </div>
       </div>
 
-      <div className="flex flex-col lg:flex-row h-[calc(100vh-8rem)]">
+      {/* Banner de Contexto do Tema */}
+      {themeContext.tema && (
+        <div className="bg-gradient-to-r from-orange-50 to-red-50 border-b border-orange-200 px-4 md:px-6 py-2">
+          <div className="flex items-center justify-between flex-wrap gap-2">
+            <div className="flex items-center gap-2">
+              <div className="p-1 bg-gradient-to-br from-orange-500 to-red-500 rounded">
+                <Flame size={14} className="text-white" />
+              </div>
+              <span className="text-sm text-medium-gray">Tema:</span>
+              <span className="font-semibold text-dark-gray">{themeContext.tema}</span>
+              {themeContext.tipo && (
+                <span className="px-2 py-0.5 bg-white border border-orange-200 rounded text-xs font-medium text-orange-700 capitalize">
+                  {themeContext.tipo}
+                </span>
+              )}
+            </div>
+            <div className="flex items-center gap-3">
+              {themeContext.links?.length > 0 && (
+                <span className="flex items-center gap-1 text-xs text-medium-gray">
+                  <Link2 size={12} />
+                  {themeContext.links.length} link(s)
+                </span>
+              )}
+              <button
+                onClick={() => navigate('/criar')}
+                className="text-xs text-tmc-orange hover:underline font-medium"
+              >
+                Trocar tema
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <div className={`flex flex-col lg:flex-row ${themeContext.tema ? 'h-[calc(100vh-11rem)]' : 'h-[calc(100vh-8rem)]'}`}>
         {/* Editor Area */}
         <div className="flex-1 flex flex-col lg:border-r border-light-gray overflow-visible">
           {/* Toolbar */}
