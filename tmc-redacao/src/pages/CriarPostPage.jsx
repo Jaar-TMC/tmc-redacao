@@ -20,9 +20,21 @@ import {
   Send,
   Trash2,
   Bot,
-  ChevronDown
+  ChevronDown,
+  Newspaper
 } from 'lucide-react';
 import { mockTones, mockPersonas } from '../data/mockData';
+
+// Tipos de matéria disponíveis
+const articleTypes = [
+  { id: 'destaque', name: 'Destaque Principal', description: 'Matéria principal da home' },
+  { id: 'principal-secao', name: 'Principal da Seção', description: 'Destaque dentro de uma editoria' },
+  { id: 'secundaria', name: 'Secundária da Seção', description: 'Matéria de apoio na editoria' },
+  { id: 'coluna', name: 'Coluna', description: 'Texto opinativo ou de colunista' },
+  { id: 'mais-lidas', name: 'Mais Lidas', description: 'Conteúdo para seção popular' },
+  { id: 'original', name: 'Conteúdo Original', description: 'Reportagem exclusiva' },
+  { id: 'servico', name: 'Serviço', description: 'Informação útil ao leitor' }
+];
 
 const CriarPostPage = () => {
   const navigate = useNavigate();
@@ -30,6 +42,7 @@ const CriarPostPage = () => {
   const [content, setContent] = useState('');
   const [selectedTone, setSelectedTone] = useState(null);
   const [selectedPersona, setSelectedPersona] = useState(null);
+  const [selectedArticleType, setSelectedArticleType] = useState(null);
   const [openDropdown, setOpenDropdown] = useState(null);
   const [spellCheck, setSpellCheck] = useState(false);
   const [isSavingDraft, setIsSavingDraft] = useState(false);
@@ -235,6 +248,39 @@ const CriarPostPage = () => {
                       >
                         <p className="text-sm font-medium text-dark-gray">{persona.name}</p>
                         <p className="text-xs text-medium-gray">{persona.description}</p>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Article Type Dropdown */}
+              <div className="relative flex-shrink-0">
+                <button
+                  onClick={() => setOpenDropdown(openDropdown === 'articleType' ? null : 'articleType')}
+                  className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+                    selectedArticleType
+                      ? 'bg-blue-600 text-white'
+                      : 'bg-off-white text-dark-gray hover:bg-light-gray'
+                  }`}
+                >
+                  <Newspaper size={16} />
+                  <span className="hidden sm:inline">{selectedArticleType?.name || 'Tipo'}</span>
+                  <ChevronDown size={14} />
+                </button>
+                {openDropdown === 'articleType' && (
+                  <div className="absolute top-full left-0 mt-1 w-64 bg-white rounded-lg shadow-lg border border-light-gray py-2 z-50">
+                    {articleTypes.map((type) => (
+                      <button
+                        key={type.id}
+                        onClick={() => {
+                          setSelectedArticleType(type);
+                          setOpenDropdown(null);
+                        }}
+                        className="w-full px-4 py-2 text-left hover:bg-off-white"
+                      >
+                        <p className="text-sm font-medium text-dark-gray">{type.name}</p>
+                        <p className="text-xs text-medium-gray">{type.description}</p>
                       </button>
                     ))}
                   </div>

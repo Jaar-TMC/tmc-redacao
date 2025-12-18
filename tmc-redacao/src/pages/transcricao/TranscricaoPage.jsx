@@ -435,8 +435,20 @@ function TranscricaoPage() {
           <div className="max-w-2xl mx-auto py-8">
             {/* Hero */}
             <div className="text-center mb-8">
-              <div className="w-20 h-20 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4">
-                <Youtube className="w-10 h-10 text-red-600" />
+              {/* Logo YouTube oficial */}
+              <div className="flex items-center justify-center mb-4">
+                <svg
+                  className="w-20 h-auto"
+                  viewBox="0 0 159 110"
+                  xmlns="http://www.w3.org/2000/svg"
+                  aria-label="YouTube"
+                >
+                  <path
+                    d="M154 17.5c-1.82-6.73-7.07-12-13.8-13.8C128.1 0 78.83 0 78.83 0s-49.27 0-61.37 3.7C10.8 5.5 5.54 10.77 3.72 17.5 0 29.6 0 55 0 55s0 25.4 3.72 37.5c1.82 6.73 7.08 12 13.8 13.8 12.1 3.7 61.37 3.7 61.37 3.7s49.27 0 61.37-3.7c6.73-1.82 11.98-7.07 13.8-13.8C158 80.4 158 55 158 55s0-25.4-4-37.5z"
+                    fill="#FF0000"
+                  />
+                  <path d="M64 78.75V31.25L103.5 55 64 78.75z" fill="#FFFFFF" />
+                </svg>
               </div>
               <h2 className="text-2xl font-bold text-dark-gray mb-2">
                 Transcreva vídeos do YouTube
