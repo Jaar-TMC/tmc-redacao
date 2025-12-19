@@ -237,7 +237,7 @@ function ConfigPanel({
         </div>
       )}
 
-      {/* Botão Gerar */}
+      {/* Botão Continuar */}
       <button
         type="button"
         onClick={onGenerate}
@@ -252,19 +252,12 @@ function ConfigPanel({
           }
         `}
       >
-        {isGenerating ? (
-          <>
-            <Loader2 className="w-5 h-5 animate-spin" aria-hidden="true" />
-            <span>Gerando...</span>
-          </>
-        ) : (
-          <span>Gerar Matéria</span>
-        )}
+        <span>Continuar para Matéria</span>
       </button>
 
       {!selection.hasSelection && (
         <p className="text-xs text-medium-gray text-center mt-3">
-          Selecione pelo menos um trecho para gerar
+          Selecione pelo menos um trecho para continuar
         </p>
       )}
     </div>

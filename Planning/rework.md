@@ -1,0 +1,12 @@
+Eu quero melhorar a experiencia do redator, acho que tem muitas funcionalidades confusas. Acho que todas as funcionalidades de configuração poderiam estar em um ambiente só, as configurações são as mesmas.
+
+Se ele quiser a partir de transcrição, a fonte vai ser a transcrição, ele poderá escolher o que quer manter da transcrição. Eu gostei da visão de blocos com os tópicos mas quero a transcrição completa também para se ele quiser editar, como num bloco de texto mesmo onde ele pode apagar ou inserir. Essa vai ser a fonte dele, dai pra frente as configurações são as mesmas, ele pode adicionar mais links de referência, documentações, escolher persona, dar instruções a IA, escolher o tom. para cada etapa das configurações da matéria, tem que ter um tooltip informativo com as boas práticas de cada preenchimento do usuário
+
+eu to pensando em centralizar as coisas e ele vai escolher um ponto de partida, tema, transcrição ou matérias do feed RSS ou link da web. A partir dai as configurações são as mesmas, o que muda é o primeiro contexto que de qualquer forma vai ser transcrito e ele poderá modificar a transcrição e realizar as configurações adicionais.
+
+
+Depois de escolher a base e editar ou manter toda a base (Transcrição, tema, pagina da web ou matérias do feed RSS)
+-> Opções de configuração para geração da matéria:
+Data de publicação do texto-base (Transcrição, tema, pagina da web ou matérias do feed RSS). Orientação sobre o lide. Declarações de fontes relevantes, contexto e informação adicional. link complementar de página da internet. link complementar de vídeo do YouTube. Anexar arquivo PDF. Pergunta se tem que dar creditos a alguma instituicao para publicar a noticia e se sim qual. Persona da Matéria. Todas as informações que ele colocar ele poderá ver tudo transcrito e escolher o que será usado de cada uma e ter uma visão unificada. Não necessariamente ele deverá preencher tudo, mas pode ter a possibilidade de preencher.
+
+A tela de redação está perfeita, não quero mudar nada dela, os temas, o feed rss ta otimo, é mais o fluxo de geração da matéria que existem muitos caminhos diferentes. Lembre-se o mais importante é a experiência do redator, a melhor experiencia na criação de matérias.

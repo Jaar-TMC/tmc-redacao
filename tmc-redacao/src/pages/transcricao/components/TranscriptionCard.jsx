@@ -163,8 +163,8 @@ function TranscriptionCard({
         relative bg-white rounded-lg border p-4 mb-3
         transition-all duration-200
         ${isSelected
-          ? 'border-[#2563EB] bg-[#EFF6FF]'
-          : 'border-light-gray hover:border-blue-300 hover:shadow-md'
+          ? 'border-tmc-orange bg-tmc-orange/10'
+          : 'border-light-gray hover:border-tmc-orange/50 hover:shadow-md'
         }
       `}
     >
@@ -188,8 +188,8 @@ function TranscriptionCard({
               w-5 h-5 rounded border-2 flex items-center justify-center
               transition-colors flex-shrink-0 cursor-pointer
               ${isSelected
-                ? 'bg-[#2563EB] border-[#2563EB]'
-                : 'border-medium-gray bg-white hover:border-[#2563EB]'
+                ? 'bg-tmc-orange border-tmc-orange'
+                : 'border-medium-gray bg-white hover:border-tmc-orange'
               }
             `}
           >
@@ -253,7 +253,7 @@ function TranscriptionCard({
           <div className="mb-4">
             <p
               data-transcription-text="true"
-              className="text-dark-gray text-sm leading-relaxed selection:bg-blue-200 pl-3 border-l-2 border-tmc-orange/20"
+              className="text-dark-gray text-sm leading-relaxed selection:bg-tmc-orange/30 pl-3 border-l-2 border-tmc-orange/20"
               style={{ userSelect: 'text' }}
             >
               &ldquo;{renderTextWithHighlights(segment.text)}&rdquo;

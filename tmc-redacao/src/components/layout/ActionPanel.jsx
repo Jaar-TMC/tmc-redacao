@@ -2,15 +2,20 @@ import { useCallback, useMemo } from 'react';
 import { Sparkles, X, FileText } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import PropTypes from 'prop-types';
+import { useCriar } from '../../context';
 
 const ActionPanel = ({ selectedArticles = [], onRemove, onClearAll, isOpen, onClose }) => {
   const navigate = useNavigate();
+  const { setFonte } = useCriar();
 
   const hasSelection = useMemo(() => selectedArticles.length > 0, [selectedArticles.length]);
 
   const handleCreateWithInspiration = useCallback(() => {
-    navigate('/criar-inspiracao', { state: { articles: selectedArticles } });
-  }, [navigate, selectedArticles]);
+    // Define a fonte como 'feed' com as matérias selecionadas
+    setFonte('feed', selectedArticles);
+    // Navega para a página de Texto-Base
+    navigate('/criar/texto-base');
+  }, [navigate, selectedArticles, setFonte]);
 
   return (
     <>
@@ -118,11 +123,11 @@ const ActionPanel = ({ selectedArticles = [], onRemove, onClearAll, isOpen, onCl
                 type="button"
                 onClick={handleCreateWithInspiration}
                 className="w-full bg-tmc-orange hover:bg-tmc-orange/90 text-white py-3 px-4 rounded-lg font-semibold transition-colors"
-                aria-label="Criar post com base nas matérias selecionadas"
+                aria-label="Criar nova matéria com base nas selecionadas"
               >
                 <div className="flex items-center justify-center gap-2">
                   <Sparkles size={20} aria-hidden="true" className="flex-shrink-0" />
-                  <span className="text-center leading-tight text-sm">Criar Post com Base nas Matérias Selecionadas</span>
+                  <span className="text-center leading-tight">Criar Nova Matéria</span>
                 </div>
               </button>
             </>

@@ -3,7 +3,7 @@ import { useEffect, lazy, Suspense } from 'react';
 import Header from './components/layout/Header';
 import ErrorBoundary from './components/ui/ErrorBoundary';
 import Spinner from './components/ui/Spinner';
-import { ArticlesProvider, FiltersProvider, UIProvider } from './context';
+import { ArticlesProvider, FiltersProvider, UIProvider, CriarProvider } from './context';
 import PropTypes from 'prop-types';
 
 // Lazy load page components for code splitting
@@ -17,6 +17,12 @@ const ConfiguracoesPage = lazy(() => import('./pages/ConfiguracoesPage'));
 const BuscadorPage = lazy(() => import('./pages/config/BuscadorPage'));
 const TrendsPage = lazy(() => import('./pages/config/TrendsPage'));
 
+// Novo fluxo de criação de matéria (Rework)
+const SelecionarFontePage = lazy(() => import('./pages/criar/index'));
+const TextoBasePage = lazy(() => import('./pages/criar/TextoBasePage'));
+const ConfigurarPage = lazy(() => import('./pages/criar/ConfigurarPage'));
+const RevisarPage = lazy(() => import('./pages/criar/RevisarPage'));
+
 // Component to handle document title updates on route changes
 function DocumentTitleUpdater() {
   const location = useLocation();
@@ -24,8 +30,12 @@ function DocumentTitleUpdater() {
   useEffect(() => {
     const titles = {
       '/': 'Redação',
-      '/criar': 'Selecionar Tema',
-      '/criar/editor': 'Criar Matéria',
+      '/criar': 'Selecionar Fonte',
+      '/criar/texto-base': 'Texto-Base',
+      '/criar/configurar': 'Configurações da Matéria',
+      '/criar/revisar': 'Revisar Matéria',
+      '/criar/editor': 'Editor de Matéria',
+      '/selecionar-tema': 'Selecionar Tema',
       '/criar-inspiracao': 'Criar com Inspiração',
       '/transcricao': 'Transcrever Vídeo',
       '/minhas-materias': 'Minhas Matérias',
@@ -93,6 +103,7 @@ function App() {
         <ArticlesProvider>
           <FiltersProvider>
             <UIProvider>
+              <CriarProvider>
               <DocumentTitleUpdater />
               <div className="min-h-screen bg-off-white">
                 {/* Skip Navigation Links - Multiple ways to navigate content */}
@@ -124,9 +135,19 @@ function App() {
                     <Routes>
                       {/* Main Pages */}
                       <Route path="/" element={<RedacaoPage />} />
-                      <Route path="/criar" element={<SelecionarTemaPage />} />
+
+                      {/* Novo Fluxo de Criação de Matéria */}
+                      <Route path="/criar" element={<SelecionarFontePage />} />
+                      <Route path="/criar/texto-base" element={<TextoBasePage />} />
+                      <Route path="/criar/configurar" element={<ConfigurarPage />} />
+                      <Route path="/criar/revisar" element={<RevisarPage />} />
                       <Route path="/criar/editor" element={<CriarPostPage />} />
+
+                      {/* Fluxo Antigo (manter temporariamente para compatibilidade) */}
+                      <Route path="/selecionar-tema" element={<SelecionarTemaPage />} />
                       <Route path="/criar-inspiracao" element={<CriarInspiracaoPage />} />
+
+                      {/* Other Pages */}
                       <Route path="/transcricao" element={<TranscricaoPage />} />
                       <Route path="/minhas-materias" element={<MinhasMaterias />} />
 
@@ -143,6 +164,7 @@ function App() {
                   </Suspense>
                 </main>
               </div>
+              </CriarProvider>
             </UIProvider>
           </FiltersProvider>
         </ArticlesProvider>

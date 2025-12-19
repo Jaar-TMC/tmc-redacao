@@ -11,13 +11,13 @@ import {
   Link2,
   Plus,
   FileText,
-  Lightbulb,
   MessageSquare,
   Trash2,
   ExternalLink,
   CheckCircle2
 } from 'lucide-react';
 import { mockGoogleTrends, mockTwitterTrends, mockFeedThemes } from '../data/mockData';
+import TipBox from '../components/ui/TipBox';
 import Skeleton from '../components/ui/Skeleton';
 import EmptyState from '../components/ui/EmptyState';
 
@@ -548,12 +548,9 @@ const SelecionarTemaPage = () => {
                 </div>
 
                 {/* Info */}
-                <div className="flex items-start gap-2 p-3 bg-blue-50 rounded-lg mb-6">
-                  <Lightbulb size={16} className="text-blue-500 flex-shrink-0 mt-0.5" />
-                  <p className="text-xs text-blue-700">
-                    Deixe os campos em branco para a IA gerar o conteúdo livremente com base apenas no tema selecionado.
-                  </p>
-                </div>
+                <TipBox compact className="mb-6" title={null}>
+                  Deixe os campos em branco para a IA gerar o conteúdo livremente com base apenas no tema selecionado.
+                </TipBox>
 
                 {/* Botões de Ação */}
                 <div className="flex gap-3">
