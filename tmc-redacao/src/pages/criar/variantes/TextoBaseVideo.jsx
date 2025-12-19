@@ -83,9 +83,38 @@ const TextoBaseVideo = ({
   onChangeSource,
   onDataChange
 }) => {
+  // Usar dados da transcrição do YouTube se disponíveis, senão usar mock
+  const transcriptionData = useMemo(() => {
+    if (fonte?.dados?.transcription && fonte.dados.transcription.length > 0) {
+      // Dados vindo da transcrição do YouTube
+      const segments = fonte.dados.transcription.map(seg => ({
+        id: seg.id,
+        startTime: seg.startTime,
+        endTime: seg.endTime,
+        topic: seg.topic || 'Trecho',
+        text: seg.text
+      }));
+
+      // Calcular duração total baseado no último endTime
+      const lastSegment = segments[segments.length - 1];
+      const durationParts = lastSegment.endTime.split(':').map(p => parseInt(p, 10));
+      const duration = durationParts.length === 2
+        ? durationParts[0] * 60 + durationParts[1]
+        : durationParts[0] * 3600 + durationParts[1] * 60 + durationParts[2];
+
+      return {
+        videoId: fonte.dados.video?.videoId || mockTranscription.videoId,
+        title: fonte.dados.video?.title || 'Vídeo do YouTube',
+        duration,
+        segments
+      };
+    }
+    return mockTranscription;
+  }, [fonte]);
+
   // States
   const [selectedSegments, setSelectedSegments] = useState(
-    () => new Set(mockTranscription.segments.map(s => s.id))
+    () => new Set(transcriptionData.segments.map(s => s.id))
   );
   const [textHighlights, setTextHighlights] = useState({});
   const [searchQuery, setSearchQuery] = useState('');
@@ -101,15 +130,20 @@ const TextoBaseVideo = ({
   const mainPlayerRef = useRef(null);
 
   // Video ID da fonte
-  const videoId = fonte?.dados?.videoId || fonte?.dados?.url?.match(/(?:youtube\.com\/watch\?v=|youtu\.be\/)([^&\n?#]+)/)?.[1] || mockTranscription.videoId;
+  const videoId = transcriptionData.videoId;
+
+  // Reinicializar seleções quando os dados mudam
+  useEffect(() => {
+    setSelectedSegments(new Set(transcriptionData.segments.map(s => s.id)));
+  }, [transcriptionData]);
 
   // Inicializar texto completo a partir dos segmentos
   useEffect(() => {
-    const fullText = mockTranscription.segments
+    const fullText = transcriptionData.segments
       .map(seg => `[${seg.startTime}] ${seg.topic}\n${seg.text}`)
       .join('\n\n');
     setFullTextContent(fullText);
-  }, []);
+  }, [transcriptionData]);
 
   // Inicializar YouTube player principal
   useEffect(() => {
@@ -209,7 +243,7 @@ const TextoBaseVideo = ({
 
   // Filtrar segmentos por busca e intervalo
   const filteredSegments = useMemo(() => {
-    return mockTranscription.segments.filter(segment => {
+    return transcriptionData.segments.filter(segment => {
       // Filtro de busca
       if (searchQuery) {
         const query = searchQuery.toLowerCase();
@@ -230,13 +264,13 @@ const TextoBaseVideo = ({
 
       return true;
     });
-  }, [searchQuery, activeIntervals]);
+  }, [searchQuery, activeIntervals, transcriptionData.segments]);
 
   // Estatisticas
   const stats = useMemo(() => {
     let wordCount = 0;
     selectedSegments.forEach(id => {
-      const segment = mockTranscription.segments.find(s => s.id === id);
+      const segment = transcriptionData.segments.find(s => s.id === id);
       if (segment) {
         wordCount += segment.text.split(/\s+/).filter(Boolean).length;
       }
@@ -244,20 +278,20 @@ const TextoBaseVideo = ({
 
     return {
       selected: selectedSegments.size,
-      total: mockTranscription.segments.length,
+      total: transcriptionData.segments.length,
       words: wordCount
     };
-  }, [selectedSegments]);
+  }, [selectedSegments, transcriptionData.segments]);
 
   // Marcadores para timeline
   const timelineMarkers = useMemo(() => {
-    return mockTranscription.segments.map(segment => ({
+    return transcriptionData.segments.map(segment => ({
       id: segment.id,
       time: segment.startTime,
       label: segment.topic,
       selected: selectedSegments.has(segment.id)
     }));
-  }, [selectedSegments]);
+  }, [selectedSegments, transcriptionData.segments]);
 
   // Handlers
   const handleToggleSegment = useCallback((segmentId) => {
@@ -273,8 +307,8 @@ const TextoBaseVideo = ({
   }, []);
 
   const handleSelectAll = useCallback(() => {
-    setSelectedSegments(new Set(mockTranscription.segments.map(s => s.id)));
-  }, []);
+    setSelectedSegments(new Set(transcriptionData.segments.map(s => s.id)));
+  }, [transcriptionData.segments]);
 
   const handleClearSelection = useCallback(() => {
     setSelectedSegments(new Set());
@@ -325,7 +359,7 @@ const TextoBaseVideo = ({
   }, []);
 
   const handlePlaySegment = useCallback((segmentId, isPlaying) => {
-    const segment = mockTranscription.segments.find(s => s.id === segmentId);
+    const segment = transcriptionData.segments.find(s => s.id === segmentId);
     if (segment && youtubePlayerRef.current) {
       if (isPlaying) {
         const seconds = parseTimeToSeconds(segment.startTime);
@@ -335,7 +369,7 @@ const TextoBaseVideo = ({
         youtubePlayerRef.current.pauseVideo();
       }
     }
-  }, []);
+  }, [transcriptionData.segments]);
 
   const handleTimeUpdate = useCallback((time) => {
     setCurrentTime(time);
@@ -363,9 +397,9 @@ const TextoBaseVideo = ({
     <div className="space-y-6">
       {/* Badge da fonte */}
       <SourceBadge
-        type="video"
-        title={fonte?.dados?.preview?.title || mockTranscription.title}
-        subtitle={formatDuration(mockTranscription.duration)}
+        type={fonte?.tipo || 'video'}
+        title={fonte?.dados?.video?.title || fonte?.dados?.preview?.title || transcriptionData.title}
+        subtitle={formatDuration(transcriptionData.duration)}
         onChangeSource={onChangeSource}
       />
 
@@ -387,7 +421,7 @@ const TextoBaseVideo = ({
 
           {/* Timeline */}
           <VideoTimeline
-            duration={mockTranscription.duration}
+            duration={transcriptionData.duration}
             markers={timelineMarkers}
             currentTime={currentTime}
             onMarkerClick={handleMarkerClick}
@@ -395,7 +429,7 @@ const TextoBaseVideo = ({
 
           {/* Filtros de intervalo */}
           <IntervalFilter
-            duration={mockTranscription.duration}
+            duration={transcriptionData.duration}
             activeIntervals={activeIntervals}
             onToggleInterval={handleToggleInterval}
             onShowAll={handleShowAllIntervals}

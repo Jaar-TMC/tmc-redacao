@@ -7,8 +7,7 @@ import {
   TextoBaseVideo,
   TextoBaseTema,
   TextoBaseFeed,
-  TextoBaseLink,
-  TextoBaseTranscricao
+  TextoBaseLink
 } from './variantes';
 
 /**
@@ -153,16 +152,9 @@ const TextoBasePage = () => {
   const renderVariant = () => {
     switch (fonte.tipo) {
       case 'video':
-        return (
-          <TextoBaseVideo
-            fonte={fonte}
-            onChangeSource={handleChangeSource}
-            onDataChange={handleDataChange}
-          />
-        );
       case 'transcription':
         return (
-          <TextoBaseTranscricao
+          <TextoBaseVideo
             fonte={fonte}
             onChangeSource={handleChangeSource}
             onDataChange={handleDataChange}
