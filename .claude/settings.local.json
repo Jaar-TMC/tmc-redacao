@@ -27,7 +27,9 @@
       "mcp__playwright__browser_handle_dialog",
       "mcp__playwright__browser_type",
       "mcp__playwright__browser_close",
-      "mcp__playwright__browser_tabs"
+      "mcp__playwright__browser_tabs",
+      "Bash(del \"C:\\\\Users\\\\enzoc\\\\OneDrive - jaarconsult.com.br\\\\JaarConsult - Oficial - TMC\\\\Projeto Ferramenta TMC\\\\tmc-redacao\\\\src\\\\pages\\\\SelecionarTemaPage.jsx\")",
+      "Bash(timeout:*)"
     ],
     "deny": [],
     "ask": []

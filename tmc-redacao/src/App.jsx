@@ -8,9 +8,7 @@ import PropTypes from 'prop-types';
 
 // Lazy load page components for code splitting
 const RedacaoPage = lazy(() => import('./pages/RedacaoPage'));
-const SelecionarTemaPage = lazy(() => import('./pages/SelecionarTemaPage'));
 const CriarPostPage = lazy(() => import('./pages/CriarPostPage'));
-const CriarInspiracaoPage = lazy(() => import('./pages/CriarInspiracaoPage'));
 const TranscricaoPage = lazy(() => import('./pages/transcricao/TranscricaoPage'));
 const MinhasMaterias = lazy(() => import('./pages/MinhasMaterias'));
 const ConfiguracoesPage = lazy(() => import('./pages/ConfiguracoesPage'));
@@ -35,8 +33,6 @@ function DocumentTitleUpdater() {
       '/criar/configurar': 'Configurações da Matéria',
       '/criar/revisar': 'Revisar Matéria',
       '/criar/editor': 'Editor de Matéria',
-      '/selecionar-tema': 'Selecionar Tema',
-      '/criar-inspiracao': 'Criar com Inspiração',
       '/transcricao': 'Transcrever Vídeo',
       '/minhas-materias': 'Minhas Matérias',
       '/configuracoes': 'Configurações',
@@ -143,9 +139,9 @@ function App() {
                       <Route path="/criar/revisar" element={<RevisarPage />} />
                       <Route path="/criar/editor" element={<CriarPostPage />} />
 
-                      {/* Fluxo Antigo (manter temporariamente para compatibilidade) */}
-                      <Route path="/selecionar-tema" element={<SelecionarTemaPage />} />
-                      <Route path="/criar-inspiracao" element={<CriarInspiracaoPage />} />
+                      {/* Redirects para rotas antigas (compatibilidade) */}
+                      <Route path="/selecionar-tema" element={<Navigate to="/criar" replace />} />
+                      <Route path="/criar-inspiracao" element={<Navigate to="/criar" replace />} />
 
                       {/* Other Pages */}
                       <Route path="/transcricao" element={<TranscricaoPage />} />

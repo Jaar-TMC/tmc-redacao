@@ -1,5 +1,6 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useCriar } from '../../context/CriarContext';
 import {
   ArrowLeft, ArrowRight, HelpCircle, Calendar, FileText, Quote,
   Info, Building2, User, Palette, MessageSquare, Link, Youtube,
@@ -203,24 +204,85 @@ const tooltips = {
 const ConfigurarPage = () => {
   const navigate = useNavigate();
 
-  // Form state
-  const [dataPublicacao, setDataPublicacao] = useState('');
-  const [orientacaoLide, setOrientacaoLide] = useState('');
-  const [citacoes, setCitacoes] = useState([]);
-  const [novaCitacao, setNovaCitacao] = useState('');
-  const [contextoAdicional, setContextoAdicional] = useState('');
-  const [precisaCredito, setPrecisaCredito] = useState(false);
-  const [creditoSelecionado, setCreditoSelecionado] = useState('');
-  const [persona, setPersona] = useState('jornalista');
-  const [tom, setTom] = useState('formal');
-  const [instrucoes, setInstrucoes] = useState('');
+  // Context - dados e funções do fluxo de criação
+  const {
+    configuracoes,
+    materiaisComplementares,
+    setConfiguracoes,
+    adicionarMaterial,
+    removerMaterial,
+    confirmarConfiguracoes,
+  } = useCriar();
 
-  // Complementary materials state
-  const [links, setLinks] = useState([]);
+  // Form state - inicializado com valores do context (para quando usuário voltar)
+  const [dataPublicacao, setDataPublicacao] = useState(configuracoes.data || '');
+  const [orientacaoLide, setOrientacaoLide] = useState(configuracoes.orientacaoLide || '');
+  const [citacoes, setCitacoes] = useState(configuracoes.citacoes || []);
+  const [novaCitacao, setNovaCitacao] = useState('');
+  const [contextoAdicional, setContextoAdicional] = useState(configuracoes.contexto || '');
+  const [precisaCredito, setPrecisaCredito] = useState(!!configuracoes.creditos);
+  const [creditoSelecionado, setCreditoSelecionado] = useState(configuracoes.creditos || '');
+  const [persona, setPersona] = useState(configuracoes.persona || 'jornalista');
+  const [tom, setTom] = useState(configuracoes.tom || 'formal');
+  const [instrucoes, setInstrucoes] = useState(configuracoes.instrucoes || '');
+
+  // Complementary materials state - inicializado com valores do context
+  const [links, setLinks] = useState(materiaisComplementares.links || []);
   const [novoLink, setNovoLink] = useState('');
-  const [videos, setVideos] = useState([]);
+  const [videos, setVideos] = useState(materiaisComplementares.videos || []);
   const [novoVideo, setNovoVideo] = useState('');
-  const [pdfs, setPdfs] = useState([]);
+  const [pdfs, setPdfs] = useState(materiaisComplementares.pdfs || []);
+
+  // Sincronizar estados locais com o context
+  useEffect(() => {
+    setConfiguracoes({
+      data: dataPublicacao,
+      orientacaoLide,
+      citacoes,
+      contexto: contextoAdicional,
+      creditos: precisaCredito ? creditoSelecionado : '',
+      persona,
+      tom,
+      instrucoes,
+    });
+  }, [dataPublicacao, orientacaoLide, citacoes, contextoAdicional, precisaCredito, creditoSelecionado, persona, tom, instrucoes, setConfiguracoes]);
+
+  // Sincronizar materiais complementares com o context
+  useEffect(() => {
+    // Sincroniza links
+    const contextLinks = materiaisComplementares.links || [];
+    if (JSON.stringify(links) !== JSON.stringify(contextLinks)) {
+      links.forEach((link, index) => {
+        if (!contextLinks.find(l => l.id === link.id)) {
+          adicionarMaterial('links', link);
+        }
+      });
+    }
+  }, [links, materiaisComplementares.links, adicionarMaterial]);
+
+  useEffect(() => {
+    // Sincroniza videos
+    const contextVideos = materiaisComplementares.videos || [];
+    if (JSON.stringify(videos) !== JSON.stringify(contextVideos)) {
+      videos.forEach((video) => {
+        if (!contextVideos.find(v => v.id === video.id)) {
+          adicionarMaterial('videos', video);
+        }
+      });
+    }
+  }, [videos, materiaisComplementares.videos, adicionarMaterial]);
+
+  useEffect(() => {
+    // Sincroniza pdfs
+    const contextPdfs = materiaisComplementares.pdfs || [];
+    if (JSON.stringify(pdfs) !== JSON.stringify(contextPdfs)) {
+      pdfs.forEach((pdf) => {
+        if (!contextPdfs.find(p => p.id === pdf.id)) {
+          adicionarMaterial('pdfs', pdf);
+        }
+      });
+    }
+  }, [pdfs, materiaisComplementares.pdfs, adicionarMaterial]);
 
   // Handlers
   const handleAddCitacao = useCallback(() => {
@@ -686,7 +748,10 @@ const ConfigurarPage = () => {
             Voltar
           </button>
           <button
-            onClick={() => navigate('/criar/revisar')}
+            onClick={() => {
+              confirmarConfiguracoes();
+              navigate('/criar/revisar');
+            }}
             className="flex items-center gap-2 px-6 py-3 bg-tmc-orange text-white rounded-lg hover:bg-tmc-orange/90 transition-colors"
           >
             Revisar e Gerar

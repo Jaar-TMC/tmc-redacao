@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { Bell, Settings, User, PenLine, Menu, X, HelpCircle, ChevronDown, FileText, Sparkles, Youtube } from 'lucide-react';
+import { Bell, Settings, User, PenLine, Menu, X, HelpCircle, ChevronDown, FileText, Youtube } from 'lucide-react';
 import { Link, useLocation } from 'react-router-dom';
 import logo from '../../assets/logo-tmc.svg';
 
@@ -19,8 +19,7 @@ const Header = () => {
   const createMenuRef = useRef(null);
 
   const createOptions = [
-    { path: '/criar', label: 'Do Zero', icon: FileText, description: 'Comece uma matéria em branco' },
-    { path: '/criar-inspiracao', label: 'Com Inspiração', icon: Sparkles, description: 'Use matérias como base' },
+    { path: '/criar', label: 'Nova Matéria', icon: FileText, description: 'Escolha sua fonte inicial' },
     { path: '/transcricao', label: 'Transcrever Vídeo', icon: Youtube, description: 'Crie a partir de um vídeo' }
   ];
 
