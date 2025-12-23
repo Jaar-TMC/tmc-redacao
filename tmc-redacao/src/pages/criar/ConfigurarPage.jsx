@@ -4,7 +4,7 @@ import { useCriar } from '../../context/CriarContext';
 import {
   ArrowLeft, ArrowRight, HelpCircle, Calendar, FileText, Quote,
   Info, Building2, User, Palette, MessageSquare, Link, Youtube,
-  FileUp, X, Plus, ExternalLink, Check
+  FileUp, X, Plus, ExternalLink, Check, Newspaper
 } from 'lucide-react';
 import { Stepper, ConfigField } from '../../components/criar';
 
@@ -39,6 +39,17 @@ const creditoOptions = [
   { id: 'afp', label: 'AFP' },
   { id: 'assessoria', label: 'Assessoria de Imprensa' },
   { id: 'outro', label: 'Outro...' }
+];
+
+// Tipos de matéria disponíveis
+const tipoMateriaOptions = [
+  { id: 'destaque', label: 'Destaque Principal', description: 'Matéria principal da home' },
+  { id: 'principal-secao', label: 'Principal da Seção', description: 'Destaque dentro de uma editoria' },
+  { id: 'secundaria', label: 'Secundária da Seção', description: 'Matéria de apoio na editoria' },
+  { id: 'coluna', label: 'Coluna', description: 'Texto opinativo ou de colunista' },
+  { id: 'mais-lidas', label: 'Mais Lidas', description: 'Conteúdo para seção popular' },
+  { id: 'original', label: 'Conteúdo Original', description: 'Reportagem exclusiva' },
+  { id: 'servico', label: 'Serviço', description: 'Informação útil ao leitor' }
 ];
 
 // Tooltips content
@@ -153,6 +164,24 @@ const tooltips = {
       </div>
     )
   },
+  tipoMateria: {
+    title: 'Tipo de Matéria',
+    content: (
+      <div className="space-y-2">
+        <p>Define a posição e formato da matéria no site:</p>
+        <ul className="list-disc list-inside space-y-1 text-gray-300">
+          <li><strong>Destaque Principal:</strong> Manchete da home</li>
+          <li><strong>Principal da Seção:</strong> Destaque em editoria</li>
+          <li><strong>Secundária:</strong> Matéria de apoio</li>
+          <li><strong>Coluna:</strong> Texto opinativo</li>
+          <li><strong>Mais Lidas:</strong> Para seção popular</li>
+          <li><strong>Original:</strong> Reportagem exclusiva</li>
+          <li><strong>Serviço:</strong> Informação útil</li>
+        </ul>
+        <p className="text-tmc-orange">O tipo influencia o tamanho e estrutura sugeridos.</p>
+      </div>
+    )
+  },
   linkWeb: {
     title: 'Link Complementar (Web)',
     content: (
@@ -225,6 +254,7 @@ const ConfigurarPage = () => {
   const [persona, setPersona] = useState(configuracoes.persona || 'jornalista');
   const [tom, setTom] = useState(configuracoes.tom || 'formal');
   const [instrucoes, setInstrucoes] = useState(configuracoes.instrucoes || '');
+  const [tipoMateria, setTipoMateria] = useState(configuracoes.tipoMateria || '');
 
   // Complementary materials state - inicializado com valores do context
   const [links, setLinks] = useState(materiaisComplementares.links || []);
@@ -244,8 +274,9 @@ const ConfigurarPage = () => {
       persona,
       tom,
       instrucoes,
+      tipoMateria,
     });
-  }, [dataPublicacao, orientacaoLide, citacoes, contextoAdicional, precisaCredito, creditoSelecionado, persona, tom, instrucoes, setConfiguracoes]);
+  }, [dataPublicacao, orientacaoLide, citacoes, contextoAdicional, precisaCredito, creditoSelecionado, persona, tom, instrucoes, tipoMateria, setConfiguracoes]);
 
   // Sincronizar materiais complementares com o context
   useEffect(() => {
@@ -579,6 +610,39 @@ const ConfigurarPage = () => {
                   rows={3}
                   className="w-full px-4 py-2.5 border border-light-gray rounded-lg text-sm resize-none focus:outline-none focus:ring-2 focus:ring-tmc-orange/50 focus:border-tmc-orange"
                 />
+              </ConfigField>
+
+              {/* Tipo de Matéria */}
+              <ConfigField
+                label="Tipo de Matéria"
+                icon={<Newspaper size={18} />}
+                tooltip={tooltips.tipoMateria}
+              >
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  {tipoMateriaOptions.map(opt => (
+                    <label
+                      key={opt.id}
+                      className={`flex items-start gap-3 p-3 rounded-lg cursor-pointer transition-colors ${
+                        tipoMateria === opt.id
+                          ? 'bg-blue-50 border border-blue-500'
+                          : 'bg-off-white hover:bg-gray-100'
+                      }`}
+                    >
+                      <input
+                        type="radio"
+                        name="tipoMateria"
+                        value={opt.id}
+                        checked={tipoMateria === opt.id}
+                        onChange={(e) => setTipoMateria(e.target.value)}
+                        className="w-4 h-4 mt-0.5 text-blue-600 focus:ring-blue-500"
+                      />
+                      <div>
+                        <span className="text-sm font-medium text-dark-gray">{opt.label}</span>
+                        <p className="text-xs text-medium-gray">{opt.description}</p>
+                      </div>
+                    </label>
+                  ))}
+                </div>
               </ConfigField>
             </div>
           </div>

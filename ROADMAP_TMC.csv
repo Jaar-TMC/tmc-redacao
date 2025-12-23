@@ -1,0 +1,19 @@
+Prioridade;Módulo;Task;Descrição;Horas;Status
+P1;Feed RSS;Levantamento Feed RSS;Definir melhor maneira para coleta de matérias e parseamento (RSS/Atom, frequências, fontes);6;Pendente
+P2;Feed RSS;Estrutura de Dados Feed RSS;Definir estrutura das tabelas e armazenamento (sources, articles, política 24h);2;Pendente
+P3;Feed RSS;Desenvolvimento Feed RSS;Backend completo: parser, CRUD fontes, jobs de coleta, limpeza 24h, API e integração frontend;30;Pendente
+P4;Geração IA;Levantamento Modelos IA;Avaliação de modelos para geração de matérias (Claude, GPT, Gemini), custos e limites;10;Pendente
+P5;Geração IA;Treinamento e Testes IA;Treinamento de prompts e testes de geração unificando múltiplas matérias ou única fonte;30;Pendente
+P6;Geração IA;Desenvolvimento Geração IA;Backend: integração LLM, personas/tons, endpoints de geração, streaming de progresso;24;Pendente
+P7;Editor/SEO;Levantamento SEO;Definir regras de análise SEO e algoritmo de legibilidade para PT-BR;4;Pendente
+P8;Editor/SEO;Desenvolvimento Editor/SEO;Backend: analisador SEO, keywords, legibilidade, upload de imagens, corretor ortográfico;20;Pendente
+P9;Gestão Matérias;Estrutura de Dados Matérias;Definir tabelas para artigos, versões, tags e status;2;Pendente
+P10;Gestão Matérias;Desenvolvimento Gestão;Backend: CRUD artigos, rascunhos, publicação, versionamento, integração frontend;14;Pendente
+P11;Tendências;Levantamento Trends;Avaliar APIs disponíveis (Google Trends, Twitter/X) e viabilidade de integração;6;Pendente
+P12;Tendências;Estrutura de Dados Trends;Definir tabelas para tópicos monitorados, excluídos e cache de tendências;2;Pendente
+P13;Tendências;Desenvolvimento Trends;Backend: integração APIs, extração de temas quentes do RSS, CRUD monitoramento;20;Pendente
+P14;Transcrição;Levantamento Transcrição;Avaliar serviços de Speech-to-Text (Whisper, Cloud STT) e download de áudio YouTube;8;Pendente
+P15;Transcrição;Estrutura de Dados Transcrição;Definir tabelas para transcrições e segmentos com timestamps;2;Pendente
+P16;Transcrição;Desenvolvimento Transcrição;Backend: YouTube metadata, download áudio, STT, segmentação, API async;24;Pendente
+;;;DISCLAIMER: As horas apresentadas são estimativas iniciais. Após a conclusão das fases de levantamento de cada módulo, será possível fornecer estimativas mais assertivas.;;
+;;;Total Estimado: 204 horas;;
