@@ -116,36 +116,58 @@ const RevisarPage = () => {
   // Generation Overlay
   if (isGenerating) {
     return (
-      <div className="min-h-screen bg-dark-gray/95 flex items-center justify-center">
-        <div className="text-center max-w-md">
+      <div className="min-h-screen bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900 flex items-center justify-center">
+        <div className="text-center max-w-md px-6">
           {/* Animated Icon */}
-          <div className="relative w-24 h-24 mx-auto mb-8">
-            <div className="absolute inset-0 bg-tmc-orange/20 rounded-full animate-ping" />
-            <div className="absolute inset-2 bg-tmc-orange/40 rounded-full animate-pulse" />
-            <div className="absolute inset-4 bg-tmc-orange rounded-full flex items-center justify-center">
-              <Sparkles className="w-8 h-8 text-white animate-pulse" />
+          <div className="relative w-28 h-28 mx-auto mb-10">
+            {/* Outer ring - slow rotation */}
+            <div className="absolute inset-0 border-4 border-tmc-orange/20 rounded-full animate-spin" style={{ animationDuration: '3s' }} />
+            {/* Middle ring - pulse */}
+            <div className="absolute inset-2 bg-tmc-orange/10 rounded-full animate-ping" style={{ animationDuration: '2s' }} />
+            {/* Inner circle - breathing */}
+            <div className="absolute inset-4 bg-gradient-to-br from-tmc-orange to-orange-600 rounded-full flex items-center justify-center shadow-lg shadow-tmc-orange/30">
+              <Sparkles className="w-10 h-10 text-white animate-pulse" />
             </div>
           </div>
 
-          <h2 className="text-2xl font-bold text-white mb-4">
+          <h2 className="text-2xl font-bold text-white mb-3">
             Gerando sua matéria...
           </h2>
 
-          <p className="text-medium-gray mb-8 min-h-[48px]">
+          <p className="text-gray-300 mb-8 min-h-[48px] leading-relaxed">
             {generationMessage}
           </p>
 
           {/* Progress Bar */}
-          <div className="w-full bg-gray-700 rounded-full h-2 mb-4">
+          <div className="w-full bg-gray-700/50 rounded-full h-3 mb-4 overflow-hidden">
             <div
-              className="bg-tmc-orange h-2 rounded-full transition-all duration-500"
+              className="bg-gradient-to-r from-tmc-orange to-orange-500 h-3 rounded-full transition-all duration-500 relative"
               style={{ width: `${generationProgress}%` }}
-            />
+            >
+              {/* Shimmer effect */}
+              <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/20 to-transparent animate-pulse" />
+            </div>
           </div>
 
-          <p className="text-sm text-medium-gray">
-            {Math.round(generationProgress)}% • Tempo estimado: ~25 segundos
-          </p>
+          <div className="flex items-center justify-center gap-3 text-sm">
+            <span className="text-white font-semibold">{Math.round(generationProgress)}%</span>
+            <span className="text-gray-400">•</span>
+            <span className="text-gray-400">Tempo estimado: ~25 segundos</span>
+          </div>
+
+          {/* Progress Steps Indicator */}
+          <div className="mt-8 flex justify-center gap-2">
+            {generationMessages.slice(0, 8).map((_, index) => (
+              <div
+                key={index}
+                className={`w-2 h-2 rounded-full transition-all duration-300 ${
+                  index <= Math.floor((generationProgress / 100) * 8)
+                    ? 'bg-tmc-orange scale-110'
+                    : 'bg-gray-600'
+                }`}
+              />
+            ))}
+          </div>
         </div>
       </div>
     );
