@@ -26,7 +26,8 @@ import {
   X,
   ExternalLink,
   Tag,
-  Plus
+  Plus,
+  Loader2
 } from 'lucide-react';
 import { mockTones, mockPersonas } from '../data/mockData';
 import Tooltip from '../components/ui/Tooltip';
@@ -77,6 +78,7 @@ const CriarPostPage = () => {
   // Estado para tópicos/tags
   const [tags, setTags] = useState([]);
   const [newTagInput, setNewTagInput] = useState('');
+  const [isGeneratingTags, setIsGeneratingTags] = useState(false);
 
   // Mensagem inicial baseada no contexto do tema
   const getInitialMessages = () => {
@@ -192,6 +194,50 @@ const CriarPostPage = () => {
       e.preventDefault();
       handleAddTag();
     }
+  };
+
+  // Função para gerar tags com IA
+  const handleGenerateTagsWithAI = async () => {
+    // Verificar se há conteúdo para analisar
+    const hasContent = title.trim() || linhaFina.trim() || content.trim() || themeContext.tema;
+    if (!hasContent) return;
+
+    setIsGeneratingTags(true);
+
+    // Simular chamada à API de IA (mock)
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+
+    // Tags mock baseadas no contexto
+    const mockGeneratedTags = [];
+
+    // Extrair palavras-chave do título
+    if (title) {
+      const titleWords = title.split(' ').filter((w) => w.length > 4);
+      if (titleWords.length > 0) mockGeneratedTags.push(titleWords[0]);
+    }
+
+    // Tags baseadas no tema do contexto
+    if (themeContext.tema) {
+      mockGeneratedTags.push(themeContext.tema);
+    }
+
+    // Tags genéricas de exemplo
+    const genericTags = ['Notícias', 'Brasil', 'Atualidades', 'Economia', 'Política', 'Tecnologia'];
+    const randomTags = genericTags.sort(() => 0.5 - Math.random()).slice(0, 3);
+    mockGeneratedTags.push(...randomTags);
+
+    // Filtrar duplicatas e tags já existentes
+    const newTags = [...new Set(mockGeneratedTags)]
+      .filter((tag) => tag && !tags.includes(tag))
+      .slice(0, 5);
+
+    // Adicionar tags com pequeno delay para animação
+    for (const tag of newTags) {
+      setTags((prev) => [...prev, tag]);
+      await new Promise((resolve) => setTimeout(resolve, 150));
+    }
+
+    setIsGeneratingTags(false);
   };
 
   return (
@@ -523,17 +569,48 @@ const CriarPostPage = () => {
 
           {/* Seção de Tópicos/Tags */}
           <div className="bg-white border-t border-light-gray px-4 md:px-6 py-3">
-            <div className="flex items-center gap-2 mb-2">
-              <Tag size={16} className="text-medium-gray" />
-              <span className="text-sm font-medium text-dark-gray">Tópicos</span>
-              <span className="text-xs text-medium-gray">({tags.length})</span>
+            <div className="flex items-center justify-between mb-2">
+              <div className="flex items-center gap-2">
+                <Tag size={16} className="text-medium-gray" />
+                <span className="text-sm font-medium text-dark-gray">Tópicos</span>
+                <span className="text-xs text-medium-gray">({tags.length})</span>
+              </div>
+
+              {/* Botão Gerar com IA */}
+              <Tooltip content="Gerar tópicos automaticamente com IA baseado no conteúdo" position="top">
+                <button
+                  onClick={handleGenerateTagsWithAI}
+                  disabled={isGeneratingTags || (!title.trim() && !linhaFina.trim() && !content.trim() && !themeContext.tema)}
+                  className={`
+                    flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-full transition-all
+                    ${isGeneratingTags
+                      ? 'bg-tmc-orange/10 text-tmc-orange cursor-wait'
+                      : 'border border-dashed border-light-gray text-medium-gray hover:border-tmc-orange hover:text-tmc-orange hover:bg-tmc-orange/5'
+                    }
+                    disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:border-light-gray disabled:hover:text-medium-gray disabled:hover:bg-transparent
+                  `}
+                  aria-label="Gerar tópicos com IA"
+                >
+                  {isGeneratingTags ? (
+                    <>
+                      <Loader2 size={14} className="animate-spin" />
+                      <span className="hidden sm:inline">Gerando...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Sparkles size={14} />
+                      <span className="hidden sm:inline">Gerar com IA</span>
+                    </>
+                  )}
+                </button>
+              </Tooltip>
             </div>
             <div className="flex flex-wrap items-center gap-2">
               {/* Tags existentes */}
               {tags.map((tag, index) => (
                 <span
                   key={index}
-                  className="inline-flex items-center gap-1 px-3 py-1.5 bg-off-white border border-light-gray text-dark-gray text-sm rounded-full group hover:border-tmc-orange transition-colors"
+                  className="inline-flex items-center gap-1 px-3 py-1.5 bg-off-white border border-light-gray text-dark-gray text-sm rounded-full group hover:border-tmc-orange transition-colors animate-in fade-in slide-in-from-left-2 duration-200"
                 >
                   {tag}
                   <button
@@ -569,9 +646,9 @@ const CriarPostPage = () => {
                 )}
               </div>
             </div>
-            {tags.length === 0 && (
+            {tags.length === 0 && !isGeneratingTags && (
               <p className="text-xs text-medium-gray mt-2">
-                Adicione tópicos relevantes para melhorar a indexação da matéria
+                Adicione tópicos manualmente ou clique em "Gerar com IA" para sugestões automáticas
               </p>
             )}
           </div>
