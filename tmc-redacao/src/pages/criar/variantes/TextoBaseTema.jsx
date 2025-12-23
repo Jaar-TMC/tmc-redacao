@@ -215,7 +215,9 @@ const TextoBaseTema = ({
   fonte,
   onChangeSource,
   onDataChange,
-  onSkipToConfig
+  onSkipToConfig,
+  onContinueWithArticles,
+  initialTemaData
 }) => {
   // Etapa atual: 'tema' ou 'materias'
   const [step, setStep] = useState('tema');
@@ -225,9 +227,25 @@ const TextoBaseTema = ({
   const [sourceFilter, setSourceFilter] = useState('all'); // all, feed, trends, twitter
   const [previewArticle, setPreviewArticle] = useState(null);
 
+  // Restaurar estado do tema se houver dados iniciais (voltando da edição de tópicos)
+  useEffect(() => {
+    if (initialTemaData?.tema) {
+      setSelectedTema(initialTemaData.tema);
+      setStep('materias');
+      if (initialTemaData.selectedArticleIds) {
+        setSelectedArticles(new Set(initialTemaData.selectedArticleIds));
+      }
+    }
+  }, [initialTemaData]);
+
   // Se vier com tema pre-selecionado, ir direto para materias
   // Se fonte.dados estiver vazio, mostrar seleção de temas
   useEffect(() => {
+    // Se há dados iniciais (voltando da edição), não processar fonte
+    if (initialTemaData?.tema) {
+      return;
+    }
+
     const temaData = fonte?.dados;
 
     // Se não houver dados ou dados estiverem vazios, ficar na seleção de tema
@@ -259,7 +277,7 @@ const TextoBaseTema = ({
         setStep('materias');
       }
     }
-  }, [fonte]);
+  }, [fonte, initialTemaData]);
 
   // Filtrar temas
   const filteredTemas = useMemo(() => {
@@ -443,7 +461,7 @@ const TextoBaseTema = ({
           </div>
 
           <h2 className="text-lg font-bold text-dark-gray mb-4">
-            📰 Matérias sobre "{selectedTema?.name}"
+            Matérias sobre "{selectedTema?.name}"
           </h2>
 
           {/* Controles de selecao */}
@@ -477,17 +495,34 @@ const TextoBaseTema = ({
         />
       </div>
 
-      {/* Opcao de pular */}
-      {onSkipToConfig && (
-        <div className="flex justify-center">
+      {/* Botões de ação */}
+      <div className="flex flex-col items-center gap-3 mt-6">
+        {/* Continuar - aparece quando tem matérias selecionadas */}
+        {selectedArticles.size > 0 && onContinueWithArticles && (
+          <button
+            onClick={() => {
+              const selectedMaterias = materias.filter(m => selectedArticles.has(m.id));
+              onContinueWithArticles(selectedMaterias, selectedTema);
+            }}
+            className="px-6 py-3 bg-tmc-orange text-white rounded-lg hover:bg-tmc-orange/90 transition-colors font-medium"
+          >
+            Continuar com {selectedArticles.size} matéria(s) selecionada(s)
+          </button>
+        )}
+
+        {/* Pular - sempre disponível */}
+        {onSkipToConfig && (
           <button
             onClick={onSkipToConfig}
             className="text-medium-gray hover:text-tmc-orange text-sm"
           >
-            Pular seleção de matérias e ir direto para Configurações →
+            {selectedArticles.size > 0
+              ? 'Ou pular edição e ir direto para Configurações'
+              : 'Pular seleção de matérias e ir direto para Configurações →'
+            }
           </button>
-        </div>
-      )}
+        )}
+      </div>
     </div>
   );
 };
@@ -501,7 +536,12 @@ TextoBaseTema.propTypes = {
   }),
   onChangeSource: PropTypes.func,
   onDataChange: PropTypes.func,
-  onSkipToConfig: PropTypes.func
+  onSkipToConfig: PropTypes.func,
+  onContinueWithArticles: PropTypes.func,
+  initialTemaData: PropTypes.shape({
+    tema: PropTypes.object,
+    selectedArticleIds: PropTypes.arrayOf(PropTypes.string)
+  })
 };
 
 export default TextoBaseTema;

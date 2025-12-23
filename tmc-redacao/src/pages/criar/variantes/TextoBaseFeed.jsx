@@ -1,6 +1,6 @@
 import { useState, useCallback, useMemo, useEffect } from 'react';
 import PropTypes from 'prop-types';
-import { Plus, ExternalLink, FileText, List, AlertCircle } from 'lucide-react';
+import { Plus, ExternalLink, FileText, List, AlertCircle, X } from 'lucide-react';
 import {
   SourceBadge,
   ContentStats,
@@ -8,6 +8,7 @@ import {
   ModeTabs,
   TopicCard
 } from '../../../components/criar';
+import { mockArticles } from '../../../data/mockData';
 
 /**
  * TextoBaseFeed - Variante da pagina Texto-Base para Materias do Feed
@@ -68,6 +69,9 @@ const TextoBaseFeed = ({
   const [selectedTopics, setSelectedTopics] = useState(new Set());
   const [activeTab, setActiveTab] = useState('topics');
   const [editedTexts, setEditedTexts] = useState({});
+  const [showAddMore, setShowAddMore] = useState(false);
+  const [availableArticles, setAvailableArticles] = useState([]);
+  const [newSelections, setNewSelections] = useState(new Set());
 
   // Inicializar quando matérias carregarem
   useEffect(() => {
@@ -81,6 +85,15 @@ const TextoBaseFeed = ({
       setSelectedTopics(allTopics);
     }
   }, [materias, activeMateria]);
+
+  // Carregar artigos disponíveis (excluindo já selecionados)
+  useEffect(() => {
+    if (!fonte?.dados) return;
+
+    const selectedIds = new Set(fonte.dados.map(article => article.id));
+    const available = mockArticles.filter(article => !selectedIds.has(article.id));
+    setAvailableArticles(available);
+  }, [fonte?.dados]);
 
   // Materia ativa
   const currentMateria = useMemo(() => {
@@ -243,14 +256,64 @@ const TextoBaseFeed = ({
               })}
             </div>
 
-            {/* Botao adicionar mais */}
-            <button
-              onClick={onChangeSource}
-              className="w-full mt-4 p-3 border border-dashed border-light-gray rounded-lg text-medium-gray hover:border-tmc-orange hover:text-tmc-orange transition-colors flex items-center justify-center gap-2"
-            >
-              <Plus size={16} />
-              <span className="text-sm">Adicionar mais matérias</span>
-            </button>
+            {/* Botao adicionar mais / Lista de artigos disponíveis */}
+            {showAddMore ? (
+              <div className="mt-4 border border-light-gray rounded-lg p-4">
+                <div className="flex items-center justify-between mb-3">
+                  <h4 className="font-medium text-dark-gray text-sm">Adicionar matérias</h4>
+                  <button onClick={() => setShowAddMore(false)} className="text-medium-gray hover:text-dark-gray">
+                    <X size={16} />
+                  </button>
+                </div>
+                <div className="space-y-2 max-h-48 overflow-y-auto">
+                  {availableArticles.map(article => (
+                    <label key={article.id} className={`flex items-center gap-3 p-2 rounded-lg cursor-pointer ${newSelections.has(article.id) ? 'bg-orange-50' : 'hover:bg-off-white'}`}>
+                      <input
+                        type="checkbox"
+                        checked={newSelections.has(article.id)}
+                        onChange={() => {
+                          const newSet = new Set(newSelections);
+                          if (newSet.has(article.id)) newSet.delete(article.id);
+                          else newSet.add(article.id);
+                          setNewSelections(newSet);
+                        }}
+                        className="w-4 h-4 text-tmc-orange rounded"
+                      />
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium text-dark-gray line-clamp-1">{article.title}</p>
+                        <p className="text-xs text-medium-gray">{article.source}</p>
+                      </div>
+                    </label>
+                  ))}
+                </div>
+                {availableArticles.length === 0 && (
+                  <p className="text-sm text-medium-gray text-center py-4">Não há mais matérias disponíveis</p>
+                )}
+                <button
+                  onClick={() => {
+                    // Adicionar matérias selecionadas
+                    const newArticles = availableArticles.filter(a => newSelections.has(a.id));
+                    if (onDataChange && newArticles.length > 0) {
+                      onDataChange({ type: 'addArticles', articles: newArticles });
+                    }
+                    setShowAddMore(false);
+                    setNewSelections(new Set());
+                  }}
+                  disabled={newSelections.size === 0}
+                  className="w-full mt-3 py-2 bg-tmc-orange text-white rounded-lg disabled:opacity-50 disabled:cursor-not-allowed text-sm font-medium"
+                >
+                  Adicionar {newSelections.size} matéria(s)
+                </button>
+              </div>
+            ) : (
+              <button
+                onClick={() => setShowAddMore(true)}
+                className="w-full mt-4 p-3 border border-dashed border-light-gray rounded-lg text-medium-gray hover:border-tmc-orange hover:text-tmc-orange transition-colors flex items-center justify-center gap-2"
+              >
+                <Plus size={16} />
+                <span className="text-sm">Adicionar mais matérias</span>
+              </button>
+            )}
           </div>
         </div>
 

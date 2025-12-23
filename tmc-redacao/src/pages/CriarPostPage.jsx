@@ -24,9 +24,12 @@ import {
   Newspaper,
   Flame,
   X,
-  ExternalLink
+  ExternalLink,
+  Tag,
+  Plus
 } from 'lucide-react';
 import { mockTones, mockPersonas } from '../data/mockData';
+import Tooltip from '../components/ui/Tooltip';
 
 // Tipos de matéria disponíveis
 const articleTypes = [
@@ -61,6 +64,7 @@ const CriarPostPage = () => {
   }, [searchParams]);
 
   const [title, setTitle] = useState('');
+  const [linhaFina, setLinhaFina] = useState('');
   const [content, setContent] = useState('');
   const [selectedTone, setSelectedTone] = useState(null);
   const [selectedPersona, setSelectedPersona] = useState(null);
@@ -69,6 +73,10 @@ const CriarPostPage = () => {
   const [spellCheck, setSpellCheck] = useState(false);
   const [isSavingDraft, setIsSavingDraft] = useState(false);
   const [isPublishing, setIsPublishing] = useState(false);
+
+  // Estado para tópicos/tags
+  const [tags, setTags] = useState([]);
+  const [newTagInput, setNewTagInput] = useState('');
 
   // Mensagem inicial baseada no contexto do tema
   const getInitialMessages = () => {
@@ -166,6 +174,26 @@ const CriarPostPage = () => {
   const wordCount = content.split(/\s+/).filter(Boolean).length;
   const seoScore = Math.min(100, Math.floor(wordCount / 5) + 30);
 
+  // Funções para gerenciar tags
+  const handleAddTag = () => {
+    const trimmedTag = newTagInput.trim();
+    if (trimmedTag && !tags.includes(trimmedTag)) {
+      setTags([...tags, trimmedTag]);
+      setNewTagInput('');
+    }
+  };
+
+  const handleRemoveTag = (tagToRemove) => {
+    setTags(tags.filter((tag) => tag !== tagToRemove));
+  };
+
+  const handleTagKeyDown = (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      handleAddTag();
+    }
+  };
+
   return (
     <div className="min-h-screen pt-16 bg-off-white">
       {/* Header */}
@@ -179,20 +207,40 @@ const CriarPostPage = () => {
             <span className="text-sm font-medium hidden sm:inline">Voltar</span>
           </button>
 
-          <div className="flex-1 max-w-xl mx-4 md:mx-8 relative">
-            <label htmlFor="post-title" className="sr-only">Título da postagem</label>
-            <input
-              id="post-title"
-              type="text"
-              placeholder="Ex: Nova análise sobre economia brasileira"
-              maxLength={100}
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-              className="w-full text-center text-lg md:text-xl font-bold text-dark-gray placeholder:text-light-gray focus:outline-none"
-            />
-            <span className="absolute -bottom-4 right-0 text-xs text-medium-gray">
-              {title.length}/100
-            </span>
+          <div className="flex-1 max-w-2xl mx-4 md:mx-8">
+            {/* Título */}
+            <div className="relative">
+              <label htmlFor="post-title" className="sr-only">Título da postagem</label>
+              <input
+                id="post-title"
+                type="text"
+                placeholder="Título da matéria"
+                maxLength={100}
+                value={title}
+                onChange={(e) => setTitle(e.target.value)}
+                className="w-full text-center text-lg md:text-xl font-bold text-dark-gray placeholder:text-light-gray focus:outline-none"
+              />
+              <span className="absolute -bottom-3 right-0 text-xs text-medium-gray">
+                {title.length}/100
+              </span>
+            </div>
+
+            {/* Linha Fina (Subtítulo) */}
+            <div className="relative mt-4">
+              <label htmlFor="post-linha-fina" className="sr-only">Linha fina (subtítulo)</label>
+              <input
+                id="post-linha-fina"
+                type="text"
+                placeholder="Linha fina: complemento do título que contextualiza a notícia"
+                maxLength={200}
+                value={linhaFina}
+                onChange={(e) => setLinhaFina(e.target.value)}
+                className="w-full text-center text-sm md:text-base text-medium-gray placeholder:text-light-gray focus:outline-none italic"
+              />
+              <span className="absolute -bottom-3 right-0 text-xs text-medium-gray">
+                {linhaFina.length}/200
+              </span>
+            </div>
           </div>
 
           <div className="flex items-center gap-2 md:gap-3">
@@ -261,54 +309,76 @@ const CriarPostPage = () => {
           <div className="bg-white border-b border-light-gray p-2 md:p-3 space-y-2 overflow-visible relative z-30 isolate">
             {/* Formatting */}
             <div className="flex items-center gap-1">
-              <button className="p-2 hover:bg-off-white rounded transition-colors">
-                <Bold size={18} className="text-medium-gray" />
-              </button>
-              <button className="p-2 hover:bg-off-white rounded transition-colors">
-                <Italic size={18} className="text-medium-gray" />
-              </button>
-              <button className="p-2 hover:bg-off-white rounded transition-colors">
-                <Underline size={18} className="text-medium-gray" />
-              </button>
+              <Tooltip content="Negrito" shortcut="Ctrl+B">
+                <button className="p-2 hover:bg-off-white rounded transition-colors" aria-label="Negrito">
+                  <Bold size={18} className="text-medium-gray" />
+                </button>
+              </Tooltip>
+              <Tooltip content="Itálico" shortcut="Ctrl+I">
+                <button className="p-2 hover:bg-off-white rounded transition-colors" aria-label="Itálico">
+                  <Italic size={18} className="text-medium-gray" />
+                </button>
+              </Tooltip>
+              <Tooltip content="Sublinhado" shortcut="Ctrl+U">
+                <button className="p-2 hover:bg-off-white rounded transition-colors" aria-label="Sublinhado">
+                  <Underline size={18} className="text-medium-gray" />
+                </button>
+              </Tooltip>
               <div className="w-px h-6 bg-light-gray mx-2" />
-              <button className="p-2 hover:bg-off-white rounded transition-colors">
-                <List size={18} className="text-medium-gray" />
-              </button>
-              <button className="p-2 hover:bg-off-white rounded transition-colors">
-                <ListOrdered size={18} className="text-medium-gray" />
-              </button>
+              <Tooltip content="Lista com marcadores">
+                <button className="p-2 hover:bg-off-white rounded transition-colors" aria-label="Lista com marcadores">
+                  <List size={18} className="text-medium-gray" />
+                </button>
+              </Tooltip>
+              <Tooltip content="Lista numerada">
+                <button className="p-2 hover:bg-off-white rounded transition-colors" aria-label="Lista numerada">
+                  <ListOrdered size={18} className="text-medium-gray" />
+                </button>
+              </Tooltip>
               <div className="w-px h-6 bg-light-gray mx-2" />
-              <button className="p-2 hover:bg-off-white rounded transition-colors">
-                <Link2 size={18} className="text-medium-gray" />
-              </button>
-              <button className="p-2 hover:bg-off-white rounded transition-colors">
-                <Image size={18} className="text-medium-gray" />
-              </button>
+              <Tooltip content="Inserir hyperlink" shortcut="Ctrl+K">
+                <button className="p-2 hover:bg-off-white rounded transition-colors" aria-label="Inserir hyperlink">
+                  <Link2 size={18} className="text-medium-gray" />
+                </button>
+              </Tooltip>
+              <Tooltip content="Inserir imagem">
+                <button className="p-2 hover:bg-off-white rounded transition-colors" aria-label="Inserir imagem">
+                  <Image size={18} className="text-medium-gray" />
+                </button>
+              </Tooltip>
               <div className="w-px h-6 bg-light-gray mx-2" />
-              <button className="p-2 hover:bg-off-white rounded transition-colors">
-                <Undo size={18} className="text-medium-gray" />
-              </button>
-              <button className="p-2 hover:bg-off-white rounded transition-colors">
-                <Redo size={18} className="text-medium-gray" />
-              </button>
+              <Tooltip content="Desfazer" shortcut="Ctrl+Z">
+                <button className="p-2 hover:bg-off-white rounded transition-colors" aria-label="Desfazer">
+                  <Undo size={18} className="text-medium-gray" />
+                </button>
+              </Tooltip>
+              <Tooltip content="Refazer" shortcut="Ctrl+Y">
+                <button className="p-2 hover:bg-off-white rounded transition-colors" aria-label="Refazer">
+                  <Redo size={18} className="text-medium-gray" />
+                </button>
+              </Tooltip>
             </div>
 
             {/* AI Tools */}
             <div className="flex flex-wrap items-center gap-2 pb-2">
               {/* Tone Dropdown */}
               <div className="relative flex-shrink-0">
-                <button
-                  onClick={() => setOpenDropdown(openDropdown === 'tone' ? null : 'tone')}
-                  className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
-                    selectedTone
-                      ? 'bg-tmc-orange text-white'
-                      : 'bg-off-white text-dark-gray hover:bg-light-gray'
-                  }`}
-                >
-                  <Sparkles size={16} />
-                  <span className="hidden sm:inline">{selectedTone?.name || 'Tom'}</span>
-                  <ChevronDown size={14} />
-                </button>
+                <Tooltip content="Escolha o tom de voz da matéria (formal, casual, etc.)" position="bottom">
+                  <button
+                    onClick={() => setOpenDropdown(openDropdown === 'tone' ? null : 'tone')}
+                    className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+                      selectedTone
+                        ? 'bg-tmc-orange text-white'
+                        : 'bg-off-white text-dark-gray hover:bg-light-gray'
+                    }`}
+                    aria-label="Selecionar tom de voz"
+                    aria-expanded={openDropdown === 'tone'}
+                  >
+                    <Sparkles size={16} />
+                    <span className="hidden sm:inline">{selectedTone?.name || 'Tom'}</span>
+                    <ChevronDown size={14} />
+                  </button>
+                </Tooltip>
                 {openDropdown === 'tone' && (
                   <div className="absolute top-full left-0 mt-1 w-64 bg-white rounded-lg shadow-lg border border-light-gray py-2 z-50">
                     {mockTones.map((tone) => (
@@ -330,18 +400,22 @@ const CriarPostPage = () => {
 
               {/* Persona Dropdown */}
               <div className="relative flex-shrink-0">
-                <button
-                  onClick={() => setOpenDropdown(openDropdown === 'persona' ? null : 'persona')}
-                  className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
-                    selectedPersona
-                      ? 'bg-tmc-dark-green text-white'
-                      : 'bg-off-white text-dark-gray hover:bg-light-gray'
-                  }`}
-                >
-                  <UserCircle size={16} />
-                  <span className="hidden sm:inline">{selectedPersona?.name || 'Persona'}</span>
-                  <ChevronDown size={14} />
-                </button>
+                <Tooltip content="Defina para qual público-alvo você está escrevendo" position="bottom">
+                  <button
+                    onClick={() => setOpenDropdown(openDropdown === 'persona' ? null : 'persona')}
+                    className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+                      selectedPersona
+                        ? 'bg-tmc-dark-green text-white'
+                        : 'bg-off-white text-dark-gray hover:bg-light-gray'
+                    }`}
+                    aria-label="Selecionar persona"
+                    aria-expanded={openDropdown === 'persona'}
+                  >
+                    <UserCircle size={16} />
+                    <span className="hidden sm:inline">{selectedPersona?.name || 'Persona'}</span>
+                    <ChevronDown size={14} />
+                  </button>
+                </Tooltip>
                 {openDropdown === 'persona' && (
                   <div className="absolute top-full left-0 mt-1 w-64 bg-white rounded-lg shadow-lg border border-light-gray py-2 z-50">
                     {mockPersonas.map((persona) => (
@@ -363,18 +437,22 @@ const CriarPostPage = () => {
 
               {/* Article Type Dropdown */}
               <div className="relative flex-shrink-0">
-                <button
-                  onClick={() => setOpenDropdown(openDropdown === 'articleType' ? null : 'articleType')}
-                  className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
-                    selectedArticleType
-                      ? 'bg-blue-600 text-white'
-                      : 'bg-off-white text-dark-gray hover:bg-light-gray'
-                  }`}
-                >
-                  <Newspaper size={16} />
-                  <span className="hidden sm:inline">{selectedArticleType?.name || 'Tipo'}</span>
-                  <ChevronDown size={14} />
-                </button>
+                <Tooltip content="Escolha o tipo de matéria (destaque, coluna, serviço, etc.)" position="bottom">
+                  <button
+                    onClick={() => setOpenDropdown(openDropdown === 'articleType' ? null : 'articleType')}
+                    className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+                      selectedArticleType
+                        ? 'bg-blue-600 text-white'
+                        : 'bg-off-white text-dark-gray hover:bg-light-gray'
+                    }`}
+                    aria-label="Selecionar tipo de matéria"
+                    aria-expanded={openDropdown === 'articleType'}
+                  >
+                    <Newspaper size={16} />
+                    <span className="hidden sm:inline">{selectedArticleType?.name || 'Tipo'}</span>
+                    <ChevronDown size={14} />
+                  </button>
+                </Tooltip>
                 {openDropdown === 'articleType' && (
                   <div className="absolute top-full left-0 mt-1 w-64 bg-white rounded-lg shadow-lg border border-light-gray py-2 z-50">
                     {articleTypes.map((type) => (
@@ -394,32 +472,42 @@ const CriarPostPage = () => {
                 )}
               </div>
 
-              <button
-                onClick={() => setSpellCheck(!spellCheck)}
-                className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors flex-shrink-0 ${
-                  spellCheck
-                    ? 'bg-success text-white'
-                    : 'bg-off-white text-dark-gray hover:bg-light-gray'
-                }`}
-              >
-                <SpellCheck size={16} />
-                <span className="hidden md:inline">Correção</span>
-              </button>
+              <Tooltip content="Ativar/desativar correção ortográfica automática" position="bottom">
+                <button
+                  onClick={() => setSpellCheck(!spellCheck)}
+                  className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors flex-shrink-0 ${
+                    spellCheck
+                      ? 'bg-success text-white'
+                      : 'bg-off-white text-dark-gray hover:bg-light-gray'
+                  }`}
+                  aria-label="Correção ortográfica"
+                  aria-pressed={spellCheck}
+                >
+                  <SpellCheck size={16} />
+                  <span className="hidden md:inline">Correção</span>
+                </button>
+              </Tooltip>
 
-              <button className="hidden md:flex items-center gap-2 px-3 py-1.5 bg-off-white text-dark-gray hover:bg-light-gray rounded-lg text-sm font-medium transition-colors flex-shrink-0">
-                <Languages size={16} />
-                <span>Traduzir</span>
-              </button>
+              <Tooltip content="Traduzir texto selecionado para outro idioma" position="bottom">
+                <button className="hidden md:flex items-center gap-2 px-3 py-1.5 bg-off-white text-dark-gray hover:bg-light-gray rounded-lg text-sm font-medium transition-colors flex-shrink-0" aria-label="Traduzir texto">
+                  <Languages size={16} />
+                  <span>Traduzir</span>
+                </button>
+              </Tooltip>
 
-              <button className="hidden md:flex items-center gap-2 px-3 py-1.5 bg-off-white text-dark-gray hover:bg-light-gray rounded-lg text-sm font-medium transition-colors flex-shrink-0">
-                <BarChart3 size={16} />
-                <span>Insights SEO (Otimização para Mecanismos de Busca)</span>
-              </button>
+              <Tooltip content="Analisar e otimizar seu texto para mecanismos de busca" position="bottom">
+                <button className="hidden md:flex items-center gap-2 px-3 py-1.5 bg-off-white text-dark-gray hover:bg-light-gray rounded-lg text-sm font-medium transition-colors flex-shrink-0" aria-label="Insights SEO">
+                  <BarChart3 size={16} />
+                  <span>Insights SEO</span>
+                </button>
+              </Tooltip>
 
-              <button className="hidden lg:flex items-center gap-2 px-3 py-1.5 bg-off-white text-dark-gray hover:bg-light-gray rounded-lg text-sm font-medium transition-colors flex-shrink-0">
-                <Lightbulb size={16} />
-                <span>Sugerir título</span>
-              </button>
+              <Tooltip content="Gerar sugestões de título com base no conteúdo" position="bottom">
+                <button className="hidden lg:flex items-center gap-2 px-3 py-1.5 bg-off-white text-dark-gray hover:bg-light-gray rounded-lg text-sm font-medium transition-colors flex-shrink-0" aria-label="Sugerir título">
+                  <Lightbulb size={16} />
+                  <span>Sugerir título</span>
+                </button>
+              </Tooltip>
             </div>
           </div>
 
@@ -431,6 +519,61 @@ const CriarPostPage = () => {
               onChange={(e) => setContent(e.target.value)}
               className="w-full h-full resize-none text-dark-gray text-base leading-relaxed focus:outline-none placeholder:text-light-gray"
             />
+          </div>
+
+          {/* Seção de Tópicos/Tags */}
+          <div className="bg-white border-t border-light-gray px-4 md:px-6 py-3">
+            <div className="flex items-center gap-2 mb-2">
+              <Tag size={16} className="text-medium-gray" />
+              <span className="text-sm font-medium text-dark-gray">Tópicos</span>
+              <span className="text-xs text-medium-gray">({tags.length})</span>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              {/* Tags existentes */}
+              {tags.map((tag, index) => (
+                <span
+                  key={index}
+                  className="inline-flex items-center gap-1 px-3 py-1.5 bg-off-white border border-light-gray text-dark-gray text-sm rounded-full group hover:border-tmc-orange transition-colors"
+                >
+                  {tag}
+                  <button
+                    onClick={() => handleRemoveTag(tag)}
+                    className="ml-1 p-0.5 hover:bg-light-gray rounded-full transition-colors"
+                    aria-label={`Remover tag ${tag}`}
+                  >
+                    <X size={12} className="text-medium-gray group-hover:text-error" />
+                  </button>
+                </span>
+              ))}
+
+              {/* Input para nova tag */}
+              <div className="inline-flex items-center">
+                <input
+                  type="text"
+                  placeholder="Adicionar tópico..."
+                  value={newTagInput}
+                  onChange={(e) => setNewTagInput(e.target.value)}
+                  onKeyDown={handleTagKeyDown}
+                  className="w-32 md:w-40 px-3 py-1.5 text-sm bg-transparent border border-dashed border-light-gray rounded-full focus:outline-none focus:border-tmc-orange placeholder:text-medium-gray"
+                />
+                {newTagInput.trim() && (
+                  <Tooltip content="Adicionar tópico" shortcut="Enter" position="top">
+                    <button
+                      onClick={handleAddTag}
+                      className="ml-2 p-1.5 bg-tmc-orange text-white rounded-full hover:bg-tmc-orange/90 transition-colors"
+                      aria-label="Adicionar tópico"
+                    >
+                      <Plus size={14} />
+                    </button>
+                  </Tooltip>
+                )}
+              </div>
+            </div>
+            {tags.length === 0 && (
+              <p className="text-xs text-medium-gray mt-2">
+                Adicione tópicos relevantes para melhorar a indexação da matéria
+              </p>
+            )}
           </div>
 
           {/* Footer Stats */}
@@ -461,9 +604,11 @@ const CriarPostPage = () => {
               </div>
               <span className="font-semibold text-dark-gray">Assistente de redação</span>
             </div>
-            <button className="p-2 hover:bg-off-white rounded-lg transition-colors">
-              <Trash2 size={16} className="text-medium-gray" />
-            </button>
+            <Tooltip content="Limpar histórico do chat" position="left">
+              <button className="p-2 hover:bg-off-white rounded-lg transition-colors" aria-label="Limpar histórico do chat">
+                <Trash2 size={16} className="text-medium-gray" />
+              </button>
+            </Tooltip>
           </div>
 
           {/* Messages */}
@@ -519,14 +664,16 @@ const CriarPostPage = () => {
                 onKeyDown={(e) => e.key === 'Enter' && handleSendMessage()}
                 className="flex-1 px-4 py-2.5 bg-off-white border border-light-gray rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-tmc-orange/50 focus:border-tmc-orange"
               />
-              <button
-                onClick={handleSendMessage}
-                disabled={!chatInput.trim()}
-                className="p-2.5 bg-tmc-orange text-white rounded-lg hover:bg-tmc-orange/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                aria-label="Enviar mensagem"
-              >
-                <Send size={18} />
-              </button>
+              <Tooltip content="Enviar mensagem" shortcut="Enter" position="top">
+                <button
+                  onClick={handleSendMessage}
+                  disabled={!chatInput.trim()}
+                  className="p-2.5 bg-tmc-orange text-white rounded-lg hover:bg-tmc-orange/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  aria-label="Enviar mensagem"
+                >
+                  <Send size={18} />
+                </button>
+              </Tooltip>
             </div>
             <p className="text-xs text-medium-gray mt-2 text-center">
               Pressione Enter para enviar

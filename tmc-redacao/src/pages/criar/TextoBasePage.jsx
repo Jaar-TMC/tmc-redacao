@@ -35,12 +35,18 @@ const tooltipContent = {
 
 const TextoBasePage = () => {
   const navigate = useNavigate();
-  const { fonte, confirmarTextoBase, setBlocos } = useCriar();
+  const { fonte, confirmarTextoBase, setBlocos, setFonte } = useCriar();
 
   // Estado para dados coletados da variante
   const [variantData, setVariantData] = useState(null);
   const [canProceed, setCanProceed] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+
+  // Estado para edição de matérias do tema (fluxo: tema → seleção → edição de tópicos)
+  const [temaArticlesForEdit, setTemaArticlesForEdit] = useState(null);
+
+  // Estado para preservar o tema selecionado ao voltar da edição
+  const [savedTemaData, setSavedTemaData] = useState(null);
 
   // Verificar se há fonte selecionada
   useEffect(() => {
@@ -78,6 +84,35 @@ const TextoBasePage = () => {
     confirmarTextoBase();
     navigate('/criar/configurar');
   }, [confirmarTextoBase, navigate]);
+
+  // Handler para continuar com matérias do tema (ir para edição de tópicos)
+  const handleContinueWithTemaArticles = useCallback((selectedArticles, temaData) => {
+    // Salvar dados do tema para restaurar ao voltar
+    setSavedTemaData({
+      tema: temaData || variantData?.tema,
+      selectedArticleIds: selectedArticles.map(a => a.id)
+    });
+
+    // Converter matérias do tema para formato compatível com TextoBaseFeed
+    const articlesForFeed = selectedArticles.map(article => ({
+      id: article.id,
+      title: article.title,
+      source: article.source,
+      sourceUrl: article.sourceUrl,
+      category: article.category,
+      preview: article.preview,
+      content: article.preview,
+      wordCount: article.wordCount
+    }));
+
+    // Salvar as matérias para edição
+    setTemaArticlesForEdit(articlesForFeed);
+  }, [variantData]);
+
+  // Handler para voltar da edição de tópicos para seleção de tema
+  const handleBackFromTopicEdit = useCallback(() => {
+    setTemaArticlesForEdit(null);
+  }, []);
 
   // Handler para continuar
   const handleContinue = useCallback(() => {
@@ -150,6 +185,17 @@ const TextoBasePage = () => {
 
   // Renderizar variante correta baseada no tipo de fonte
   const renderVariant = () => {
+    // Se há matérias do tema para editar, mostrar TextoBaseFeed
+    if (temaArticlesForEdit && temaArticlesForEdit.length > 0) {
+      return (
+        <TextoBaseFeed
+          fonte={{ tipo: 'tema-articles', dados: temaArticlesForEdit }}
+          onChangeSource={handleBackFromTopicEdit}
+          onDataChange={handleDataChange}
+        />
+      );
+    }
+
     switch (fonte.tipo) {
       case 'video':
       case 'transcription':
@@ -167,6 +213,8 @@ const TextoBasePage = () => {
             onChangeSource={handleChangeSource}
             onDataChange={handleDataChange}
             onSkipToConfig={handleSkipToConfig}
+            onContinueWithArticles={handleContinueWithTemaArticles}
+            initialTemaData={savedTemaData}
           />
         );
       case 'feed':
@@ -264,39 +312,48 @@ const TextoBasePage = () => {
         {/* Variante */}
         {renderVariant()}
 
-        {/* Navigation Buttons */}
-        <div className="flex justify-between mt-8">
-          <button
-            onClick={() => navigate('/criar')}
-            className="flex items-center gap-2 px-6 py-3 border border-light-gray text-medium-gray rounded-lg hover:bg-off-white transition-colors"
-          >
-            <ArrowLeft size={20} />
-            Voltar
-          </button>
-          <button
-            onClick={handleContinue}
-            disabled={!canProceed || isLoading}
-            className={`
-              flex items-center gap-2 px-6 py-3 rounded-lg transition-colors
-              ${!canProceed || isLoading
-                ? 'bg-light-gray text-medium-gray cursor-not-allowed'
-                : 'bg-tmc-orange text-white hover:bg-tmc-orange/90'
-              }
-            `}
-          >
-            {isLoading ? (
-              <>
-                <Loader2 size={20} className="animate-spin" />
-                Processando...
-              </>
-            ) : (
-              <>
-                Continuar
-                <ArrowRight size={20} />
-              </>
-            )}
-          </button>
-        </div>
+        {/* Navigation Buttons - Ocultar quando tema está na fase de seleção (tem seus próprios botões) */}
+        {!(fonte.tipo === 'tema' && !temaArticlesForEdit) && (
+          <div className="flex justify-between mt-8">
+            <button
+              onClick={() => {
+                // Se está editando matérias do tema, voltar para seleção de matérias
+                if (temaArticlesForEdit) {
+                  handleBackFromTopicEdit();
+                } else {
+                  navigate('/criar');
+                }
+              }}
+              className="flex items-center gap-2 px-6 py-3 border border-light-gray text-medium-gray rounded-lg hover:bg-off-white transition-colors"
+            >
+              <ArrowLeft size={20} />
+              Voltar
+            </button>
+            <button
+              onClick={handleContinue}
+              disabled={!canProceed || isLoading}
+              className={`
+                flex items-center gap-2 px-6 py-3 rounded-lg transition-colors
+                ${!canProceed || isLoading
+                  ? 'bg-light-gray text-medium-gray cursor-not-allowed'
+                  : 'bg-tmc-orange text-white hover:bg-tmc-orange/90'
+                }
+              `}
+            >
+              {isLoading ? (
+                <>
+                  <Loader2 size={20} className="animate-spin" />
+                  Processando...
+                </>
+              ) : (
+                <>
+                  Continuar
+                  <ArrowRight size={20} />
+                </>
+              )}
+            </button>
+          </div>
+        )}
       </main>
     </div>
   );

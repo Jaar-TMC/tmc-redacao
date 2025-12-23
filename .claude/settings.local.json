@@ -29,7 +29,9 @@
       "mcp__playwright__browser_close",
       "mcp__playwright__browser_tabs",
       "Bash(del \"C:\\\\Users\\\\enzoc\\\\OneDrive - jaarconsult.com.br\\\\JaarConsult - Oficial - TMC\\\\Projeto Ferramenta TMC\\\\tmc-redacao\\\\src\\\\pages\\\\SelecionarTemaPage.jsx\")",
-      "Bash(timeout:*)"
+      "Bash(timeout:*)",
+      "Bash(npm run lint:*)",
+      "mcp__playwright__browser_hover"
     ],
     "deny": [],
     "ask": []

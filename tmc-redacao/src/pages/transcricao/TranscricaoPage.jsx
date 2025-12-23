@@ -4,23 +4,15 @@ import { ArrowLeft, Youtube } from 'lucide-react';
 
 import { useDocumentTitle } from '../../hooks';
 import { useCriar } from '../../context';
-import Breadcrumb from '../../components/ui/Breadcrumb';
 import TipBox from '../../components/ui/TipBox';
 
 import {
   YouTubeInput,
   VideoPreview,
-  ProgressOverlay,
-  StepIndicator
+  ProgressOverlay
 } from './components';
 
 import { useSteps } from './hooks';
-
-// Etapas do fluxo (simplificado)
-const STEPS = [
-  { id: 'input', label: 'Adicionar Vídeo' },
-  { id: 'transcribing', label: 'Transcrevendo' }
-];
 
 // Mock de transcrição (em produção, viria da API)
 const MOCK_TRANSCRIPTION = [
@@ -169,28 +161,10 @@ function TranscricaoPage() {
               >
                 <ArrowLeft className="w-5 h-5 text-dark-gray" />
               </Link>
-              <div>
-                <h1 className="text-xl font-bold text-dark-gray">
-                  Transcrever Vídeo
-                </h1>
-                <Breadcrumb
-                  items={[
-                    { label: 'Redação', href: '/' },
-                    { label: 'Transcrever Vídeo' }
-                  ]}
-                />
-              </div>
+              <h1 className="text-xl font-bold text-dark-gray">
+                Transcrever Vídeo
+              </h1>
             </div>
-
-            {/* Step Indicator */}
-            <div className="hidden md:block">
-              <StepIndicator steps={STEPS} currentStep={currentStep} />
-            </div>
-          </div>
-
-          {/* Step Indicator Mobile */}
-          <div className="md:hidden mt-4">
-            <StepIndicator steps={STEPS} currentStep={currentStep} />
           </div>
         </div>
       </div>

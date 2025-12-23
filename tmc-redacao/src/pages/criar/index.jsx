@@ -199,6 +199,19 @@ const CriarMateria = () => {
                 Não importa qual fonte escolher, você poderá adicionar
                 materiais complementares (links, PDFs, vídeos) na etapa 3
               </TipBox>
+
+              {/* Botão para ir direto ao editor */}
+              <div className="mt-6 text-center">
+                <button
+                  onClick={() => {
+                    setFonte('manual', { skipSteps: true });
+                    navigate('/criar/editor');
+                  }}
+                  className="text-medium-gray hover:text-tmc-orange text-sm underline transition-colors"
+                >
+                  Ou ir direto ao editor sem ponto de partida →
+                </button>
+              </div>
             </div>
           </>
         )}
