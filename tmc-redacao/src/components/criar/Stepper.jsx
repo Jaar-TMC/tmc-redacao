@@ -1,4 +1,13 @@
 import PropTypes from 'prop-types';
+import { Link2, FileText, Sliders, PenLine, Check } from 'lucide-react';
+
+// Mapeamento de ícones por label do step
+const stepIcons = {
+  'Fonte': Link2,
+  'Texto-Base': FileText,
+  'Configurar': Sliders,
+  'Editor': PenLine
+};
 
 /**
  * Stepper - Componente de navegação por etapas para o fluxo de criação de matéria
@@ -60,10 +69,10 @@ function Stepper({ steps, currentStep, onStepClick }) {
                   aria-label={`${stepLabel}${isCompleted ? ' - Completo' : isCurrent ? ' - Atual' : ' - Pendente'}`}
                   tabIndex={isClickable || isCurrent ? 0 : -1}
                 >
-                  {/* Círculo da etapa */}
+                  {/* Círculo da etapa com ícone personalizado */}
                   <div
                     className={`
-                      flex items-center justify-center w-10 h-10 rounded-full
+                      relative flex items-center justify-center w-10 h-10 rounded-full
                       font-semibold text-sm transition-all duration-300 ease-in-out
                       ${isCompleted
                         ? 'bg-tmc-orange text-white'
@@ -73,39 +82,17 @@ function Stepper({ steps, currentStep, onStepClick }) {
                       }
                     `}
                   >
-                    {/* Ícone baseado no estado */}
-                    {isCompleted ? (
-                      // Círculo preenchido
-                      <svg
-                        className="w-5 h-5"
-                        viewBox="0 0 20 20"
-                        fill="currentColor"
-                        aria-hidden="true"
-                      >
-                        <circle cx="10" cy="10" r="5" />
-                      </svg>
-                    ) : isCurrent ? (
-                      // Círculo preenchido com destaque
-                      <svg
-                        className="w-5 h-5"
-                        viewBox="0 0 20 20"
-                        fill="currentColor"
-                        aria-hidden="true"
-                      >
-                        <circle cx="10" cy="10" r="5" />
-                      </svg>
-                    ) : (
-                      // Círculo vazio
-                      <svg
-                        className="w-5 h-5"
-                        viewBox="0 0 20 20"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="2"
-                        aria-hidden="true"
-                      >
-                        <circle cx="10" cy="10" r="4" />
-                      </svg>
+                    {/* Ícone específico do step */}
+                    {(() => {
+                      const IconComponent = stepIcons[stepLabel] || Link2;
+                      return <IconComponent className="w-5 h-5" aria-hidden="true" />;
+                    })()}
+
+                    {/* Badge de check para steps completos */}
+                    {isCompleted && (
+                      <div className="absolute -bottom-0.5 -right-0.5 w-4 h-4 bg-success rounded-full flex items-center justify-center border-2 border-white">
+                        <Check className="w-2.5 h-2.5 text-white" strokeWidth={3} />
+                      </div>
                     )}
                   </div>
 
@@ -166,7 +153,7 @@ function Stepper({ steps, currentStep, onStepClick }) {
                       onClick={() => isClickable && onStepClick && onStepClick(index)}
                       disabled={!isClickable}
                       className={`
-                        flex items-center justify-center w-8 h-8 rounded-full
+                        relative flex items-center justify-center w-8 h-8 rounded-full
                         font-semibold text-xs transition-all duration-300 ease-in-out
                         ${isClickable
                           ? 'cursor-pointer focus-visible:outline-tmc-orange'
@@ -183,35 +170,17 @@ function Stepper({ steps, currentStep, onStepClick }) {
                       aria-label={`${stepLabel}${isCompleted ? ' - Completo' : isCurrent ? ' - Atual' : ' - Pendente'}`}
                       tabIndex={isClickable || isCurrent ? 0 : -1}
                     >
-                      {isCompleted ? (
-                        <svg
-                          className="w-4 h-4"
-                          viewBox="0 0 16 16"
-                          fill="currentColor"
-                          aria-hidden="true"
-                        >
-                          <circle cx="8" cy="8" r="4" />
-                        </svg>
-                      ) : isCurrent ? (
-                        <svg
-                          className="w-4 h-4"
-                          viewBox="0 0 16 16"
-                          fill="currentColor"
-                          aria-hidden="true"
-                        >
-                          <circle cx="8" cy="8" r="4" />
-                        </svg>
-                      ) : (
-                        <svg
-                          className="w-4 h-4"
-                          viewBox="0 0 16 16"
-                          fill="none"
-                          stroke="currentColor"
-                          strokeWidth="2"
-                          aria-hidden="true"
-                        >
-                          <circle cx="8" cy="8" r="3" />
-                        </svg>
+                      {/* Ícone específico do step (mobile) */}
+                      {(() => {
+                        const IconComponent = stepIcons[stepLabel] || Link2;
+                        return <IconComponent className="w-4 h-4" aria-hidden="true" />;
+                      })()}
+
+                      {/* Badge de check para steps completos (mobile) */}
+                      {isCompleted && (
+                        <div className="absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 bg-success rounded-full flex items-center justify-center border-2 border-white">
+                          <Check className="w-2 h-2 text-white" strokeWidth={3} />
+                        </div>
                       )}
                     </button>
 
