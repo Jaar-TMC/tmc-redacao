@@ -1,68 +1,102 @@
 import { useMemo } from 'react';
 import PropTypes from 'prop-types';
 import {
-  CheckCircle2,
-  AlertCircle,
-  XCircle,
-  ChevronDown,
-  ChevronUp,
+  Check,
+  AlertTriangle,
+  X,
   Type,
   FileText,
-  BarChart3,
+  BarChart2,
   BookOpen,
   Link2,
   Image,
   Sparkles,
   Target,
-  Lightbulb
+  Hash,
+  TrendingUp
 } from 'lucide-react';
-import { useState } from 'react';
 
 /**
- * SEOAnalyzerPanel - Painel de análise SEO em tempo real
+ * SEOAnalyzerPanel - Painel de análise SEO em tempo real (v2 - Redesign)
  *
- * Mostra métricas de SEO para redatores otimizarem suas matérias
+ * Design consistente com o padrão visual TMC
  */
 
-// Função para calcular score de legibilidade (Flesch-Kincaid simplificado)
+// Função para calcular score de legibilidade (Adaptado para Português Brasileiro)
+// Baseado no Índice de Legibilidade de Flesch adaptado por Martins et al.
 const calculateReadability = (text) => {
-  if (!text || text.trim().length === 0) return { score: 0, grade: 'N/A', level: 'neutral' };
+  if (!text || text.trim().length === 0) return { score: 0, grade: 'N/A', level: 'neutral', tip: null, avgWordsPerSentence: 0 };
 
   const sentences = text.split(/[.!?]+/).filter(s => s.trim().length > 0);
   const words = text.split(/\s+/).filter(w => w.length > 0);
-  const syllables = words.reduce((count, word) => {
-    // Estimativa simplificada de sílabas em português
-    const vowels = word.toLowerCase().match(/[aeiouáéíóúâêîôûãõ]/g);
-    return count + (vowels ? vowels.length : 1);
-  }, 0);
 
-  if (sentences.length === 0 || words.length === 0) return { score: 0, grade: 'N/A', level: 'neutral' };
+  // Contagem de sílabas adaptada para português
+  const countSyllables = (word) => {
+    const cleanWord = word.toLowerCase().replace(/[^a-záéíóúâêîôûãõç]/g, '');
+    if (cleanWord.length <= 2) return 1;
+
+    // Padrões de vogais em português (incluindo ditongos e tritongos)
+    const vowelGroups = cleanWord.match(/[aeiouáéíóúâêîôûãõ]+/g);
+    if (!vowelGroups) return 1;
+
+    let syllableCount = vowelGroups.length;
+
+    // Ajuste para ditongos comuns (contam como 1 sílaba, não 2)
+    const ditongos = (cleanWord.match(/ai|au|ei|eu|oi|ou|ui|ão|ãe|õe/g) || []).length;
+    syllableCount -= ditongos * 0.5; // Reduz parcialmente
+
+    return Math.max(1, Math.round(syllableCount));
+  };
+
+  const totalSyllables = words.reduce((count, word) => count + countSyllables(word), 0);
+
+  if (sentences.length === 0 || words.length === 0) return { score: 0, grade: 'N/A', level: 'neutral', tip: null, avgWordsPerSentence: 0 };
 
   const avgWordsPerSentence = words.length / sentences.length;
-  const avgSyllablesPerWord = syllables / words.length;
+  const avgSyllablesPerWord = totalSyllables / words.length;
 
-  // Flesch Reading Ease adaptado
-  const score = Math.round(206.835 - (1.015 * avgWordsPerSentence) - (84.6 * avgSyllablesPerWord));
+  // Fórmula adaptada para português brasileiro
+  // Coeficiente de sílabas reduzido (62 vs 84.6) para compensar palavras mais longas
+  const score = Math.round(248.835 - (1.015 * avgWordsPerSentence) - (84.6 * avgSyllablesPerWord));
   const clampedScore = Math.max(0, Math.min(100, score));
 
-  let grade, level;
-  if (clampedScore >= 80) { grade = 'Muito Fácil'; level = 'success'; }
-  else if (clampedScore >= 60) { grade = 'Fácil'; level = 'success'; }
-  else if (clampedScore >= 40) { grade = 'Moderado'; level = 'warning'; }
-  else if (clampedScore >= 20) { grade = 'Difícil'; level = 'warning'; }
-  else { grade = 'Muito Difícil'; level = 'error'; }
+  let grade, level, tip;
+  if (clampedScore >= 80) {
+    grade = 'Muito Fácil';
+    level = 'success';
+    tip = 'Excelente! Texto acessível para todos os públicos.';
+  }
+  else if (clampedScore >= 60) {
+    grade = 'Fácil';
+    level = 'success';
+    tip = 'Bom! Texto claro e de fácil compreensão.';
+  }
+  else if (clampedScore >= 40) {
+    grade = 'Moderado';
+    level = 'warning';
+    tip = 'Tente usar frases mais curtas e palavras simples.';
+  }
+  else if (clampedScore >= 20) {
+    grade = 'Difícil';
+    level = 'warning';
+    tip = 'Simplifique: frases menores, menos jargões.';
+  }
+  else {
+    grade = 'Muito Difícil';
+    level = 'error';
+    tip = 'Texto complexo. Divida frases longas e use vocabulário acessível.';
+  }
 
-  return { score: clampedScore, grade, level };
+  return { score: clampedScore, grade, level, tip, avgWordsPerSentence };
 };
 
-// Função para extrair palavras-chave e calcular densidade
+// Função para extrair palavras-chave
 const analyzeKeywords = (text, title) => {
   if (!text || text.trim().length === 0) return [];
 
   const words = text.toLowerCase().split(/\s+/).filter(w => w.length > 4);
   const titleWords = title ? title.toLowerCase().split(/\s+/).filter(w => w.length > 4) : [];
 
-  // Contar frequência
   const frequency = {};
   words.forEach(word => {
     const cleanWord = word.replace(/[^a-záéíóúâêîôûãõç]/g, '');
@@ -71,125 +105,199 @@ const analyzeKeywords = (text, title) => {
     }
   });
 
-  // Ordenar por frequência e pegar top 5
-  const sorted = Object.entries(frequency)
+  return Object.entries(frequency)
     .sort((a, b) => b[1] - a[1])
     .slice(0, 5)
-    .map(([word, count]) => ({
-      word,
-      count,
-      density: ((count / words.length) * 100).toFixed(1),
-      inTitle: titleWords.includes(word)
-    }));
+    .map(([word, count]) => {
+      const density = (count / words.length) * 100;
+      const densityFormatted = density.toFixed(1);
 
-  return sorted;
+      // Status baseado na densidade ideal (1-3%)
+      let status = 'warning';
+      if (density >= 1 && density <= 3) status = 'success';
+      else if (density > 3) status = 'error'; // over-optimization
+      else if (density < 1) status = 'warning'; // pode aumentar
+
+      return {
+        word,
+        count,
+        density: densityFormatted,
+        densityValue: density,
+        status,
+        inTitle: titleWords.includes(word)
+      };
+    });
 };
 
-// Componente de indicador de status
-const StatusIndicator = ({ status, size = 16 }) => {
-  const icons = {
-    success: <CheckCircle2 size={size} className="text-success" />,
-    warning: <AlertCircle size={size} className="text-warning" />,
-    error: <XCircle size={size} className="text-error" />,
-    neutral: <div className={`w-${size/4} h-${size/4} rounded-full bg-light-gray`} />
-  };
-  return icons[status] || icons.neutral;
+// Componente Gauge Circular
+const CircularGauge = ({ value, size = 120 }) => {
+  const strokeWidth = 8;
+  const radius = (size - strokeWidth) / 2;
+  const circumference = radius * 2 * Math.PI;
+  const progress = (value / 100) * circumference;
+  const offset = circumference - progress;
+
+  // Cores baseadas no score
+  let strokeColor = '#EF4444'; // error
+  let bgGradient = 'from-red-50 to-red-100';
+  let label = 'Crítico';
+
+  if (value >= 80) {
+    strokeColor = '#10B981'; // success
+    bgGradient = 'from-emerald-50 to-emerald-100';
+    label = 'Excelente';
+  } else if (value >= 60) {
+    strokeColor = '#F59E0B'; // warning
+    bgGradient = 'from-amber-50 to-amber-100';
+    label = 'Bom';
+  } else if (value >= 40) {
+    strokeColor = '#F59E0B';
+    bgGradient = 'from-amber-50 to-amber-100';
+    label = 'Regular';
+  }
+
+  return (
+    <div className={`relative inline-flex items-center justify-center bg-gradient-to-br ${bgGradient} rounded-full p-2`}>
+      <svg width={size} height={size} className="transform -rotate-90">
+        {/* Background circle */}
+        <circle
+          cx={size / 2}
+          cy={size / 2}
+          r={radius}
+          fill="none"
+          stroke="#E5E7EB"
+          strokeWidth={strokeWidth}
+        />
+        {/* Progress circle */}
+        <circle
+          cx={size / 2}
+          cy={size / 2}
+          r={radius}
+          fill="none"
+          stroke={strokeColor}
+          strokeWidth={strokeWidth}
+          strokeLinecap="round"
+          strokeDasharray={circumference}
+          strokeDashoffset={offset}
+          className="transition-all duration-700 ease-out"
+        />
+      </svg>
+      <div className="absolute inset-0 flex flex-col items-center justify-center">
+        <span className="text-3xl font-bold text-dark-gray">{value}</span>
+        <span className="text-[10px] text-medium-gray uppercase tracking-wider">{label}</span>
+      </div>
+    </div>
+  );
 };
 
-StatusIndicator.propTypes = {
-  status: PropTypes.oneOf(['success', 'warning', 'error', 'neutral']),
+CircularGauge.propTypes = {
+  value: PropTypes.number.isRequired,
   size: PropTypes.number
 };
 
-// Componente de barra de progresso
-const ProgressBar = ({ value, max, showLabel = true, size = 'md' }) => {
+// Componente de Mini Barra de Progresso
+const MiniProgress = ({ value, max, variant = 'default' }) => {
   const percentage = Math.min(100, (value / max) * 100);
 
-  let color = 'bg-success';
-  if (percentage < 50) color = 'bg-error';
-  else if (percentage < 80) color = 'bg-warning';
-
-  const heights = { sm: 'h-1', md: 'h-2', lg: 'h-3' };
+  let barColor = 'bg-tmc-orange';
+  if (variant === 'auto') {
+    if (percentage >= 80) barColor = 'bg-success';
+    else if (percentage >= 50) barColor = 'bg-warning';
+    else barColor = 'bg-error';
+  }
 
   return (
-    <div className="w-full">
-      <div className={`w-full bg-off-white rounded-full overflow-hidden ${heights[size]}`}>
-        <div
-          className={`${heights[size]} ${color} rounded-full transition-all duration-300`}
-          style={{ width: `${percentage}%` }}
-        />
-      </div>
-      {showLabel && (
-        <div className="flex justify-between mt-1">
-          <span className="text-xs text-medium-gray">{value}</span>
-          <span className="text-xs text-medium-gray">{max}</span>
-        </div>
-      )}
+    <div className="w-full h-1.5 bg-light-gray/50 rounded-full overflow-hidden">
+      <div
+        className={`h-full ${barColor} rounded-full transition-all duration-500`}
+        style={{ width: `${percentage}%` }}
+      />
     </div>
   );
 };
 
-ProgressBar.propTypes = {
+MiniProgress.propTypes = {
   value: PropTypes.number.isRequired,
   max: PropTypes.number.isRequired,
-  showLabel: PropTypes.bool,
-  size: PropTypes.oneOf(['sm', 'md', 'lg'])
+  variant: PropTypes.oneOf(['default', 'auto'])
 };
 
-// Componente de card de métrica
-const MetricCard = ({ title, icon: Icon, children, defaultExpanded = true }) => {
-  const [isExpanded, setIsExpanded] = useState(defaultExpanded);
+// Componente de Status Dot
+const StatusDot = ({ status }) => {
+  const colors = {
+    success: 'bg-success',
+    warning: 'bg-warning',
+    error: 'bg-error',
+    neutral: 'bg-light-gray'
+  };
 
   return (
-    <div className="bg-off-white rounded-lg overflow-hidden">
-      <button
-        onClick={() => setIsExpanded(!isExpanded)}
-        className="w-full flex items-center justify-between px-3 py-2 hover:bg-light-gray/50 transition-colors"
-      >
-        <div className="flex items-center gap-2">
-          <Icon size={14} className="text-medium-gray" />
-          <span className="text-xs font-semibold text-dark-gray uppercase tracking-wide">{title}</span>
-        </div>
-        {isExpanded ? (
-          <ChevronUp size={14} className="text-medium-gray" />
-        ) : (
-          <ChevronDown size={14} className="text-medium-gray" />
-        )}
-      </button>
-      {isExpanded && (
-        <div className="px-3 pb-3 space-y-2">
-          {children}
-        </div>
-      )}
-    </div>
+    <span className={`inline-block w-2 h-2 rounded-full ${colors[status] || colors.neutral}`} />
   );
 };
 
-MetricCard.propTypes = {
-  title: PropTypes.string.isRequired,
-  icon: PropTypes.elementType.isRequired,
-  children: PropTypes.node.isRequired,
-  defaultExpanded: PropTypes.bool
+StatusDot.propTypes = {
+  status: PropTypes.oneOf(['success', 'warning', 'error', 'neutral'])
 };
 
-// Componente de item de checklist
-const CheckItem = ({ status, children }) => (
-  <div className="flex items-start gap-2">
-    <StatusIndicator status={status} size={14} />
-    <span className={`text-xs ${status === 'success' ? 'text-dark-gray' : status === 'warning' ? 'text-warning' : 'text-error'}`}>
+// Componente de Métrica Compacta
+const MetricRow = ({ icon: Icon, label, value, status, hint }) => (
+  <div className="flex items-center justify-between py-2 border-b border-light-gray/50 last:border-0">
+    <div className="flex items-center gap-2">
+      <div className="w-7 h-7 rounded-lg bg-off-white flex items-center justify-center">
+        <Icon size={14} className="text-medium-gray" />
+      </div>
+      <div>
+        <p className="text-xs font-medium text-dark-gray">{label}</p>
+        {hint && <p className="text-[10px] text-medium-gray">{hint}</p>}
+      </div>
+    </div>
+    <div className="flex items-center gap-2">
+      <span className={`text-sm font-semibold ${
+        status === 'success' ? 'text-success' :
+        status === 'warning' ? 'text-warning' :
+        status === 'error' ? 'text-error' : 'text-dark-gray'
+      }`}>
+        {value}
+      </span>
+      <StatusDot status={status} />
+    </div>
+  </div>
+);
+
+MetricRow.propTypes = {
+  icon: PropTypes.elementType.isRequired,
+  label: PropTypes.string.isRequired,
+  value: PropTypes.string.isRequired,
+  status: PropTypes.oneOf(['success', 'warning', 'error', 'neutral']),
+  hint: PropTypes.string
+};
+
+// Componente de Checklist Item
+const ChecklistItem = ({ checked, children }) => (
+  <div className="flex items-center gap-2 py-1">
+    <div className={`w-4 h-4 rounded flex items-center justify-center ${
+      checked ? 'bg-success/10' : 'bg-light-gray/50'
+    }`}>
+      {checked ? (
+        <Check size={10} className="text-success" />
+      ) : (
+        <X size={10} className="text-medium-gray" />
+      )}
+    </div>
+    <span className={`text-xs ${checked ? 'text-dark-gray' : 'text-medium-gray'}`}>
       {children}
     </span>
   </div>
 );
 
-CheckItem.propTypes = {
-  status: PropTypes.oneOf(['success', 'warning', 'error']).isRequired,
+ChecklistItem.propTypes = {
+  checked: PropTypes.bool,
   children: PropTypes.node.isRequired
 };
 
-// Componente principal
+// Componente Principal
 const SEOAnalyzerPanel = ({ title, linhaFina, content, tags, onOptimizeWithAI }) => {
-  // Calcular métricas
   const metrics = useMemo(() => {
     const titleLength = title?.length || 0;
     const linhaFinaLength = linhaFina?.length || 0;
@@ -197,43 +305,33 @@ const SEOAnalyzerPanel = ({ title, linhaFina, content, tags, onOptimizeWithAI })
     const readability = calculateReadability(content);
     const keywords = analyzeKeywords(content, title);
 
-    // Análise de estrutura
     const hasImages = /<img|!\[/.test(content || '');
     const hasLinks = /<a |https?:\/\/|\[.*\]\(/.test(content || '');
     const paragraphs = (content || '').split(/\n\n+/).filter(p => p.trim().length > 0);
     const sentences = (content || '').split(/[.!?]+/).filter(s => s.trim().length > 0);
-    const longSentences = sentences.filter(s => s.split(/\s+/).length > 40).length;
 
-    // Calcular score geral
+    // Score calculation
     let score = 0;
-
-    // Título (20 pontos)
     if (titleLength >= 50 && titleLength <= 60) score += 20;
     else if (titleLength >= 40 && titleLength <= 70) score += 15;
     else if (titleLength > 0) score += 5;
 
-    // Linha fina / Meta description (20 pontos)
     if (linhaFinaLength >= 150 && linhaFinaLength <= 160) score += 20;
     else if (linhaFinaLength >= 120 && linhaFinaLength <= 180) score += 15;
     else if (linhaFinaLength >= 80) score += 10;
     else if (linhaFinaLength > 0) score += 5;
 
-    // Conteúdo (20 pontos)
     if (wordCount >= 800) score += 20;
     else if (wordCount >= 600) score += 15;
     else if (wordCount >= 400) score += 10;
     else if (wordCount >= 200) score += 5;
 
-    // Legibilidade (15 pontos)
     if (readability.level === 'success') score += 15;
     else if (readability.level === 'warning') score += 8;
 
-    // Palavras-chave (10 pontos)
-    const hasKeywordInTitle = keywords.some(k => k.inTitle);
-    if (hasKeywordInTitle) score += 10;
+    if (keywords.some(k => k.inTitle)) score += 10;
     else if (keywords.length > 0) score += 5;
 
-    // Estrutura (15 pontos)
     if (hasImages) score += 5;
     if (hasLinks) score += 5;
     if (tags?.length >= 3) score += 5;
@@ -248,234 +346,233 @@ const SEOAnalyzerPanel = ({ title, linhaFina, content, tags, onOptimizeWithAI })
       hasImages,
       hasLinks,
       paragraphs: paragraphs.length,
-      longSentences,
       avgWordsPerSentence: sentences.length > 0 ? Math.round(wordCount / sentences.length) : 0
     };
   }, [title, linhaFina, content, tags]);
 
-  // Determinar cor do score
-  const getScoreColor = (score) => {
-    if (score >= 80) return 'text-success';
-    if (score >= 50) return 'text-warning';
-    return 'text-error';
+  const getTitleStatus = () => {
+    if (metrics.titleLength >= 50 && metrics.titleLength <= 60) return 'success';
+    if (metrics.titleLength >= 40 && metrics.titleLength <= 70) return 'warning';
+    return 'error';
   };
 
-  const getScoreLabel = (score) => {
-    if (score >= 80) return 'Excelente';
-    if (score >= 60) return 'Bom';
-    if (score >= 40) return 'Regular';
-    return 'Precisa melhorar';
+  const getDescStatus = () => {
+    if (metrics.linhaFinaLength >= 150 && metrics.linhaFinaLength <= 160) return 'success';
+    if (metrics.linhaFinaLength >= 120) return 'warning';
+    return 'error';
+  };
+
+  const getWordCountStatus = () => {
+    if (metrics.wordCount >= 600) return 'success';
+    if (metrics.wordCount >= 300) return 'warning';
+    return 'error';
   };
 
   return (
     <div className="flex flex-col h-full">
-      {/* Score Principal */}
-      <div className="bg-gradient-to-br from-off-white to-light-gray/30 rounded-xl p-4 mb-4">
-        <div className="text-center">
-          <p className="text-xs text-medium-gray uppercase tracking-wider mb-2">Score SEO</p>
-          <div className="flex items-baseline justify-center gap-1">
-            <span className={`text-4xl font-bold ${getScoreColor(metrics.score)}`}>
-              {metrics.score}
-            </span>
-            <span className="text-lg text-medium-gray">/100</span>
-          </div>
-          <p className={`text-sm font-medium mt-1 ${getScoreColor(metrics.score)}`}>
-            {getScoreLabel(metrics.score)}
-          </p>
-        </div>
-
-        {/* Barra de progresso circular visual */}
-        <div className="mt-3">
-          <div className="w-full bg-white rounded-full h-2 overflow-hidden">
-            <div
-              className={`h-full rounded-full transition-all duration-500 ${
-                metrics.score >= 80 ? 'bg-success' : metrics.score >= 50 ? 'bg-warning' : 'bg-error'
-              }`}
-              style={{ width: `${metrics.score}%` }}
-            />
-          </div>
-        </div>
-
-        {/* Legenda */}
-        <div className="flex justify-center gap-4 mt-3 text-xs">
-          <span className="flex items-center gap-1">
-            <span className="w-2 h-2 rounded-full bg-success" />
-            Bom
-          </span>
-          <span className="flex items-center gap-1">
-            <span className="w-2 h-2 rounded-full bg-warning" />
-            Atenção
-          </span>
-          <span className="flex items-center gap-1">
-            <span className="w-2 h-2 rounded-full bg-error" />
-            Crítico
-          </span>
-        </div>
+      {/* Score Principal com Gauge */}
+      <div className="flex flex-col items-center py-4 border-b border-light-gray">
+        <CircularGauge value={metrics.score} size={110} />
+        <p className="text-[10px] text-medium-gray mt-2 uppercase tracking-wider">
+          Score SEO
+        </p>
       </div>
 
-      {/* Métricas Detalhadas */}
-      <div className="flex-1 overflow-y-auto space-y-3 pr-1">
-        {/* Título */}
-        <MetricCard title="Título" icon={Type}>
-          <div className="flex items-center justify-between mb-2">
-            <span className={`text-sm font-medium ${
-              metrics.titleLength >= 50 && metrics.titleLength <= 60 ? 'text-success' :
-              metrics.titleLength >= 40 && metrics.titleLength <= 70 ? 'text-warning' : 'text-error'
-            }`}>
-              {metrics.titleLength}/60 caracteres
-            </span>
-            <StatusIndicator
-              status={
-                metrics.titleLength >= 50 && metrics.titleLength <= 60 ? 'success' :
-                metrics.titleLength >= 40 && metrics.titleLength <= 70 ? 'warning' : 'error'
-              }
-            />
-          </div>
-          <ProgressBar value={metrics.titleLength} max={60} showLabel={false} size="sm" />
-          <div className="mt-2 space-y-1">
-            {metrics.titleLength === 0 && (
-              <CheckItem status="error">Adicione um título</CheckItem>
-            )}
-            {metrics.titleLength > 0 && metrics.titleLength < 50 && (
-              <CheckItem status="warning">Título curto - ideal: 50-60 caracteres</CheckItem>
-            )}
-            {metrics.titleLength > 60 && (
-              <CheckItem status="warning">Título longo - pode ser cortado no Google</CheckItem>
-            )}
-            {metrics.titleLength >= 50 && metrics.titleLength <= 60 && (
-              <CheckItem status="success">Comprimento ideal para SEO</CheckItem>
-            )}
-          </div>
-        </MetricCard>
+      {/* Métricas Principais */}
+      <div className="flex-1 overflow-y-auto">
+        {/* Seção: Conteúdo */}
+        <div className="p-3">
+          <p className="text-[10px] font-semibold text-medium-gray uppercase tracking-wider mb-2">
+            Conteúdo
+          </p>
 
-        {/* Meta Description (Linha Fina) */}
-        <MetricCard title="Meta Description" icon={FileText}>
-          <div className="flex items-center justify-between mb-2">
-            <span className={`text-sm font-medium ${
-              metrics.linhaFinaLength >= 150 && metrics.linhaFinaLength <= 160 ? 'text-success' :
-              metrics.linhaFinaLength >= 120 ? 'text-warning' : 'text-error'
-            }`}>
-              {metrics.linhaFinaLength}/160 caracteres
-            </span>
-            <StatusIndicator
-              status={
-                metrics.linhaFinaLength >= 150 && metrics.linhaFinaLength <= 160 ? 'success' :
-                metrics.linhaFinaLength >= 120 ? 'warning' : 'error'
-              }
-            />
-          </div>
-          <ProgressBar value={metrics.linhaFinaLength} max={160} showLabel={false} size="sm" />
-          <div className="mt-2 space-y-1">
-            {metrics.linhaFinaLength === 0 && (
-              <CheckItem status="error">Adicione uma linha fina (meta description)</CheckItem>
-            )}
-            {metrics.linhaFinaLength > 0 && metrics.linhaFinaLength < 120 && (
-              <CheckItem status="warning">Muito curta - adicione mais contexto</CheckItem>
-            )}
-            {metrics.linhaFinaLength > 160 && (
-              <CheckItem status="warning">Muito longa - será cortada nos resultados</CheckItem>
-            )}
-            {metrics.linhaFinaLength >= 150 && metrics.linhaFinaLength <= 160 && (
-              <CheckItem status="success">Comprimento ideal</CheckItem>
-            )}
-          </div>
-        </MetricCard>
+          <MetricRow
+            icon={Type}
+            label="Título"
+            value={`${metrics.titleLength}/60`}
+            status={getTitleStatus()}
+            hint="Ideal: 50-60 caracteres"
+          />
 
-        {/* Palavras-chave */}
-        <MetricCard title="Palavras-chave" icon={Target} defaultExpanded={false}>
-          {metrics.keywords.length > 0 ? (
-            <div className="space-y-2">
-              {metrics.keywords.map((kw, index) => (
-                <div key={index} className="flex items-center justify-between text-xs">
-                  <span className="text-dark-gray font-medium truncate max-w-[120px]">
-                    "{kw.word}"
-                  </span>
+          <MetricRow
+            icon={FileText}
+            label="Meta Description"
+            value={`${metrics.linhaFinaLength}/160`}
+            status={getDescStatus()}
+            hint="Ideal: 150-160 caracteres"
+          />
+
+          <MetricRow
+            icon={BarChart2}
+            label="Palavras"
+            value={`${metrics.wordCount}`}
+            status={getWordCountStatus()}
+            hint="Mínimo: 600 palavras"
+          />
+
+        </div>
+
+        {/* Seção: Legibilidade Expandida */}
+        <div className="p-3 border-t border-light-gray">
+          <p className="text-[10px] font-semibold text-medium-gray uppercase tracking-wider mb-2">
+            Legibilidade
+          </p>
+
+          {/* Score e Grade */}
+          <div className="flex items-center justify-between mb-2">
+            <div className="flex items-center gap-2">
+              <div className="w-7 h-7 rounded-lg bg-off-white flex items-center justify-center">
+                <BookOpen size={14} className="text-medium-gray" />
+              </div>
+              <div>
+                <p className="text-xs font-medium text-dark-gray">
+                  {metrics.readability.grade}
+                </p>
+                <p className="text-[10px] text-medium-gray">
+                  Score: {metrics.readability.score}/100
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className={`text-sm font-semibold ${
+                metrics.readability.level === 'success' ? 'text-success' :
+                metrics.readability.level === 'warning' ? 'text-warning' : 'text-error'
+              }`}>
+                {metrics.readability.score >= 60 ? 'OK' : 'Melhorar'}
+              </span>
+              <StatusDot status={metrics.readability.level} />
+            </div>
+          </div>
+
+          {/* Dica contextual */}
+          <div className={`text-[10px] p-2 rounded-md ${
+            metrics.readability.level === 'success' ? 'bg-success/5 text-success' :
+            metrics.readability.level === 'warning' ? 'bg-warning/5 text-warning' :
+            'bg-error/5 text-error'
+          }`}>
+            {metrics.readability.tip || 'Escreva algum conteúdo para analisar.'}
+          </div>
+
+          {/* Métrica auxiliar */}
+          <div className="flex items-center justify-between mt-2 pt-2 border-t border-light-gray/50">
+            <span className="text-[10px] text-medium-gray">Média palavras/frase</span>
+            <span className={`text-[10px] font-medium ${
+              metrics.avgWordsPerSentence <= 20 ? 'text-success' :
+              metrics.avgWordsPerSentence <= 25 ? 'text-warning' : 'text-error'
+            }`}>
+              {metrics.avgWordsPerSentence} {metrics.avgWordsPerSentence <= 20 ? '(ideal)' : metrics.avgWordsPerSentence <= 25 ? '(ok)' : '(longo)'}
+            </span>
+          </div>
+
+          {/* Referência */}
+          <div className="mt-2 px-2 py-1.5 bg-off-white rounded text-center">
+            <p className="text-[9px] text-medium-gray font-medium">
+              Ideal: 60+ (Fácil) • Frases até 20 palavras
+            </p>
+          </div>
+        </div>
+
+        {/* Seção: Palavras-chave */}
+        {metrics.keywords.length > 0 && (
+          <div className="p-3 border-t border-light-gray">
+            <div className="flex items-center justify-between mb-2">
+              <p className="text-[10px] font-semibold text-medium-gray uppercase tracking-wider">
+                Palavras-chave
+              </p>
+              <span className="text-[10px] text-medium-gray font-medium">Densidade</span>
+            </div>
+
+            <div className="space-y-1.5">
+              {metrics.keywords.slice(0, 4).map((kw, i) => (
+                <div key={i} className="flex items-center justify-between py-1">
                   <div className="flex items-center gap-2">
-                    <span className="text-medium-gray">{kw.count}x ({kw.density}%)</span>
+                    <StatusDot status={kw.status} />
+                    <span className="text-xs text-dark-gray truncate max-w-[90px]">{kw.word}</span>
                     {kw.inTitle && (
-                      <span className="px-1.5 py-0.5 bg-success/10 text-success text-[10px] rounded">
-                        no título
+                      <span className="text-[8px] px-1 py-0.5 bg-tmc-orange/10 text-tmc-orange rounded font-medium">
+                        TÍTULO
                       </span>
                     )}
                   </div>
+                  <div className="flex items-center gap-1.5">
+                    <span className={`text-[11px] font-semibold ${
+                      kw.status === 'success' ? 'text-success' :
+                      kw.status === 'warning' ? 'text-warning' : 'text-error'
+                    }`}>
+                      {kw.density}%
+                    </span>
+                    <span className="text-[10px] text-dark-gray font-medium">
+                      ({kw.count}x)
+                    </span>
+                  </div>
                 </div>
               ))}
-              <p className="text-xs text-medium-gray mt-2">
-                Densidade ideal: 1-3% por palavra-chave
-              </p>
             </div>
-          ) : (
-            <p className="text-xs text-medium-gray">
-              Adicione conteúdo para analisar palavras-chave
-            </p>
-          )}
-        </MetricCard>
 
-        {/* Legibilidade */}
-        <MetricCard title="Legibilidade" icon={BookOpen}>
-          <div className="flex items-center justify-between mb-2">
-            <span className={`text-sm font-medium ${
-              metrics.readability.level === 'success' ? 'text-success' :
-              metrics.readability.level === 'warning' ? 'text-warning' : 'text-error'
-            }`}>
-              {metrics.readability.grade}
-            </span>
-            <StatusIndicator status={metrics.readability.level} />
+            {/* Legenda de densidade */}
+            <div className="mt-3 pt-2 border-t border-light-gray/50">
+              <p className="text-[9px] text-medium-gray mb-1.5">
+                Densidade ideal: 1% - 3% do texto
+              </p>
+              <div className="flex items-center gap-3 text-[9px]">
+                <span className="flex items-center gap-1">
+                  <StatusDot status="success" />
+                  <span className="text-medium-gray">Ideal</span>
+                </span>
+                <span className="flex items-center gap-1">
+                  <StatusDot status="warning" />
+                  <span className="text-medium-gray">Baixa</span>
+                </span>
+                <span className="flex items-center gap-1">
+                  <StatusDot status="error" />
+                  <span className="text-medium-gray">Excessiva</span>
+                </span>
+              </div>
+            </div>
           </div>
-          <div className="space-y-1 mt-2">
-            <CheckItem status={metrics.avgWordsPerSentence <= 25 ? 'success' : 'warning'}>
-              Média de {metrics.avgWordsPerSentence} palavras/frase
-            </CheckItem>
-            {metrics.longSentences > 0 && (
-              <CheckItem status="warning">
-                {metrics.longSentences} frase(s) muito longa(s)
-              </CheckItem>
-            )}
-            <CheckItem status={metrics.paragraphs >= 3 ? 'success' : 'warning'}>
-              {metrics.paragraphs} parágrafo(s)
-            </CheckItem>
-          </div>
-        </MetricCard>
+        )}
 
-        {/* Estrutura do Conteúdo */}
-        <MetricCard title="Estrutura" icon={BarChart3}>
-          <div className="flex items-center justify-between mb-2">
-            <span className={`text-sm font-medium ${
-              metrics.wordCount >= 600 ? 'text-success' :
-              metrics.wordCount >= 300 ? 'text-warning' : 'text-error'
-            }`}>
-              {metrics.wordCount} palavras
-            </span>
-            <span className="text-xs text-medium-gray">min: 600</span>
+        {/* Seção: Checklist */}
+        <div className="p-3 border-t border-light-gray">
+          <p className="text-[10px] font-semibold text-medium-gray uppercase tracking-wider mb-2">
+            Checklist
+          </p>
+          <div className="space-y-0.5">
+            <ChecklistItem checked={metrics.titleLength >= 50 && metrics.titleLength <= 60}>
+              Título otimizado
+            </ChecklistItem>
+            <ChecklistItem checked={metrics.linhaFinaLength >= 150}>
+              Meta description completa
+            </ChecklistItem>
+            <ChecklistItem checked={metrics.wordCount >= 600}>
+              Conteúdo substancial (+600 palavras)
+            </ChecklistItem>
+            <ChecklistItem checked={metrics.hasImages}>
+              Imagens incluídas
+            </ChecklistItem>
+            <ChecklistItem checked={metrics.hasLinks}>
+              Links de referência
+            </ChecklistItem>
+            <ChecklistItem checked={tags?.length >= 3}>
+              Tópicos/tags ({tags?.length || 0}/3)
+            </ChecklistItem>
+            <ChecklistItem checked={metrics.keywords.some(k => k.inTitle)}>
+              Palavra-chave no título
+            </ChecklistItem>
           </div>
-          <ProgressBar value={metrics.wordCount} max={600} showLabel={false} size="sm" />
-          <div className="space-y-1 mt-2">
-            <CheckItem status={metrics.hasImages ? 'success' : 'warning'}>
-              {metrics.hasImages ? 'Contém imagens' : 'Adicione imagens'}
-            </CheckItem>
-            <CheckItem status={metrics.hasLinks ? 'success' : 'warning'}>
-              {metrics.hasLinks ? 'Contém links' : 'Adicione links de referência'}
-            </CheckItem>
-            <CheckItem status={tags?.length >= 3 ? 'success' : 'warning'}>
-              {tags?.length || 0} tópico(s) - ideal: 3-5
-            </CheckItem>
-          </div>
-        </MetricCard>
+        </div>
       </div>
 
-      {/* Botão de Otimização */}
+      {/* Botão Otimizar */}
       {metrics.score < 80 && onOptimizeWithAI && (
-        <div className="mt-4 pt-4 border-t border-light-gray">
+        <div className="p-3 border-t border-light-gray">
           <button
             onClick={onOptimizeWithAI}
-            className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-gradient-to-r from-tmc-orange to-orange-500 text-white text-sm font-medium rounded-lg hover:from-tmc-orange/90 hover:to-orange-500/90 transition-all shadow-sm"
+            className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-tmc-orange text-white text-sm font-medium rounded-lg hover:bg-tmc-orange/90 transition-colors"
           >
             <Sparkles size={16} />
             Otimizar com IA
           </button>
-          <p className="text-xs text-medium-gray text-center mt-2">
-            A IA pode sugerir melhorias para título, descrição e conteúdo
-          </p>
         </div>
       )}
     </div>
@@ -488,6 +585,46 @@ SEOAnalyzerPanel.propTypes = {
   content: PropTypes.string,
   tags: PropTypes.arrayOf(PropTypes.string),
   onOptimizeWithAI: PropTypes.func
+};
+
+// Hook utilitário para cálculo do score SEO (para uso externo)
+export const calculateSEOScore = ({ title, linhaFina, content, tags }) => {
+  const titleLength = title?.length || 0;
+  const linhaFinaLength = linhaFina?.length || 0;
+  const wordCount = content?.split(/\s+/).filter(Boolean).length || 0;
+  const readability = calculateReadability(content);
+  const keywords = analyzeKeywords(content, title);
+
+  const hasImages = /<img|!\[/.test(content || '');
+  const hasLinks = /<a |https?:\/\/|\[.*\]\(/.test(content || '');
+
+  // Score calculation - mesma lógica do painel
+  let score = 0;
+  if (titleLength >= 50 && titleLength <= 60) score += 20;
+  else if (titleLength >= 40 && titleLength <= 70) score += 15;
+  else if (titleLength > 0) score += 5;
+
+  if (linhaFinaLength >= 150 && linhaFinaLength <= 160) score += 20;
+  else if (linhaFinaLength >= 120 && linhaFinaLength <= 180) score += 15;
+  else if (linhaFinaLength >= 80) score += 10;
+  else if (linhaFinaLength > 0) score += 5;
+
+  if (wordCount >= 800) score += 20;
+  else if (wordCount >= 600) score += 15;
+  else if (wordCount >= 400) score += 10;
+  else if (wordCount >= 200) score += 5;
+
+  if (readability.level === 'success') score += 15;
+  else if (readability.level === 'warning') score += 8;
+
+  if (keywords.some(k => k.inTitle)) score += 10;
+  else if (keywords.length > 0) score += 5;
+
+  if (hasImages) score += 5;
+  if (hasLinks) score += 5;
+  if (tags?.length >= 3) score += 5;
+
+  return score;
 };
 
 export default SEOAnalyzerPanel;

@@ -31,7 +31,7 @@ import {
 } from 'lucide-react';
 import { mockTones, mockPersonas } from '../data/mockData';
 import Tooltip from '../components/ui/Tooltip';
-import { SEOAnalyzerPanel } from '../components/editor';
+import { SEOAnalyzerPanel, calculateSEOScore } from '../components/editor';
 
 // Tipos de matéria disponíveis
 const articleTypes = [
@@ -178,7 +178,11 @@ const CriarPostPage = () => {
   };
 
   const wordCount = content.split(/\s+/).filter(Boolean).length;
-  const seoScore = Math.min(100, Math.floor(wordCount / 5) + 30);
+
+  // Score SEO sincronizado com o painel SEO
+  const seoScore = useMemo(() => {
+    return calculateSEOScore({ title, linhaFina, content, tags });
+  }, [title, linhaFina, content, tags]);
 
   // Funções para gerenciar tags
   const handleAddTag = () => {

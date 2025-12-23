@@ -1,1 +1,1 @@
-export { default as SEOAnalyzerPanel } from './SEOAnalyzerPanel';
+export { default as SEOAnalyzerPanel, calculateSEOScore } from './SEOAnalyzerPanel';
