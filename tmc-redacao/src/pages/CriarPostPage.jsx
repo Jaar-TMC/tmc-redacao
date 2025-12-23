@@ -283,7 +283,7 @@ Com esse desempenho, o Brasil reafirma sua posição estratégica no cenário gl
             <span className="text-sm font-medium hidden sm:inline">Voltar</span>
           </button>
 
-          <div className="flex-1 max-w-2xl mx-4 md:mx-8">
+          <div className="flex-1 max-w-4xl mx-4 md:mx-6">
             {/* Título */}
             <div className="relative">
               <label htmlFor="post-title" className="sr-only">Título da postagem</label>
