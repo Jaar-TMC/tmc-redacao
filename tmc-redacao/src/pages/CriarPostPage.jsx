@@ -31,6 +31,7 @@ import {
 } from 'lucide-react';
 import { mockTones, mockPersonas } from '../data/mockData';
 import Tooltip from '../components/ui/Tooltip';
+import { SEOAnalyzerPanel } from '../components/editor';
 
 // Tipos de matéria disponíveis
 const articleTypes = [
@@ -79,6 +80,9 @@ const CriarPostPage = () => {
   const [tags, setTags] = useState([]);
   const [newTagInput, setNewTagInput] = useState('');
   const [isGeneratingTags, setIsGeneratingTags] = useState(false);
+
+  // Estado para controlar a aba ativa do painel lateral (assistente ou seo)
+  const [activeSidebarTab, setActiveSidebarTab] = useState('assistente');
 
   // Mensagem inicial baseada no contexto do tema
   const getInitialMessages = () => {
@@ -671,91 +675,139 @@ const CriarPostPage = () => {
           </div>
         </div>
 
-        {/* AI Chat Sidebar - Hidden on mobile, show as modal */}
+        {/* Sidebar com Abas - Hidden on mobile, show as modal */}
         <div className="hidden lg:flex lg:w-96 bg-white flex-col border-l border-light-gray">
-          {/* Chat Header */}
-          <div className="px-4 py-3 border-b border-light-gray flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <div className="w-8 h-8 bg-tmc-orange rounded-lg flex items-center justify-center">
-                <Bot size={18} className="text-white" />
-              </div>
-              <span className="font-semibold text-dark-gray">Assistente de redação</span>
-            </div>
-            <Tooltip content="Limpar histórico do chat" position="left">
-              <button className="p-2 hover:bg-off-white rounded-lg transition-colors" aria-label="Limpar histórico do chat">
-                <Trash2 size={16} className="text-medium-gray" />
-              </button>
-            </Tooltip>
+          {/* Tabs Header */}
+          <div className="flex border-b border-light-gray">
+            <button
+              onClick={() => setActiveSidebarTab('assistente')}
+              className={`flex-1 flex items-center justify-center gap-2 px-4 py-3 text-sm font-medium transition-colors ${
+                activeSidebarTab === 'assistente'
+                  ? 'text-tmc-orange border-b-2 border-tmc-orange bg-tmc-orange/5'
+                  : 'text-medium-gray hover:text-dark-gray hover:bg-off-white'
+              }`}
+            >
+              <Bot size={16} />
+              <span>Assistente</span>
+            </button>
+            <button
+              onClick={() => setActiveSidebarTab('seo')}
+              className={`flex-1 flex items-center justify-center gap-2 px-4 py-3 text-sm font-medium transition-colors ${
+                activeSidebarTab === 'seo'
+                  ? 'text-tmc-orange border-b-2 border-tmc-orange bg-tmc-orange/5'
+                  : 'text-medium-gray hover:text-dark-gray hover:bg-off-white'
+              }`}
+            >
+              <BarChart3 size={16} />
+              <span>SEO</span>
+            </button>
           </div>
 
-          {/* Messages */}
-          <div className="flex-1 overflow-y-auto p-4 space-y-4">
-            {chatMessages.map((message) => (
-              <div
-                key={message.id}
-                className={`flex ${message.type === 'user' ? 'justify-end' : 'justify-start'}`}
-              >
-                <div
-                  className={`max-w-[85%] rounded-xl px-4 py-2.5 ${
-                    message.type === 'user'
-                      ? 'bg-tmc-orange text-white rounded-br-none'
-                      : 'bg-off-white text-dark-gray rounded-bl-none'
-                  }`}
-                >
-                  <p className="text-sm">{message.content}</p>
-                  {message.type === 'ai' && (
-                    <button className="mt-2 text-xs text-tmc-orange hover:underline">
-                      Inserir no texto
+          {/* Conteúdo do Assistente */}
+          {activeSidebarTab === 'assistente' && (
+            <>
+              {/* Chat Header */}
+              <div className="px-4 py-3 border-b border-light-gray flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <div className="w-8 h-8 bg-tmc-orange rounded-lg flex items-center justify-center">
+                    <Bot size={18} className="text-white" />
+                  </div>
+                  <span className="font-semibold text-dark-gray">Assistente de redação</span>
+                </div>
+                <Tooltip content="Limpar histórico do chat" position="left">
+                  <button className="p-2 hover:bg-off-white rounded-lg transition-colors" aria-label="Limpar histórico do chat">
+                    <Trash2 size={16} className="text-medium-gray" />
+                  </button>
+                </Tooltip>
+              </div>
+
+              {/* Messages */}
+              <div className="flex-1 overflow-y-auto p-4 space-y-4">
+                {chatMessages.map((message) => (
+                  <div
+                    key={message.id}
+                    className={`flex ${message.type === 'user' ? 'justify-end' : 'justify-start'}`}
+                  >
+                    <div
+                      className={`max-w-[85%] rounded-xl px-4 py-2.5 ${
+                        message.type === 'user'
+                          ? 'bg-tmc-orange text-white rounded-br-none'
+                          : 'bg-off-white text-dark-gray rounded-bl-none'
+                      }`}
+                    >
+                      <p className="text-sm">{message.content}</p>
+                      {message.type === 'ai' && (
+                        <button className="mt-2 text-xs text-tmc-orange hover:underline">
+                          Inserir no texto
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              {/* Quick Suggestions */}
+              <div className="px-4 py-2 border-t border-light-gray">
+                <div className="flex flex-wrap gap-2">
+                  {quickSuggestions.map((suggestion) => (
+                    <button
+                      key={suggestion}
+                      onClick={() => handleQuickSuggestion(suggestion)}
+                      className="px-3 py-1 bg-off-white text-medium-gray text-xs rounded-full hover:bg-light-gray transition-colors"
+                    >
+                      {suggestion}
                     </button>
-                  )}
+                  ))}
                 </div>
               </div>
-            ))}
-          </div>
 
-          {/* Quick Suggestions */}
-          <div className="px-4 py-2 border-t border-light-gray">
-            <div className="flex flex-wrap gap-2">
-              {quickSuggestions.map((suggestion) => (
-                <button
-                  key={suggestion}
-                  onClick={() => handleQuickSuggestion(suggestion)}
-                  className="px-3 py-1 bg-off-white text-medium-gray text-xs rounded-full hover:bg-light-gray transition-colors"
-                >
-                  {suggestion}
-                </button>
-              ))}
-            </div>
-          </div>
+              {/* Chat Input */}
+              <div className="p-4 border-t border-light-gray">
+                <div className="flex items-center gap-2">
+                  <label htmlFor="chat-input" className="sr-only">Mensagem para o assistente de IA</label>
+                  <input
+                    id="chat-input"
+                    type="text"
+                    placeholder="Ex: como melhorar a introdução?"
+                    value={chatInput}
+                    onChange={(e) => setChatInput(e.target.value)}
+                    onKeyDown={(e) => e.key === 'Enter' && handleSendMessage()}
+                    className="flex-1 px-4 py-2.5 bg-off-white border border-light-gray rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-tmc-orange/50 focus:border-tmc-orange"
+                  />
+                  <Tooltip content="Enviar mensagem" shortcut="Enter" position="top">
+                    <button
+                      onClick={handleSendMessage}
+                      disabled={!chatInput.trim()}
+                      className="p-2.5 bg-tmc-orange text-white rounded-lg hover:bg-tmc-orange/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                      aria-label="Enviar mensagem"
+                    >
+                      <Send size={18} />
+                    </button>
+                  </Tooltip>
+                </div>
+                <p className="text-xs text-medium-gray mt-2 text-center">
+                  Pressione Enter para enviar
+                </p>
+              </div>
+            </>
+          )}
 
-          {/* Chat Input */}
-          <div className="p-4 border-t border-light-gray">
-            <div className="flex items-center gap-2">
-              <label htmlFor="chat-input" className="sr-only">Mensagem para o assistente de IA</label>
-              <input
-                id="chat-input"
-                type="text"
-                placeholder="Ex: como melhorar a introdução?"
-                value={chatInput}
-                onChange={(e) => setChatInput(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && handleSendMessage()}
-                className="flex-1 px-4 py-2.5 bg-off-white border border-light-gray rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-tmc-orange/50 focus:border-tmc-orange"
+          {/* Conteúdo do SEO Analyzer */}
+          {activeSidebarTab === 'seo' && (
+            <div className="flex-1 overflow-hidden p-4">
+              <SEOAnalyzerPanel
+                title={title}
+                linhaFina={linhaFina}
+                content={content}
+                tags={tags}
+                onOptimizeWithAI={() => {
+                  // Mudar para aba do assistente e enviar sugestão
+                  setActiveSidebarTab('assistente');
+                  setChatInput('Analise meu texto e sugira melhorias para SEO');
+                }}
               />
-              <Tooltip content="Enviar mensagem" shortcut="Enter" position="top">
-                <button
-                  onClick={handleSendMessage}
-                  disabled={!chatInput.trim()}
-                  className="p-2.5 bg-tmc-orange text-white rounded-lg hover:bg-tmc-orange/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                  aria-label="Enviar mensagem"
-                >
-                  <Send size={18} />
-                </button>
-              </Tooltip>
             </div>
-            <p className="text-xs text-medium-gray mt-2 text-center">
-              Pressione Enter para enviar
-            </p>
-          </div>
+          )}
         </div>
       </div>
 
