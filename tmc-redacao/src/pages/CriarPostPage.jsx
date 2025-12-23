@@ -65,9 +65,31 @@ const CriarPostPage = () => {
     };
   }, [searchParams]);
 
-  const [title, setTitle] = useState('');
-  const [linhaFina, setLinhaFina] = useState('');
-  const [content, setContent] = useState('');
+  // Mock data para demonstração - matéria bem formatada com boa nota SEO
+  const mockArticle = {
+    title: 'Brasil bate recorde histórico em exportações de soja em 2024',
+    linhaFina: 'País consolida liderança mundial no mercado de commodities agrícolas com aumento de 15% nas vendas externas e perspectivas otimistas para o segundo semestre',
+    content: `O Brasil alcançou um marco histórico nas exportações de soja em 2024, consolidando sua posição como principal fornecedor global do grão. Os dados divulgados pelo Ministério da Agricultura mostram que o país exportou mais de 100 milhões de toneladas no primeiro semestre, um aumento de 15% em relação ao mesmo período do ano anterior.
+
+A demanda aquecida da China, principal compradora da soja brasileira, foi um dos fatores determinantes para esse resultado expressivo. O país asiático adquiriu aproximadamente 70% de toda a produção exportada pelo Brasil, fortalecendo ainda mais as relações comerciais entre as duas nações.
+
+Especialistas do setor apontam que a combinação de condições climáticas favoráveis nas principais regiões produtoras, como Mato Grosso, Goiás e Paraná, aliada aos investimentos em tecnologia agrícola, foram fundamentais para o aumento da produtividade. A safra 2023/2024 registrou média de 3,5 toneladas por hectare, superando as expectativas iniciais dos analistas.
+
+O impacto econômico dessas exportações é significativo para a balança comercial brasileira. O agronegócio continua sendo o principal pilar das exportações nacionais, representando mais de 40% do total exportado pelo país. Os recursos gerados beneficiam não apenas o setor agrícola, mas toda a cadeia produtiva, incluindo transporte, logística e serviços.
+
+Para o segundo semestre, as projeções indicam manutenção do ritmo positivo. Analistas estimam que o Brasil pode encerrar 2024 com exportações superiores a 150 milhões de toneladas, estabelecendo um novo recorde absoluto na história do país.
+
+A diversificação dos mercados compradores também contribui para essa perspectiva otimista. Além da China, países do Oriente Médio e da África têm aumentado significativamente suas compras de soja brasileira, reduzindo a dependência de um único mercado.
+
+O governo federal anunciou medidas para apoiar os produtores rurais, incluindo linhas de crédito com juros reduzidos e programas de incentivo à sustentabilidade. A meta é garantir que o crescimento do setor ocorra de forma responsável, respeitando os compromissos ambientais assumidos internacionalmente.
+
+Com esse desempenho, o Brasil reafirma sua posição estratégica no cenário global de commodities e projeta um futuro promissor para o agronegócio nacional.`,
+    tags: ['Agronegócio', 'Exportações', 'Soja', 'Economia', 'Brasil']
+  };
+
+  const [title, setTitle] = useState(mockArticle.title);
+  const [linhaFina, setLinhaFina] = useState(mockArticle.linhaFina);
+  const [content, setContent] = useState(mockArticle.content);
   const [selectedTone, setSelectedTone] = useState(null);
   const [selectedPersona, setSelectedPersona] = useState(null);
   const [selectedArticleType, setSelectedArticleType] = useState(null);
@@ -77,7 +99,7 @@ const CriarPostPage = () => {
   const [isPublishing, setIsPublishing] = useState(false);
 
   // Estado para tópicos/tags
-  const [tags, setTags] = useState([]);
+  const [tags, setTags] = useState(mockArticle.tags);
   const [newTagInput, setNewTagInput] = useState('');
   const [isGeneratingTags, setIsGeneratingTags] = useState(false);
 
