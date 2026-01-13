@@ -19,6 +19,7 @@ from .deduplication import (
     is_similar_title,
     get_article_fingerprint,
 )
+from .llm_service import LLMService, get_llm_service
 
 __all__ = [
     'RSSParser',
@@ -34,4 +35,6 @@ __all__ = [
     'deduplicate_with_db',
     'is_similar_title',
     'get_article_fingerprint',
+    'LLMService',
+    'get_llm_service',
 ]

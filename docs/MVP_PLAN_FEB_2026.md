@@ -8,6 +8,34 @@
 
 ---
 
+## Implementation Progress Tracker
+
+**Last Updated:** 2026-01-13
+
+### Completed Tasks
+| Task | File(s) | Date | Notes |
+|------|---------|------|-------|
+| Tag mockup version | Git tag `v0.0.0-mockup` | 2026-01-13 | Preserves full mockup state |
+| Create feature flags | `src/config/featureFlags.js` | 2026-01-13 | Controls MVP/post-MVP visibility |
+| Hide non-MVP features | `pages/criar/index.jsx`, `TrendsSidebar.jsx` | 2026-01-13 | Video, Google Trends, Twitter hidden |
+| Create API service layer | `src/services/api.js` | 2026-01-13 | Frontend API wrapper with error handling |
+| Create LLM service | `services/llm_service.py` | 2026-01-13 | Claude Sonnet 4.5 with personas/tones |
+| Create generation API | `functions/generation_api.py` | 2026-01-13 | /generate, /extract-topics, /generate-tags |
+
+### In Progress
+| Task | File(s) | Started | Notes |
+|------|---------|---------|-------|
+| Connect TextoBaseFeed to RSS API | `TextoBaseFeed.jsx` | 2026-01-13 | Replace mock data with real API |
+
+### Pending
+| Task | Priority | Estimated Hours |
+|------|----------|-----------------|
+| Connect RevisarPage to generation API | CRITICAL | 3h |
+| Add Copy to Clipboard button | HIGH | 1h |
+| Deploy Azure Functions | HIGH | 2h |
+
+---
+
 ## Current State Analysis
 
 ### What's Already Done (90%+ Complete)

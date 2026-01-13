@@ -47,7 +47,8 @@
       "Bash(powershell -Command \"Invoke-RestMethod -Uri ''http://localhost:7071/api/categories'' -Method GET | ConvertTo-Json\")",
       "Bash(az account show:*)",
       "Bash(az group list:*)",
-      "Bash(ls:*)"
+      "Bash(ls:*)",
+      "Bash(git commit:*)"
     ],
     "deny": [],
     "ask": []

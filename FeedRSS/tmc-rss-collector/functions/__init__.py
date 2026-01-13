@@ -10,6 +10,11 @@ from .sources_api import (
 )
 from .rss_collector import rss_collector_handler, collect_single_source_handler
 from .health import health_check_handler, stats_handler
+from .generation_api import (
+    generate_article_handler,
+    extract_topics_handler,
+    generate_tags_handler
+)
 
 __all__ = [
     # Articles API
@@ -29,4 +34,8 @@ __all__ = [
     # Health & Stats
     'health_check_handler',
     'stats_handler',
+    # AI Generation API
+    'generate_article_handler',
+    'extract_topics_handler',
+    'generate_tags_handler',
 ]

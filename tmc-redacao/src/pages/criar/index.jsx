@@ -8,6 +8,7 @@ import TemaSelector from '../../components/criar/TemaSelector';
 import FeedSelector from '../../components/criar/FeedSelector';
 import TipBox from '../../components/ui/TipBox';
 import { useCriar } from '../../context';
+import { FEATURES } from '../../config/featureFlags';
 
 /**
  * Página de Seleção de Fonte (Etapa 1)
@@ -160,22 +161,7 @@ const CriarMateria = () => {
           <>
             {/* Grid de Source Cards */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6 max-w-3xl mx-auto mb-8">
-              <SourceCard
-                icon={<Video size={28} strokeWidth={1.5} />}
-                title="TRANSCRIÇÃO DE VÍDEO"
-                description="Extraia de um vídeo do YouTube"
-                selected={selectedSource === 'video'}
-                onClick={() => handleSourceClick('video')}
-              />
-
-              <SourceCard
-                icon={<Flame size={28} strokeWidth={1.5} />}
-                title="TEMA EM ALTA"
-                description="Escolha entre os assuntos do momento"
-                selected={selectedSource === 'tema'}
-                onClick={() => handleSourceClick('tema')}
-              />
-
+              {/* MVP: RSS Feed - Primary source */}
               <SourceCard
                 icon={<Newspaper size={28} strokeWidth={1.5} />}
                 title="MATÉRIAS DO FEED"
@@ -184,6 +170,7 @@ const CriarMateria = () => {
                 onClick={() => handleSourceClick('feed')}
               />
 
+              {/* MVP: Link da Web - Manual paste */}
               <SourceCard
                 icon={<Globe size={28} strokeWidth={1.5} />}
                 title="LINK DA WEB"
@@ -191,6 +178,28 @@ const CriarMateria = () => {
                 selected={selectedSource === 'web'}
                 onClick={() => handleSourceClick('web')}
               />
+
+              {/* Post-MVP: Video Transcription */}
+              {FEATURES.VIDEO_TRANSCRIPTION && (
+                <SourceCard
+                  icon={<Video size={28} strokeWidth={1.5} />}
+                  title="TRANSCRIÇÃO DE VÍDEO"
+                  description="Extraia de um vídeo do YouTube"
+                  selected={selectedSource === 'video'}
+                  onClick={() => handleSourceClick('video')}
+                />
+              )}
+
+              {/* Post-MVP: Trending Themes (requires Google Trends) */}
+              {FEATURES.GOOGLE_TRENDS && (
+                <SourceCard
+                  icon={<Flame size={28} strokeWidth={1.5} />}
+                  title="TEMA EM ALTA"
+                  description="Escolha entre os assuntos do momento"
+                  selected={selectedSource === 'tema'}
+                  onClick={() => handleSourceClick('tema')}
+                />
+              )}
             </div>
 
             {/* Dica */}

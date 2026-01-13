@@ -154,6 +154,70 @@ async def collect_source(req: func.HttpRequest) -> func.HttpResponse:
 
 
 # ========================================
+# HTTP TRIGGERS - AI GENERATION API
+# ========================================
+
+@app.route(route="generate", methods=["POST"])
+async def generate_article(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    POST /api/generate - Gera matéria usando IA.
+
+    Body:
+        {
+            "texto_base": "Texto fonte para reescrita...",
+            "persona": "imparcial|especialista|colunista|influencer",
+            "tom": "formal|informal|tecnico|persuasivo|neutro",
+            "tipo_materia": "destaque|coluna|servico|analise|reportagem",
+            "orientacao_lide": "Orientação para o lide (opcional)",
+            "citacoes": ["Citação 1", "Citação 2"],
+            "contexto": "Contexto adicional (opcional)",
+            "creditos": "Créditos da fonte (opcional)",
+            "tags": ["tag1", "tag2"]
+        }
+
+    Returns:
+        {
+            "titulo": "Título gerado",
+            "linha_fina": "Linha fina gerada",
+            "conteudo": "Corpo da matéria (mín 2000 chars)",
+            "tags_sugeridas": ["tag1", "tag2", "tag3"]
+        }
+    """
+    from functions.generation_api import generate_article_handler
+    return await generate_article_handler(req)
+
+
+@app.route(route="extract-topics", methods=["POST"])
+async def extract_topics(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    POST /api/extract-topics - Extrai tópicos do texto usando IA.
+
+    Body:
+        {"texto": "Texto para análise..."}
+
+    Returns:
+        {"topics": [{"type": "fato", "content": "..."}, ...]}
+    """
+    from functions.generation_api import extract_topics_handler
+    return await extract_topics_handler(req)
+
+
+@app.route(route="generate-tags", methods=["POST"])
+async def generate_tags(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    POST /api/generate-tags - Gera tags para conteúdo usando IA.
+
+    Body:
+        {"texto": "Conteúdo para análise...", "max_tags": 10}
+
+    Returns:
+        {"tags": ["tag1", "tag2", "tag3", ...]}
+    """
+    from functions.generation_api import generate_tags_handler
+    return await generate_tags_handler(req)
+
+
+# ========================================
 # STARTUP
 # ========================================
 
@@ -171,3 +235,6 @@ logger.info("  - POST /api/sources")
 logger.info("  - PUT  /api/sources/{id}")
 logger.info("  - DELETE /api/sources/{id}")
 logger.info("  - POST /api/sources/{id}/collect")
+logger.info("  - POST /api/generate")
+logger.info("  - POST /api/extract-topics")
+logger.info("  - POST /api/generate-tags")

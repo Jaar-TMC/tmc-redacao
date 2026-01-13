@@ -5,6 +5,7 @@ import { useFilters } from '../../context';
 import Skeleton from '../ui/Skeleton';
 import EmptyState from '../ui/EmptyState';
 import PropTypes from 'prop-types';
+import { FEATURES } from '../../config/featureFlags';
 
 /**
  * TrendsSidebar Component
@@ -238,100 +239,106 @@ const TrendsSidebar = ({ isOpen, onClose }) => {
             )}
           </section>
 
-          {/* Google Trends */}
-          <section aria-labelledby="google-trends-heading" className="px-4">
-            <div className="flex items-center gap-2 mb-3">
-              <TrendingUp size={18} className="text-tmc-orange" aria-hidden="true" />
-              <h3 id="google-trends-heading" className="font-semibold text-dark-gray text-sm">Google Trends</h3>
-            </div>
-            {isLoading ? (
-              <div className="space-y-2">
-                {[...Array(5)].map((_, i) => (
-                  <div key={i} className="flex items-center gap-3 p-2">
-                    <Skeleton variant="circle" className="w-6 h-6 flex-shrink-0" />
-                    <div className="flex-1 space-y-2">
-                      <Skeleton className="h-3 w-3/4" />
-                      <Skeleton className="h-2 w-1/2" />
-                    </div>
-                    <Skeleton className="h-4 w-12" />
-                  </div>
-                ))}
+          {/* Google Trends - Post-MVP */}
+          {FEATURES.GOOGLE_TRENDS && (
+            <section aria-labelledby="google-trends-heading" className="px-4">
+              <div className="flex items-center gap-2 mb-3">
+                <TrendingUp size={18} className="text-tmc-orange" aria-hidden="true" />
+                <h3 id="google-trends-heading" className="font-semibold text-dark-gray text-sm">Google Trends</h3>
               </div>
-            ) : googleTrends.length === 0 ? (
-              <EmptyState
-                icon={TrendingUp}
-                title="Nenhuma tendência"
-                description="Não há tendências do Google no momento."
-                className="py-6"
-              />
-            ) : (
-              <ul className="space-y-2">
-                {googleTrends.map((trend, index) => (
-                  <li
-                    key={trend.id}
-                    className="flex items-center gap-3 p-2 hover:bg-off-white rounded-lg cursor-pointer transition-colors group"
-                  >
-                    <span className="w-6 h-6 bg-tmc-orange/10 text-tmc-orange rounded-full flex items-center justify-center text-xs font-bold" aria-label={`Posição ${index + 1}`}>
-                      {index + 1}
-                    </span>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium text-dark-gray truncate group-hover:text-tmc-orange transition-colors">
-                        {trend.topic}
-                      </p>
-                      <p className="text-xs text-medium-gray">{trend.searches} buscas</p>
+              {isLoading ? (
+                <div className="space-y-2">
+                  {[...Array(5)].map((_, i) => (
+                    <div key={i} className="flex items-center gap-3 p-2">
+                      <Skeleton variant="circle" className="w-6 h-6 flex-shrink-0" />
+                      <div className="flex-1 space-y-2">
+                        <Skeleton className="h-3 w-3/4" />
+                        <Skeleton className="h-2 w-1/2" />
+                      </div>
+                      <Skeleton className="h-4 w-12" />
                     </div>
-                    <span className="text-xs font-semibold text-success bg-success/10 px-2 py-0.5 rounded" aria-label={`Crescimento de ${trend.growth}`}>
-                      {trend.growth}
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </section>
+                  ))}
+                </div>
+              ) : googleTrends.length === 0 ? (
+                <EmptyState
+                  icon={TrendingUp}
+                  title="Nenhuma tendência"
+                  description="Não há tendências do Google no momento."
+                  className="py-6"
+                />
+              ) : (
+                <ul className="space-y-2">
+                  {googleTrends.map((trend, index) => (
+                    <li
+                      key={trend.id}
+                      className="flex items-center gap-3 p-2 hover:bg-off-white rounded-lg cursor-pointer transition-colors group"
+                    >
+                      <span className="w-6 h-6 bg-tmc-orange/10 text-tmc-orange rounded-full flex items-center justify-center text-xs font-bold" aria-label={`Posição ${index + 1}`}>
+                        {index + 1}
+                      </span>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium text-dark-gray truncate group-hover:text-tmc-orange transition-colors">
+                          {trend.topic}
+                        </p>
+                        <p className="text-xs text-medium-gray">{trend.searches} buscas</p>
+                      </div>
+                      <span className="text-xs font-semibold text-success bg-success/10 px-2 py-0.5 rounded" aria-label={`Crescimento de ${trend.growth}`}>
+                        {trend.growth}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </section>
+          )}
 
-          {/* Divider */}
-          <div className="border-t border-light-gray mx-4" role="separator"></div>
+          {/* Divider - only show if we have sections above and below */}
+          {(FEATURES.GOOGLE_TRENDS && FEATURES.TWITTER_TRENDS) && (
+            <div className="border-t border-light-gray mx-4" role="separator"></div>
+          )}
 
-          {/* Twitter Trending */}
-          <section aria-labelledby="twitter-trends-heading" className="px-4">
-            <div className="flex items-center gap-2 mb-3">
-              <Twitter size={18} className="text-[#1DA1F2]" aria-hidden="true" />
-              <h3 id="twitter-trends-heading" className="font-semibold text-dark-gray text-sm">Twitter Trending</h3>
-            </div>
-            {isLoading ? (
-              <div className="space-y-2">
-                {[...Array(5)].map((_, i) => (
-                  <div key={i} className="flex items-center justify-between p-2">
-                    <Skeleton className="h-3 w-24" />
-                    <Skeleton className="h-4 w-12" />
-                  </div>
-                ))}
+          {/* Twitter Trending - Post-MVP */}
+          {FEATURES.TWITTER_TRENDS && (
+            <section aria-labelledby="twitter-trends-heading" className="px-4">
+              <div className="flex items-center gap-2 mb-3">
+                <Twitter size={18} className="text-[#1DA1F2]" aria-hidden="true" />
+                <h3 id="twitter-trends-heading" className="font-semibold text-dark-gray text-sm">Twitter Trending</h3>
               </div>
-            ) : twitterTrends.length === 0 ? (
-              <EmptyState
-                icon={Twitter}
-                title="Nenhuma tendência"
-                description="Não há trending topics do Twitter no momento."
-                className="py-6"
-              />
-            ) : (
-              <ul className="space-y-2">
-                {twitterTrends.map((trend) => (
-                  <li
-                    key={trend.id}
-                    className="flex items-center justify-between p-2 hover:bg-off-white rounded-lg cursor-pointer transition-colors group"
-                  >
-                    <span className="text-sm font-medium text-[#1DA1F2] group-hover:underline">
-                      {trend.hashtag}
-                    </span>
-                    <span className="text-xs text-medium-gray bg-off-white px-2 py-0.5 rounded" aria-label={`${trend.mentions} menções`}>
-                      {trend.mentions}
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </section>
+              {isLoading ? (
+                <div className="space-y-2">
+                  {[...Array(5)].map((_, i) => (
+                    <div key={i} className="flex items-center justify-between p-2">
+                      <Skeleton className="h-3 w-24" />
+                      <Skeleton className="h-4 w-12" />
+                    </div>
+                  ))}
+                </div>
+              ) : twitterTrends.length === 0 ? (
+                <EmptyState
+                  icon={Twitter}
+                  title="Nenhuma tendência"
+                  description="Não há trending topics do Twitter no momento."
+                  className="py-6"
+                />
+              ) : (
+                <ul className="space-y-2">
+                  {twitterTrends.map((trend) => (
+                    <li
+                      key={trend.id}
+                      className="flex items-center justify-between p-2 hover:bg-off-white rounded-lg cursor-pointer transition-colors group"
+                    >
+                      <span className="text-sm font-medium text-[#1DA1F2] group-hover:underline">
+                        {trend.hashtag}
+                      </span>
+                      <span className="text-xs text-medium-gray bg-off-white px-2 py-0.5 rounded" aria-label={`${trend.mentions} menções`}>
+                        {trend.mentions}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </section>
+          )}
 
         </div>
 
