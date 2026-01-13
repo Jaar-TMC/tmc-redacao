@@ -21,11 +21,12 @@
 | Create API service layer | `src/services/api.js` | 2026-01-13 | Frontend API wrapper with error handling |
 | Create LLM service | `services/llm_service.py` | 2026-01-13 | Claude Sonnet 4.5 with personas/tones |
 | Create generation API | `functions/generation_api.py` | 2026-01-13 | /generate, /extract-topics, /generate-tags |
+| Connect FeedSelector to API | `FeedSelector.jsx` | 2026-01-13 | Loading/error states, real data fetch |
 
 ### In Progress
 | Task | File(s) | Started | Notes |
 |------|---------|---------|-------|
-| Connect TextoBaseFeed to RSS API | `TextoBaseFeed.jsx` | 2026-01-13 | Replace mock data with real API |
+| Connect TextoBaseFeed to RSS API | `TextoBaseFeed.jsx` | 2026-01-13 | "Add more articles" feature needs API |
 
 ### Pending
 | Task | Priority | Estimated Hours |
@@ -33,6 +34,18 @@
 | Connect RevisarPage to generation API | CRITICAL | 3h |
 | Add Copy to Clipboard button | HIGH | 1h |
 | Deploy Azure Functions | HIGH | 2h |
+
+### How to Continue Development
+
+If session is cleared, use this prompt:
+```
+Continue developing the TMC Redação MVP.
+Read the plan file at: docs/MVP_PLAN_FEB_2026.md
+Follow the Implementation Progress Tracker at the top.
+Key files: api.js, featureFlags.js, llm_service.py, generation_api.py
+Tag v0.0.0-mockup preserves the mockup.
+Continue from where we left off.
+```
 
 ---
 

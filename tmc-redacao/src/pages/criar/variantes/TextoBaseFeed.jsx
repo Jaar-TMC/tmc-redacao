@@ -1,6 +1,6 @@
 import { useState, useCallback, useMemo, useEffect } from 'react';
 import PropTypes from 'prop-types';
-import { Plus, ExternalLink, FileText, List, AlertCircle, X } from 'lucide-react';
+import { Plus, ExternalLink, FileText, List, AlertCircle, X, RefreshCw } from 'lucide-react';
 import {
   SourceBadge,
   ContentStats,
@@ -8,7 +8,7 @@ import {
   ModeTabs,
   TopicCard
 } from '../../../components/criar';
-import { mockArticles } from '../../../data/mockData';
+import { getArticles } from '../../../services/api';
 
 /**
  * TextoBaseFeed - Variante da pagina Texto-Base para Materias do Feed
@@ -72,6 +72,8 @@ const TextoBaseFeed = ({
   const [showAddMore, setShowAddMore] = useState(false);
   const [availableArticles, setAvailableArticles] = useState([]);
   const [newSelections, setNewSelections] = useState(new Set());
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
+  const [loadMoreError, setLoadMoreError] = useState(null);
 
   // Inicializar quando matérias carregarem
   useEffect(() => {
@@ -86,14 +88,45 @@ const TextoBaseFeed = ({
     }
   }, [materias, activeMateria]);
 
-  // Carregar artigos disponíveis (excluindo já selecionados)
-  useEffect(() => {
+  // Carregar artigos disponíveis do API (excluindo já selecionados)
+  const loadAvailableArticles = useCallback(async () => {
     if (!fonte?.dados) return;
 
-    const selectedIds = new Set(fonte.dados.map(article => article.id));
-    const available = mockArticles.filter(article => !selectedIds.has(article.id));
-    setAvailableArticles(available);
+    setIsLoadingMore(true);
+    setLoadMoreError(null);
+
+    try {
+      const response = await getArticles({ limit: 50 });
+      const allArticles = (response?.articles || []).map(article => ({
+        id: article.id,
+        title: article.title,
+        preview: article.summary || article.content?.substring(0, 200) || '',
+        content: article.content,
+        category: article.category || 'Geral',
+        source: article.source_name || article.source,
+        url: article.link || article.url,
+        favicon: article.favicon_url || `https://www.google.com/s2/favicons?domain=${new URL(article.link || article.url || 'https://example.com').hostname}`,
+        publishedAt: article.published_at ? new Date(article.published_at) : new Date(),
+        tags: article.tags || []
+      }));
+
+      const selectedIds = new Set(fonte.dados.map(article => article.id));
+      const available = allArticles.filter(article => !selectedIds.has(article.id));
+      setAvailableArticles(available);
+    } catch (err) {
+      console.error('Error loading available articles:', err);
+      setLoadMoreError(err.message || 'Erro ao carregar matérias');
+    } finally {
+      setIsLoadingMore(false);
+    }
   }, [fonte?.dados]);
+
+  // Carregar artigos quando showAddMore for ativado
+  useEffect(() => {
+    if (showAddMore && availableArticles.length === 0 && !isLoadingMore) {
+      loadAvailableArticles();
+    }
+  }, [showAddMore, availableArticles.length, isLoadingMore, loadAvailableArticles]);
 
   // Materia ativa
   const currentMateria = useMemo(() => {
@@ -265,45 +298,72 @@ const TextoBaseFeed = ({
                     <X size={16} />
                   </button>
                 </div>
-                <div className="space-y-2 max-h-48 overflow-y-auto">
-                  {availableArticles.map(article => (
-                    <label key={article.id} className={`flex items-center gap-3 p-2 rounded-lg cursor-pointer ${newSelections.has(article.id) ? 'bg-orange-50' : 'hover:bg-off-white'}`}>
-                      <input
-                        type="checkbox"
-                        checked={newSelections.has(article.id)}
-                        onChange={() => {
-                          const newSet = new Set(newSelections);
-                          if (newSet.has(article.id)) newSet.delete(article.id);
-                          else newSet.add(article.id);
-                          setNewSelections(newSet);
-                        }}
-                        className="w-4 h-4 text-tmc-orange rounded"
-                      />
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm font-medium text-dark-gray line-clamp-1">{article.title}</p>
-                        <p className="text-xs text-medium-gray">{article.source}</p>
-                      </div>
-                    </label>
-                  ))}
-                </div>
-                {availableArticles.length === 0 && (
-                  <p className="text-sm text-medium-gray text-center py-4">Não há mais matérias disponíveis</p>
+
+                {/* Loading state */}
+                {isLoadingMore && (
+                  <div className="flex items-center justify-center py-6">
+                    <RefreshCw size={20} className="text-tmc-orange animate-spin mr-2" />
+                    <span className="text-sm text-medium-gray">Carregando...</span>
+                  </div>
                 )}
-                <button
-                  onClick={() => {
-                    // Adicionar matérias selecionadas
-                    const newArticles = availableArticles.filter(a => newSelections.has(a.id));
-                    if (onDataChange && newArticles.length > 0) {
-                      onDataChange({ type: 'addArticles', articles: newArticles });
-                    }
-                    setShowAddMore(false);
-                    setNewSelections(new Set());
-                  }}
-                  disabled={newSelections.size === 0}
-                  className="w-full mt-3 py-2 bg-tmc-orange text-white rounded-lg disabled:opacity-50 disabled:cursor-not-allowed text-sm font-medium"
-                >
-                  Adicionar {newSelections.size} matéria(s)
-                </button>
+
+                {/* Error state */}
+                {loadMoreError && !isLoadingMore && (
+                  <div className="text-center py-4">
+                    <p className="text-sm text-red-500 mb-2">{loadMoreError}</p>
+                    <button
+                      onClick={loadAvailableArticles}
+                      className="text-sm text-tmc-orange hover:underline"
+                    >
+                      Tentar novamente
+                    </button>
+                  </div>
+                )}
+
+                {/* Articles list */}
+                {!isLoadingMore && !loadMoreError && (
+                  <>
+                    <div className="space-y-2 max-h-48 overflow-y-auto">
+                      {availableArticles.map(article => (
+                        <label key={article.id} className={`flex items-center gap-3 p-2 rounded-lg cursor-pointer ${newSelections.has(article.id) ? 'bg-orange-50' : 'hover:bg-off-white'}`}>
+                          <input
+                            type="checkbox"
+                            checked={newSelections.has(article.id)}
+                            onChange={() => {
+                              const newSet = new Set(newSelections);
+                              if (newSet.has(article.id)) newSet.delete(article.id);
+                              else newSet.add(article.id);
+                              setNewSelections(newSet);
+                            }}
+                            className="w-4 h-4 text-tmc-orange rounded"
+                          />
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-medium text-dark-gray line-clamp-1">{article.title}</p>
+                            <p className="text-xs text-medium-gray">{article.source}</p>
+                          </div>
+                        </label>
+                      ))}
+                    </div>
+                    {availableArticles.length === 0 && (
+                      <p className="text-sm text-medium-gray text-center py-4">Não há mais matérias disponíveis</p>
+                    )}
+                    <button
+                      onClick={() => {
+                        // Adicionar matérias selecionadas
+                        const newArticles = availableArticles.filter(a => newSelections.has(a.id));
+                        if (onDataChange && newArticles.length > 0) {
+                          onDataChange({ type: 'addArticles', articles: newArticles });
+                        }
+                        setShowAddMore(false);
+                        setNewSelections(new Set());
+                      }}
+                      disabled={newSelections.size === 0}
+                      className="w-full mt-3 py-2 bg-tmc-orange text-white rounded-lg disabled:opacity-50 disabled:cursor-not-allowed text-sm font-medium"
+                    >
+                      Adicionar {newSelections.size} matéria(s)
+                    </button>
+                  </>
+                )}
               </div>
             ) : (
               <button
