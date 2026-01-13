@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(cd C:UsersenzocOneDrive - jaarconsult.com.brJaarConsult - Oficial - TMCProjeto Ferramenta TMCFeedRSStmc-rss-collector)",
+      "Bash(cat:*)",
+      "Bash(dir:*)"
+    ]
+  }
+}

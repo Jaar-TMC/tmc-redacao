@@ -412,21 +412,333 @@ Data Lake + Banco Operacional
 
 **Situação Atual:** Apenas dados mockados (~500KB)
 
-**Projeção para Produção (Ano 1):**
+---
 
-| Tipo de Dado | Volume Estimado/Mês | Volume Ano 1 | Observação |
-|--------------|---------------------|--------------|------------|
-| Artigos coletados (RSS) | ~10.000 artigos/dia* | ~500 MB max | *Janela de 24h apenas |
-| Tendências | ~50 MB | ~600 MB | Histórico permanente |
-| Transcrições | ~100 MB | ~1.2 GB | Permanente |
-| Artigos gerados | ~20 MB | ~240 MB | Permanente |
-| Logs/Analytics | ~200 MB | ~2.4 GB | Permanente |
-| **TOTAL PERMANENTE** | **~370 MB/mês** | **~4-5 GB** | Sem acúmulo de RSS |
+## VOLUMETRIA ESTIMADA
 
-> **Nota sobre RSS:** Como matérias de RSS são descartadas após 24h, o volume máximo em disco é fixo (~500 MB), não acumulativo. Isso reduz significativamente as necessidades de armazenamento.
+### Premissas do Cenário Base
 
-**Projeção Ano 3 (com crescimento):**
-- Estimativa: 20-40 GB (dados permanentes apenas, sem acúmulo de RSS)
+| Parâmetro | Valor Estimado |
+|-----------|----------------|
+| Usuários ativos/mês | ~100 |
+| Matérias geradas/mês | ~3.500 |
+| Fontes RSS monitoradas | ~75 |
+| Transcrições de vídeo/mês | ~1.000 |
+| Tópicos de tendências monitorados | ~50 (coleta 4x/dia) |
+| Trending topics Twitter | ~30 (coleta 6x/dia) |
+| Imagens por matéria | ~1.5 (média) |
+| PDFs complementares/mês | ~1.000 |
+
+> **Política de retenção:** RSS (24h) e PDFs (30 dias) são temporários - usados apenas na produção da matéria.
+
+---
+
+### TABELA RESUMO - VOLUMETRIA ESTIMADA
+
+| Tipo de Dado | Volume/mês | Volume/ano | Linhas/mês | Linhas/ano |
+|--------------|------------|------------|------------|------------|
+| **Armazenamento permanente** | | | | |
+| Imagens de matérias | 2.6 GB | 31 GB | 5.250 | 63.000 |
+| Matérias criadas + versões | 157 MB | 1.9 GB | 14.000 | 168.000 |
+| Transcrições de vídeo | 35 MB | 420 MB | 1.000 | 12.000 |
+| Tendências (Google + Twitter) | 33 MB | 400 MB | 11.400 | 137.000 |
+| Logs de geração IA | 9 MB | 110 MB | 17.500 | 210.000 |
+| **Subtotal permanente** | **~2.8 GB** | **~34 GB** | **~49.000** | **~590.000** |
+| | | | | |
+| **Armazenamento temporário** | | | | |
+| PDFs complementares (30 dias) | 2 GB | 2 GB* | 1.000* | 1.000* |
+| RSS (cache 24h) | 31 MB | 31 MB* | 6.000* | 6.000* |
+| **Subtotal temporário** | **~2 GB** | **~2 GB** | **~7.000*** | **~7.000*** |
+| | | | | |
+| **TOTAL ARMAZENAMENTO** | **~4.8 GB** | **~36 GB** | **~49.000** | **~590.000** |
+
+> *Dados temporários não acumulam - valores representam o máximo em qualquer momento.
+
+### CONSUMO DE SERVIÇOS
+
+| Serviço | Consumo/mês | Consumo/ano | Observação |
+|---------|-------------|-------------|------------|
+| IA Generativa (tokens) | 192M | 2.3B | ~55K tokens/matéria |
+| Speech-to-Text (minutos) | 10.000 | 120.000 | Transcrição de vídeos |
+| Invocações serverless | 15.000 | 180.000 | Coletores RSS/Trends |
+| Mensagens em filas | 100.000 | 1.2M | Processamento assíncrono |
+
+**Detalhamento do consumo de IA por matéria (~55.000 tokens):**
+- Geração principal (título, linha fina, corpo, tags, SEO): ~21.000
+- Chat do assistente (~12 interações): ~14.400
+- Funcionalidades do editor (reescritas, melhorias, formatação): ~15.000
+- Processamento de materiais (PDFs, links, transcrições): ~4.500
+
+### Projeção de Crescimento (5 anos)
+
+| Ano | Armazenamento | Linhas/registros | Tokens IA | Speech-to-Text | Usuários |
+|-----|---------------|------------------|-----------|----------------|----------|
+| Ano 1 | ~36 GB | ~590K | ~2.3B | ~120.000 min | ~100 |
+| Ano 2 | ~54 GB | ~885K | ~3.0B | ~150.000 min | ~150 |
+| Ano 3 | ~73 GB | ~1.2M | ~3.6B | ~180.000 min | ~200 |
+| Ano 4 | ~95 GB | ~1.5M | ~4.3B | ~210.000 min | ~260 |
+| Ano 5 | ~120 GB | ~1.9M | ~5.0B | ~240.000 min | ~325 |
+
+> **Nota:** Projeção conservadora. PDFs e RSS são temporários e não acumulam.
+
+---
+
+## METODOLOGIA DE CÁLCULO (Detalhamento)
+
+Esta seção detalha como cada estimativa foi calculada, permitindo validação e ajuste conforme premissas mudem.
+
+---
+
+### 1. VOLUMETRIA DE COLETA RSS
+
+**Estrutura de dados por artigo coletado:**
+```json
+{
+  "title": "~100 caracteres",
+  "description": "~500 caracteres",
+  "content": "~4.000 caracteres (texto completo)",
+  "url": "~150 caracteres",
+  "source": "~50 caracteres",
+  "category": "~30 caracteres",
+  "publishedAt": "24 caracteres (ISO)",
+  "author": "~50 caracteres",
+  "tags": "~100 caracteres (array)",
+  "metadata": "~200 caracteres"
+}
+// Total médio: ~5.2 KB por artigo
+```
+
+**Cálculo de volume diário:**
+- Portais de notícia publicam **~50-200 artigos/dia** cada
+- RSS típico retorna **últimos 20-50 artigos** por request
+- Frequência média de coleta: **1 hora** (24 requests/dia por fonte)
+
+**Volume estimado (cenário médio - 75 fontes RSS):**
+
+| Métrica | Valor |
+|---------|-------|
+| Artigos coletados/dia | ~6.000 |
+| Volume máximo (24h) | ~31 MB |
+| Invocações de coleta/mês | ~54.000 |
+
+> **Nota:** Com política de retenção de 24h, o volume de RSS é **FIXO** (não acumulativo). Representa custo máximo de armazenamento temporário.
+
+---
+
+### 2. VOLUMETRIA DE TENDÊNCIAS
+
+#### 2.1 Google Trends
+
+**Dados coletados por tópico:**
+```json
+{
+  "topic": "string",
+  "interest_over_time": [168 pontos/semana],
+  "related_queries": [25 queries × 2 campos],
+  "related_topics": [25 topics × 3 campos],
+  "geo_data": [27 estados BR],
+  "timestamp": "datetime"
+}
+// Total médio: ~3 KB por tópico por coleta
+```
+
+**Volume estimado (cenário médio - 50 tópicos):**
+
+| Métrica | Valor |
+|---------|-------|
+| Volume/mês | ~108 MB |
+| Volume/ano | ~1.3 GB |
+
+#### 2.2 Twitter/X Trends
+
+**Dados coletados por hashtag:**
+```json
+{
+  "hashtag": "string",
+  "tweet_volume": "number",
+  "sample_tweets": [20 tweets × 1KB],
+  "engagement_metrics": "object",
+  "timestamp": "datetime"
+}
+// Total médio: ~25 KB por hashtag por coleta
+```
+
+**Volume estimado (cenário médio - 25 hashtags):**
+
+| Métrica | Valor |
+|---------|-------|
+| Volume/mês | ~1.8 GB |
+| Volume/ano | ~21.6 GB |
+
+#### 2.3 Resumo Tendências (Histórico Permanente - Cenário Médio)
+
+| Fonte | Volume/mês | Volume/ano |
+|-------|------------|------------|
+| Google Trends | ~108 MB | ~1.3 GB |
+| Twitter/X | ~1.8 GB | ~21.6 GB |
+| **Total** | **~1.9 GB** | **~22.8 GB** |
+
+---
+
+### 3. VOLUMETRIA DE TRANSCRIÇÕES (Speech-to-Text)
+
+**Premissas de transcrição:**
+- Duração média de vídeo: **10 minutos**
+- Palavras por minuto (fala): **~150 palavras**
+- Caracteres por palavra: **~6 caracteres**
+- Texto gerado por vídeo: **10 min × 150 palavras × 6 chars = ~9 KB**
+
+**Estrutura de dados por transcrição:**
+```json
+{
+  "video_id": "string",
+  "video_metadata": {
+    "title": "~100 chars",
+    "channel": "~50 chars",
+    "duration": "number",
+    "thumbnail": "url"
+  },
+  "full_transcript": "~9.000 caracteres",
+  "segments": [
+    {
+      "start": "number",
+      "end": "number",
+      "text": "~150 chars",
+      "confidence": "number"
+    }
+  ],  // ~100 segmentos × 200 bytes = 20 KB
+  "language": "string",
+  "created_at": "datetime"
+}
+// Total médio: ~35 KB por transcrição
+```
+
+**Consumo estimado (cenário médio):**
+
+| Métrica | Valor |
+|---------|-------|
+| Transcrições/mês | ~500 |
+| Minutos de áudio/mês | ~5.000 min |
+| Armazenamento/mês | ~17.5 MB |
+| Armazenamento/ano | ~210 MB |
+
+> **Nota:** O custo de Speech-to-Text varia conforme o provedor. Consultar tabela de preços do provedor selecionado.
+
+---
+
+### 4. VOLUMETRIA DE GERAÇÃO DE IA
+
+**Consumo estimado de tokens por matéria (cenário médio):**
+
+| Operação | Input | Output |
+|----------|-------|--------|
+| Geração da matéria completa | ~7.500 | ~2.700 |
+| Operações auxiliares (títulos, resumos, SEO) | ~7.500 | ~2.500 |
+| **Total por matéria** | **~15.000** | **~5.200** |
+
+**Consumo mensal (cenário médio - 3.500 matérias/mês):**
+
+| Métrica | Valor |
+|---------|-------|
+| Input tokens/mês | ~52.5M |
+| Output tokens/mês | ~18.2M |
+| **Total tokens/mês** | **~71M** |
+| Logs de geração | ~9 MB/mês |
+
+> **Nota:** O custo de IA generativa varia conforme o provedor e modelo escolhido. Recomenda-se consultar tabelas de preço atualizadas do provedor selecionado.
+
+---
+
+### 5. VOLUMETRIA DE MATÉRIAS CRIADAS (Permanente)
+
+**Estrutura de dados por matéria:**
+```json
+{
+  "id": "uuid",
+  "title": "~100 caracteres",
+  "subtitle": "~200 caracteres",
+  "content": "~15.000 caracteres (HTML)",
+  "content_plain": "~12.000 caracteres",
+  "summary": "~500 caracteres",
+  "author_id": "uuid",
+  "category_id": "uuid",
+  "tags": ["~10 tags × 20 chars"],
+  "seo_metadata": {
+    "meta_title": "~60 chars",
+    "meta_description": "~160 chars",
+    "keywords": "~200 chars",
+    "readability_score": "number",
+    "seo_score": "number"
+  },
+  "sources": [
+    {"url": "string", "title": "string", "type": "string"}
+  ],
+  "status": "draft|published",
+  "created_at": "datetime",
+  "updated_at": "datetime",
+  "published_at": "datetime",
+  "version": "number"
+}
+// Total médio: ~30 KB por matéria
+```
+
+**Versionamento (histórico de edições):**
+- Média de 3 versões por matéria
+- Cada versão armazena diff: ~5 KB
+
+**Volume estimado (cenário médio - 3.500 matérias/mês):**
+
+| Métrica | Valor |
+|---------|-------|
+| Volume/mês | ~157.5 MB |
+| Volume/ano | ~1.89 GB |
+
+---
+
+### 6. VOLUMETRIA DE LOGS E ANALYTICS
+
+**Tipos de logs coletados:**
+
+| Tipo de Log | Tamanho médio | Eventos/usuário/dia |
+|-------------|---------------|---------------------|
+| Page views | 200 bytes | 50 |
+| Clicks/Interações | 150 bytes | 100 |
+| Geração de IA | 500 bytes | 5 |
+| Erros | 1 KB | 2 |
+| Performance | 300 bytes | 20 |
+
+**Volume estimado (cenário médio - 100 usuários ativos):**
+
+| Métrica | Valor |
+|---------|-------|
+| Eventos/dia | ~17.700 |
+| Volume/mês | ~159 MB |
+| Volume/ano | ~1.9 GB |
+
+---
+
+### 7. VOLUMETRIA DE ARQUIVOS
+
+**Tipos de arquivos:**
+| Tipo | Tamanho médio | Frequência | Retenção |
+|------|---------------|------------|----------|
+| PDFs complementares | 2 MB | 10/mês/usuário | Permanente |
+| Imagens de matérias | 500 KB | 3/matéria | Permanente |
+| Exports (DOCX/PDF) | 100 KB | 1/matéria | 30 dias |
+| Backups | Variável | Diário | 30 dias |
+
+**Volume estimado (cenário médio):**
+
+| Métrica | Valor |
+|---------|-------|
+| PDFs/mês | ~1.000 (2 GB) |
+| Imagens/mês | ~10.500 (5.25 GB) |
+| Volume/mês | ~7.25 GB |
+| Volume/ano | ~87 GB |
+
+---
+
+*Ver tabela resumo de volumetria estimada no início da Seção II.*
 
 ---
 
