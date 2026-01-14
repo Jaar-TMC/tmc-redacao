@@ -6,6 +6,8 @@
 
 **Core Value Proposition:** AI-powered article generation from RSS feeds and pasted text, with SEO analysis and a simple editor.
 
+**Deployment Target:** WordPress Admin Plugin (changed from Azure Static Web Apps)
+
 ---
 
 ## Implementation Progress Tracker
@@ -22,18 +24,69 @@
 | Create LLM service | `services/llm_service.py` | 2026-01-13 | Claude Sonnet 4.5 with personas/tones |
 | Create generation API | `functions/generation_api.py` | 2026-01-13 | /generate, /extract-topics, /generate-tags |
 | Connect FeedSelector to API | `FeedSelector.jsx` | 2026-01-13 | Loading/error states, real data fetch |
+| Connect TextoBaseFeed to RSS API | `TextoBaseFeed.jsx` | 2026-01-13 | "Add more articles" with API loading/error states |
+| Connect RevisarPage to generation API | `RevisarPage.jsx`, `CriarPostPage.jsx` | 2026-01-13 | Full generation flow: API call + context + editor display |
+| Add Copy to Clipboard button | `CriarPostPage.jsx` | 2026-01-13 | Copy title + linha fina + content + tags to clipboard |
 
 ### In Progress
 | Task | File(s) | Started | Notes |
 |------|---------|---------|-------|
-| Connect TextoBaseFeed to RSS API | `TextoBaseFeed.jsx` | 2026-01-13 | "Add more articles" feature needs API |
+| Deploy Azure Functions | N/A | 2026-01-13 | Requires Azure MFA login - see deployment instructions below |
 
-### Pending
+### Pending - Core MVP
 | Task | Priority | Estimated Hours |
 |------|----------|-----------------|
-| Connect RevisarPage to generation API | CRITICAL | 3h |
-| Add Copy to Clipboard button | HIGH | 1h |
-| Deploy Azure Functions | HIGH | 2h |
+
+### Azure Functions Deployment Instructions
+
+**Prerequisites Met:**
+- ✅ Azure Functions Core Tools v4.0.7317 installed
+- ✅ Azure subscription "Microsoft Azure Sponsorship" connected
+- ⚠️ Azure CLI needs MFA re-authentication
+
+**Required Environment Variables (add to Azure App Settings):**
+```
+ANTHROPIC_API_KEY=<your-anthropic-api-key>
+ANTHROPIC_MODEL=claude-sonnet-4-5-20241022
+SQL_SERVER=bi4ia-tmc.database.windows.net
+SQL_DATABASE=tmc
+SQL_USERNAME=admjaar
+SQL_PASSWORD=<configured>
+```
+
+**To Deploy:**
+```bash
+# 1. Re-authenticate with Azure (requires MFA)
+az login --scope https://management.core.windows.net//.default
+
+# 2. Create Function App (if not exists) or use existing
+# az functionapp create --resource-group <rg-name> --name tmc-redacao-api --storage-account <storage> --runtime python --runtime-version 3.11 --functions-version 4
+
+# 3. Add ANTHROPIC_API_KEY to App Settings
+az functionapp config appsettings set --name <function-app-name> --resource-group <rg-name> --settings "ANTHROPIC_API_KEY=<your-key>"
+
+# 4. Deploy
+cd FeedRSS/tmc-rss-collector
+func azure functionapp publish <function-app-name>
+```
+
+### Pending - WordPress Plugin Migration
+| Task | Priority | Estimated Hours |
+|------|----------|-----------------|
+| Create WP plugin structure (tmc-redacao-wp/) | CRITICAL | 4h |
+| Create uninstall.php for cleanup | CRITICAL | 1h |
+| Add capability checks (current_user_can) | CRITICAL | 1h |
+| Add settings page for API URL config | CRITICAL | 2h |
+| Modify Vite config for WordPress build | CRITICAL | 4h |
+| Add aggressive CSS scoping (.tmc-app + all:initial) | CRITICAL | 3h |
+| Adjust CSS for WP admin bar (32px offset) | HIGH | 1h |
+| Change BrowserRouter to HashRouter | HIGH | 2h |
+| Use unique root ID (#tmc-redacao-root) | HIGH | 1h |
+| Create WordPressContext.jsx | HIGH | 2h |
+| Update api.js for dynamic base URL | HIGH | 1h |
+| Update Header.jsx for WP user | MEDIUM | 1h |
+| Add nonce to wp_localize_script | HIGH | 1h |
+| Test in WordPress environment | HIGH | 8h |
 
 ### How to Continue Development
 
@@ -43,6 +96,7 @@ Continue developing the TMC Redação MVP.
 Read the plan file at: docs/MVP_PLAN_FEB_2026.md
 Follow the Implementation Progress Tracker at the top.
 Key files: api.js, featureFlags.js, llm_service.py, generation_api.py
+WordPress plugin: tmc-redacao-wp/
 Tag v0.0.0-mockup preserves the mockup.
 Continue from where we left off.
 ```
@@ -69,8 +123,116 @@ Continue from where we left off.
 |---------|--------|--------|----------|
 | **AI Generation Backend** | 0% | HIGH | CRITICAL |
 | **RSS Frontend Integration and Theme and Tags Extraction** | 0% | MEDIUM | CRITICAL |
+| **WordPress Plugin Migration** | 0% | HIGH | CRITICAL |
 | **Article Persistence** | 0% | MEDIUM | HIGH |
 | **Copy/Export Content** | 0% | LOW | HIGH |
+
+---
+
+## WordPress Plugin Architecture
+
+### Deployment Change
+**Before:** React SPA → Azure Static Web Apps
+**After:** React SPA → WordPress Admin Plugin → Azure Functions API (unchanged)
+
+### Key Decisions
+- **Location:** WordPress Admin Area only
+- **Auth:** WordPress user authentication
+- **Backend:** Keep Azure Functions (no PHP rewrite)
+- **Strategy:** Minimal React changes, bundle for WordPress
+
+### Plugin Structure
+```
+tmc-redacao-wp/
+├── tmc-redacao.php                     # Main plugin file
+├── uninstall.php                       # CRITICAL: Cleanup on uninstall
+├── includes/
+│   ├── class-tmc-redacao-admin.php     # Admin menu + settings page
+│   └── class-tmc-redacao-assets.php    # Script/style enqueuing
+├── assets/
+│   ├── js/tmc-redacao.js               # Bundled React app
+│   ├── css/tmc-redacao.css             # Scoped Tailwind CSS
+│   └── images/logo-tmc.svg
+├── views/
+│   ├── admin-page.php                  # React container
+│   └── settings-page.php               # API configuration
+└── languages/
+    └── tmc-redacao.pot                 # Translation template
+```
+
+### React App Changes Required
+| File | Change |
+|------|--------|
+| `vite.config.js` | Add WordPress build mode |
+| `package.json` | Add `build:wp` script |
+| `src/main.jsx` | Support WP root element |
+| `src/App.jsx` | BrowserRouter → HashRouter |
+| `src/index.css` | CSS scoping under `.tmc-app` |
+| `src/services/api.js` | Dynamic API base URL |
+| `src/components/layout/Header.jsx` | Use WP user data |
+
+### New Files to Create (React)
+| File | Purpose |
+|------|---------|
+| `src/context/WordPressContext.jsx` | WP user context provider |
+
+### WordPress Security Requirements
+
+**Capability Checks (in PHP):**
+```php
+// Every admin page render must check:
+if ( ! current_user_can( 'edit_posts' ) ) {
+    wp_die( 'Access denied' );
+}
+```
+
+**Nonce Verification:**
+- Pass nonce via `wp_localize_script()`
+- Verify with `wp_verify_nonce()` for any AJAX calls
+
+**CSS Scoping (CRITICAL):**
+```css
+/* Use aggressive isolation to prevent WP admin conflicts */
+.tmc-app {
+    all: initial;  /* Reset ALL inherited styles */
+}
+/* Adjust for WP admin bar (32px desktop, 46px mobile) */
+.tmc-app header { top: 32px; }
+```
+
+### WordPress Data Flow
+```
+WordPress Admin Page Loads
+         ↓
+current_user_can('edit_posts') check
+         ↓
+wp_enqueue_script('tmc-redacao-app')
+         ↓
+wp_localize_script('tmcRedacaoConfig', {
+    user: { id, displayName, email, roles },
+    apiBaseUrl: get_option('tmc_redacao_api_url'),
+    nonce: wp_create_nonce('tmc_redacao_nonce'),
+    restNonce: wp_create_nonce('wp_rest')
+})
+         ↓
+React app reads window.tmcRedacaoConfig
+         ↓
+WordPressContext provides user data to components
+         ↓
+API calls go directly to Azure Functions
+```
+
+### Build Commands
+```bash
+# Development (standalone React)
+npm run dev
+
+# Build for WordPress
+npm run build:wp
+
+# Build for WordPress with watch
+npm run build:wp:watch
+```
 
 ---
 
@@ -171,9 +333,15 @@ categoryColors = {
 - **Status:** Frontend UI complete, just needs API connection
 - **Work:** Connect to same generation API as #1
 
+#### 4. WordPress Plugin Migration ⭐ NEW
+- **What:** Convert React SPA to WordPress admin plugin
+- **Status:** Not started
+- **Effort:** HIGH (32 hours)
+- **Files to create:** See "WordPress Plugin Architecture" section
+
 ### TIER 2: QUICK WINS (High Value, Low Effort - Week 2)
 
-#### 4. Tag/Hashtag Display & Selection ⭐ NEW
+#### 5. Tag/Hashtag Display & Selection
 - **What:** Show article tags in UI, let users select which to keep
 - **Status:** Data exists in mockData, UI missing
 - **Effort:** LOW (3-4 hours)
@@ -183,31 +351,31 @@ categoryColors = {
   - `CriarContext.jsx` - Add selectedTags state
   - `RevisarPage.jsx` - Show aggregated tags
 
-#### 5. Copy to Clipboard
+#### 6. Copy to Clipboard
 - **What:** One-click copy of generated article
 - **Status:** Missing
 - **Effort:** LOW (1-2 hours)
 - **Files:** `CriarPostPage.jsx`
 
-#### 6. Full-Text Editing Mode Fix
+#### 7. Full-Text Editing Mode Fix
 - **What:** Enable the textarea in full-text mode (currently `onChange={() => {}}`)
 - **Effort:** LOW (1 hour)
 - **File:** `TextoBaseFeed.jsx:391-396`
 
 ### TIER 3: NICE TO HAVE (If Time Permits - Week 3)
 
-#### 7. Tags Recognition Display (Feed em Alta)
-- **What:** Show trending tags from RSS 
+#### 8. Tags Recognition Display (Feed em Alta)
+- **What:** Show trending tags from RSS
 - **Status:** Data exists (mock data), UI missing
 - **Effort:** MEDIUM (4-6 hours)
 - **Value:** Helps users pick trending topics
 
-#### 8. Article Persistence (LocalStorage)
+#### 9. Article Persistence (LocalStorage)
 - **What:** Auto-save drafts to browser
 - **Effort:** MEDIUM (3-4 hours)
 - **File:** `CriarContext.jsx`
 
-#### 9. Export Options (Markdown/HTML)
+#### 10. Export Options (Markdown/HTML)
 - **What:** Download article in different formats
 - **Effort:** MEDIUM (3-4 hours)
 
@@ -217,7 +385,7 @@ categoryColors = {
 |---------|--------|
 | Video transcription | Complex, needs Speech-to-Text service |
 | Google Trends integration | Backend not ready |
-| User authentication | Out of scope for MVP |
+| User authentication | Handled by WordPress now |
 | Rich text editor (TipTap/Slate) | Textarea sufficient for MVP |
 | AI-powered topic extraction | Can use basic sentence extraction for now |
 | Article merging UI | Complex UX, defer to v2 |
@@ -240,7 +408,7 @@ categoryColors = {
 cd FeedRSS/tmc-rss-collector
 func azure functionapp publish <APP_NAME>
 ```
-- Configure CORS for frontend domain
+- Configure CORS for WordPress domain
 - Verify endpoints: `/api/health`, `/api/articles`, `/api/sources`
 
 **Step 1.3: Create LLM Service**
@@ -254,60 +422,92 @@ func azure functionapp publish <APP_NAME>
 - Input: `{ texto_base, tags, persona, tom, orientacao_lide, citacoes, contexto, creditos, tipo_materia }`
 - Output: `{ titulo, linha_fina, conteudo, tags_sugeridas }`
 
-### Phase 2: Frontend Integration (Week 1-2)
+### Phase 2: WordPress Plugin (Week 1-2)
 
-**Step 2.1: Connect RSS Feed to Backend**
+**Step 2.1: Create Plugin Structure**
+- Create `tmc-redacao-wp/` folder with PHP files
+- Main plugin file with activation hooks
+- Admin menu registration
+- Script/style enqueuing
+
+**Step 2.2: Modify Vite Build**
+- Update `vite.config.js` for WordPress output
+- Add `build:wp` script to package.json
+- Configure single bundle output
+
+**Step 2.3: CSS Scoping**
+- Wrap all styles under `.tmc-app` class
+- Add WordPress admin reset styles
+
+**Step 2.4: React Router Change**
+- Change BrowserRouter to HashRouter in App.jsx
+- Test all navigation paths
+
+**Step 2.5: WordPress Integration**
+- Create WordPressContext.jsx
+- Update Header.jsx with WP user data
+- Update api.js for dynamic base URL
+
+### Phase 3: Frontend Integration (Week 2)
+
+**Step 3.1: Connect RSS Feed to Backend**
 - File: `tmc-redacao/src/pages/crear/variantes/TextoBaseFeed.jsx`
 - Replace `mockArticles` with `api.getArticles()`
 - Add loading/error states
 
-**Step 2.2: Add Tag Display & Selection ⭐**
+**Step 3.2: Add Tag Display & Selection**
 - File: `TextoBaseFeed.jsx`
 - Display tags as chips below each article in sidebar
 - Add checkboxes to select/deselect tags
 - Aggregate selected tags across all articles
 
-**Step 2.3: Update Context for Tags**
+**Step 3.3: Update Context for Tags**
 - File: `tmc-redacao/src/context/CriarContext.jsx`
 - Add `selectedTags: Set()` to state
 - Add `setSelectedTags()` action
 - Include tags in `getDataForGeneration()`
 
-**Step 2.4: Connect Generation to API**
+**Step 3.4: Connect Generation to API**
 - File: `tmc-redacao/src/pages/criar/RevisarPage.jsx`
 - Replace mock `setTimeout` with real `api.generate()` call
 - Pass selected topics + tags + configuration
 - Handle response and navigate to editor
 
-**Step 2.5: Fix Full-Text Editing**
+**Step 3.5: Fix Full-Text Editing**
 - File: `TextoBaseFeed.jsx:391-396`
 - Implement `onChange` handler for textarea
 
-### Phase 3: Editor & Export (Week 2)
+### Phase 4: Editor & Export (Week 2-3)
 
-**Step 3.1: Add Copy to Clipboard**
+**Step 4.1: Add Copy to Clipboard**
 - File: `tmc-redacao/src/pages/CriarPostPage.jsx`
 - Add "Copy Article" button in toolbar
 - Copy title + linha fina + content
 - Show toast confirmation
 
-**Step 3.2: Show Tags in Review**
+**Step 4.2: Show Tags in Review**
 - File: `tmc-redacao/src/pages/criar/RevisarPage.jsx`
 - Display aggregated selected tags
 - Allow last-minute tag editing
 
-### Phase 4: Polish & Testing (Week 3-4)
+### Phase 5: Testing (Week 3-4)
 
-**Step 4.1: Error Handling**
+**Step 5.1: WordPress Integration Testing**
+- Set up local WordPress environment
+- Test plugin activation
+- Test all 15 pages via HashRouter
+- Test API connectivity with CORS
+
+**Step 5.2: Error Handling**
 - API timeout handling
 - Network error recovery
 - Validation feedback
 
-**Step 4.2: LocalStorage Persistence (Optional)**
+**Step 5.3: LocalStorage Persistence (Optional)**
 - Auto-save draft to localStorage
 - Recover on page reload
 
-**Step 4.3: End-to-End Testing**
+**Step 5.4: End-to-End Testing**
 - Test full RSS → Generate → Edit → Copy flow
 - Test Pasted Text → Generate → Edit → Copy flow
 
@@ -352,11 +552,12 @@ ANTHROPIC_MODEL=claude-sonnet-4-5-20241022
 | Requirement | Decision |
 |-------------|----------|
 | **AI Model** | Claude Sonnet 4.5 (Anthropic) |
-| **Deployment** | RSS backend tested locally, needs Azure deployment |
+| **Deployment** | WordPress Admin Plugin |
 | **Input Sources** | Both RSS and Pasted Text equally important |
 | **Article Length** | Minimum 2000 characters (TMC standard for columnists) |
 | **Personas** | Currently mock data - will be designed |
 | **Tones** | Currently mock data - will be designed |
+| **Auth** | WordPress user authentication |
 
 ---
 
@@ -406,6 +607,26 @@ ANTHROPIC_MODEL=claude-sonnet-4-5-20241022
 | **1.8** | Error handling & loading states | 2h |
 | | **Subtotal TIER 1** | **22h** |
 
+### WORDPRESS PLUGIN MIGRATION
+
+| Task | Description | Hours |
+|------|-------------|-------|
+| **WP.1** | Create WordPress plugin structure (PHP files) | 4h |
+| **WP.2** | Create uninstall.php for cleanup | 1h |
+| **WP.3** | Add capability checks + security | 1h |
+| **WP.4** | Add settings page for API URL config | 2h |
+| **WP.5** | Modify Vite config for WordPress build | 4h |
+| **WP.6** | Add aggressive CSS scoping (all:initial) | 3h |
+| **WP.7** | Adjust CSS for WP admin bar offset | 1h |
+| **WP.8** | Change BrowserRouter to HashRouter | 2h |
+| **WP.9** | Use unique root ID (#tmc-redacao-root) | 1h |
+| **WP.10** | Create WordPressContext.jsx | 2h |
+| **WP.11** | Update api.js for dynamic base URL | 1h |
+| **WP.12** | Update Header.jsx for WP user | 1h |
+| **WP.13** | Add nonce to wp_localize_script | 1h |
+| **WP.14** | Test in WordPress environment | 8h |
+| | **Subtotal WordPress** | **32h** |
+
 ### TIER 2: QUICK WINS
 
 | Task | Description | Hours |
@@ -442,21 +663,22 @@ ANTHROPIC_MODEL=claude-sonnet-4-5-20241022
 | Tier | Features | Hours |
 |------|----------|-------|
 | **TIER 1** | Core MVP (AI Generation + RSS Integration) | 22h |
+| **WordPress** | Plugin Migration | 32h |
 | **TIER 2** | Quick Wins (Tag Selection + Copy) | 7h |
 | **TIER 3** | Nice to Have (Themes + LocalStorage + Export) | 10h |
 | **Testing** | E2E Testing + Bug Fixes | 7h |
 | | | |
-| **TOTAL MVP (TIER 1+2+Testing)** | Minimum viable product | **36h** |
-| **TOTAL COMPLETE (All Tiers)** | Full feature set | **46h** |
+| **TOTAL MVP (TIER 1+WP+TIER 2+Testing)** | Minimum viable product | **68h** |
+| **TOTAL COMPLETE (All Tiers)** | Full feature set | **78h** |
 
 ### Timeline Mapping
 
-- **36 hours** = ~4-5 days of focused development (8h/day)
-- **46 hours** = ~6 days of focused development
+- **68 hours** = ~8-9 days of focused development (8h/day)
+- **78 hours** = ~10 days of focused development
 
 With a Feb 15 deadline (33 days from Jan 13):
-- **Conservative estimate:** 2 weeks for full implementation + testing
-- **Buffer:** 2+ weeks for iterations and unforeseen issues
+- **Conservative estimate:** 2-3 weeks for full implementation + testing
+- **Buffer:** 1-2 weeks for iterations and unforeseen issues
 
 ---
 
@@ -468,14 +690,30 @@ With a Feb 15 deadline (33 days from Jan 13):
 
 **Frontend (to create):**
 - `tmc-redacao/src/services/api.js`
+- `tmc-redacao/src/context/WordPressContext.jsx`
 
 **Frontend (to modify):**
+- `tmc-redacao/vite.config.js`
+- `tmc-redacao/package.json`
+- `tmc-redacao/src/main.jsx`
+- `tmc-redacao/src/App.jsx`
+- `tmc-redacao/src/index.css`
+- `tmc-redacao/src/services/api.js`
+- `tmc-redacao/src/components/layout/Header.jsx`
 - `tmc-redacao/src/pages/crear/variantes/TextoBaseFeed.jsx`
 - `tmc-redacao/src/pages/criar/RevisarPage.jsx`
 - `tmc-redacao/src/pages/CriarPostPage.jsx`
 - `tmc-redacao/src/context/CriarContext.jsx`
 - `tmc-redacao/src/components/cards/ArticleCard.jsx`
 - `tmc-redacao/src/components/criar/FeedSelector.jsx`
+
+**WordPress Plugin (to create):**
+- `tmc-redacao-wp/tmc-redacao.php` - Main plugin file with activation hooks
+- `tmc-redacao-wp/uninstall.php` - CRITICAL: Cleanup on uninstall
+- `tmc-redacao-wp/includes/class-tmc-redacao-admin.php` - Admin menu + settings
+- `tmc-redacao-wp/includes/class-tmc-redacao-assets.php` - Script/style enqueuing
+- `tmc-redacao-wp/views/admin-page.php` - React container with unique ID
+- `tmc-redacao-wp/views/settings-page.php` - API URL configuration
 
 ---
 
@@ -490,5 +728,6 @@ A successful MVP will allow users to:
 5. Edit the generated content in a simple editor
 6. See real-time SEO analysis and scoring
 7. Copy the final content to clipboard for publishing elsewhere
+8. **Access the tool via WordPress Admin menu (TMC Redacao)**
 
-This delivers the core value proposition: **AI-powered journalistic writing with SEO optimization**.
+This delivers the core value proposition: **AI-powered journalistic writing with SEO optimization, delivered as a WordPress plugin**.

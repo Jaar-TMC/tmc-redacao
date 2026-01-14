@@ -27,11 +27,14 @@ import {
   ExternalLink,
   Tag,
   Plus,
-  Loader2
+  Loader2,
+  Copy,
+  Check
 } from 'lucide-react';
 import { mockTones, mockPersonas } from '../data/mockData';
 import Tooltip from '../components/ui/Tooltip';
 import { SEOAnalyzerPanel, calculateSEOScore } from '../components/editor';
+import { useCriar } from '../context';
 
 // Tipos de matéria disponíveis
 const articleTypes = [
@@ -47,6 +50,7 @@ const articleTypes = [
 const CriarPostPage = () => {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
+  const { resultado } = useCriar();
 
   // Extrair parâmetros da URL (vindos da tela de seleção de tema)
   const themeContext = useMemo(() => {
@@ -87,9 +91,15 @@ Com esse desempenho, o Brasil reafirma sua posição estratégica no cenário gl
     tags: ['Agronegócio', 'Exportações', 'Soja', 'Economia', 'Brasil']
   };
 
-  const [title, setTitle] = useState(mockArticle.title);
-  const [linhaFina, setLinhaFina] = useState(mockArticle.linhaFina);
-  const [content, setContent] = useState(mockArticle.content);
+  // Use resultado from context if available, otherwise fall back to mock data
+  const initialTitle = resultado?.titulo || mockArticle.title;
+  const initialLinhaFina = resultado?.linhaFina || mockArticle.linhaFina;
+  const initialContent = resultado?.conteudo || mockArticle.content;
+  const initialTags = resultado?.tagsSugeridas || mockArticle.tags;
+
+  const [title, setTitle] = useState(initialTitle);
+  const [linhaFina, setLinhaFina] = useState(initialLinhaFina);
+  const [content, setContent] = useState(initialContent);
   const [selectedTone, setSelectedTone] = useState(null);
   const [selectedPersona, setSelectedPersona] = useState(null);
   const [selectedArticleType, setSelectedArticleType] = useState(null);
@@ -97,9 +107,22 @@ Com esse desempenho, o Brasil reafirma sua posição estratégica no cenário gl
   const [spellCheck, setSpellCheck] = useState(false);
   const [isSavingDraft, setIsSavingDraft] = useState(false);
   const [isPublishing, setIsPublishing] = useState(false);
+  const [isCopied, setIsCopied] = useState(false);
 
   // Estado para tópicos/tags
-  const [tags, setTags] = useState(mockArticle.tags);
+  const [tags, setTags] = useState(initialTags);
+
+  // Update state when resultado changes (e.g., when navigating from RevisarPage)
+  useEffect(() => {
+    if (resultado?.geradoEm) {
+      setTitle(resultado.titulo || '');
+      setLinhaFina(resultado.linhaFina || '');
+      setContent(resultado.conteudo || '');
+      if (resultado.tagsSugeridas?.length > 0) {
+        setTags(resultado.tagsSugeridas);
+      }
+    }
+  }, [resultado?.geradoEm]);
   const [newTagInput, setNewTagInput] = useState('');
   const [isGeneratingTags, setIsGeneratingTags] = useState(false);
 
@@ -270,6 +293,38 @@ Com esse desempenho, o Brasil reafirma sua posição estratégica no cenário gl
     setIsGeneratingTags(false);
   };
 
+  // Função para copiar matéria para área de transferência
+  const handleCopyToClipboard = async () => {
+    // Formatar conteúdo para cópia
+    const formattedContent = [
+      title,
+      '',
+      linhaFina,
+      '',
+      content,
+      '',
+      tags.length > 0 ? `Tags: ${tags.join(', ')}` : ''
+    ].filter(Boolean).join('\n');
+
+    try {
+      await navigator.clipboard.writeText(formattedContent);
+      setIsCopied(true);
+      // Reset após 2 segundos
+      setTimeout(() => setIsCopied(false), 2000);
+    } catch (err) {
+      console.error('Erro ao copiar:', err);
+      // Fallback para navegadores antigos
+      const textArea = document.createElement('textarea');
+      textArea.value = formattedContent;
+      document.body.appendChild(textArea);
+      textArea.select();
+      document.execCommand('copy');
+      document.body.removeChild(textArea);
+      setIsCopied(true);
+      setTimeout(() => setIsCopied(false), 2000);
+    }
+  };
+
   return (
     <div className="min-h-screen pt-16 bg-off-white">
       {/* Header */}
@@ -320,6 +375,32 @@ Com esse desempenho, o Brasil reafirma sua posição estratégica no cenário gl
           </div>
 
           <div className="flex items-center gap-2 md:gap-3">
+            {/* Copy to Clipboard Button */}
+            <Tooltip content={isCopied ? 'Copiado!' : 'Copiar matéria para área de transferência'} position="bottom">
+              <button
+                onClick={handleCopyToClipboard}
+                disabled={!title && !content}
+                className={`flex items-center gap-2 px-3 md:px-4 py-2 text-sm font-medium border rounded-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed ${
+                  isCopied
+                    ? 'bg-success text-white border-success'
+                    : 'text-medium-gray hover:text-dark-gray border-light-gray hover:bg-off-white'
+                }`}
+                aria-label="Copiar matéria"
+              >
+                {isCopied ? (
+                  <>
+                    <Check size={16} />
+                    <span className="hidden sm:inline">Copiado!</span>
+                  </>
+                ) : (
+                  <>
+                    <Copy size={16} />
+                    <span className="hidden sm:inline">Copiar</span>
+                  </>
+                )}
+              </button>
+            </Tooltip>
+
             <button
               onClick={() => {
                 setIsSavingDraft(true);

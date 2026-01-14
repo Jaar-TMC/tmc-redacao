@@ -1,20 +1,22 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   ArrowLeft, HelpCircle, FileText, ChevronDown, ChevronUp,
   Link, Youtube, File, User, Palette, Building2, Calendar,
-  MessageSquare, Edit, Sparkles, Check
+  MessageSquare, Edit, Sparkles, Check, AlertCircle
 } from 'lucide-react';
 import { Stepper } from '../../components/criar';
+import { useCriar } from '../../context';
+import { generateArticle } from '../../services/api';
 
 /**
  * RevisarPage - Etapa 3.5 do fluxo de criação de matéria
  *
  * Permite ao usuário revisar todos os conteúdos e configurações
- * antes de gerar a matéria.
+ * antes de gerar a matéria usando IA.
  */
 
-// Mock data - Em produção viria do contexto/estado global
+// Fallback mock data when context is empty (for testing)
 const mockReviewData = {
   textoBase: {
     type: 'Transcrição YouTube',
@@ -38,8 +40,25 @@ const mockReviewData = {
   }
 };
 
+// Map context persona/tom to display names
+const PERSONA_NAMES = {
+  imparcial: 'Jornalista Imparcial',
+  especialista: 'Especialista',
+  colunista: 'Colunista',
+  influencer: 'Influenciador Digital'
+};
+
+const TOM_NAMES = {
+  formal: 'Formal',
+  informal: 'Informal',
+  tecnico: 'Técnico',
+  persuasivo: 'Persuasivo',
+  neutro: 'Neutro'
+};
+
 const RevisarPage = () => {
   const navigate = useNavigate();
+  const { fonte, textoBase, configuracoes, materiaisComplementares, setResultado } = useCriar();
 
   // State
   const [expandedSections, setExpandedSections] = useState({
@@ -49,9 +68,11 @@ const RevisarPage = () => {
   const [isGenerating, setIsGenerating] = useState(false);
   const [generationProgress, setGenerationProgress] = useState(0);
   const [generationMessage, setGenerationMessage] = useState('');
+  const [generationError, setGenerationError] = useState(null);
 
   // Generation messages
   const generationMessages = [
+    'Conectando à IA Claude Sonnet 4.5...',
     'Analisando texto-base e fontes complementares...',
     'Identificando informações principais...',
     'Aplicando persona e tom selecionados...',
@@ -61,6 +82,74 @@ const RevisarPage = () => {
     'Otimizando para legibilidade e SEO...',
     'Finalizando e revisando estrutura...'
   ];
+
+  // Build review data from context or use mock
+  const reviewData = useMemo(() => {
+    // If we have real data from context, use it
+    if (fonte?.dados && fonte.dados.length > 0) {
+      const articles = fonte.dados;
+      const textoBaseContent = textoBase?.textoCompleto ||
+        articles.map(a => a.content || a.preview || a.title).join('\n\n');
+
+      const wordCount = textoBaseContent.split(/\s+/).filter(Boolean).length;
+
+      return {
+        textoBase: {
+          type: fonte.tipo === 'feed' ? 'Matérias do Feed' :
+                fonte.tipo === 'link' ? 'Link da Web' :
+                fonte.tipo === 'video' ? 'Transcrição de Vídeo' : 'Texto',
+          title: articles[0]?.title || 'Texto-base',
+          blocks: articles.length,
+          words: wordCount,
+          content: textoBaseContent.substring(0, 500) + (textoBaseContent.length > 500 ? '...' : '')
+        },
+        materiais: [
+          ...materiaisComplementares.links.map((l, i) => ({
+            id: `link-${i}`, type: 'link', title: l.url || l.title, words: l.words || 0, status: 'extracted'
+          })),
+          ...materiaisComplementares.pdfs.map((p, i) => ({
+            id: `pdf-${i}`, type: 'pdf', title: p.name || p.title, pages: p.pages, words: p.words || 0, status: 'extracted'
+          })),
+          ...materiaisComplementares.videos.map((v, i) => ({
+            id: `video-${i}`, type: 'video', title: v.title || v.url, words: v.words || 0, status: 'extracted'
+          }))
+        ],
+        configuracoes: {
+          persona: PERSONA_NAMES[configuracoes.persona] || configuracoes.persona,
+          tom: TOM_NAMES[configuracoes.tom] || configuracoes.tom,
+          creditos: configuracoes.creditos || 'Não informado',
+          dataBase: configuracoes.data || new Date().toLocaleDateString('pt-BR'),
+          orientacaoLide: configuracoes.orientacaoLide || '',
+          citacoes: configuracoes.citacoes?.length || 0,
+          instrucoes: configuracoes.instrucoes || ''
+        },
+        // Keep raw data for API
+        _raw: {
+          textoBaseContent,
+          persona: configuracoes.persona,
+          tom: configuracoes.tom,
+          citacoes: configuracoes.citacoes,
+          contexto: configuracoes.contexto,
+          creditos: configuracoes.creditos,
+          orientacaoLide: configuracoes.orientacaoLide
+        }
+      };
+    }
+
+    // Fall back to mock data
+    return {
+      ...mockReviewData,
+      _raw: {
+        textoBaseContent: mockReviewData.textoBase.content,
+        persona: 'imparcial',
+        tom: 'formal',
+        citacoes: [],
+        contexto: '',
+        creditos: mockReviewData.configuracoes.creditos,
+        orientacaoLide: mockReviewData.configuracoes.orientacaoLide
+      }
+    };
+  }, [fonte, textoBase, configuracoes, materiaisComplementares]);
 
   const toggleSection = useCallback((section, id = null) => {
     if (id) {
@@ -79,29 +168,71 @@ const RevisarPage = () => {
     }
   }, []);
 
-  const handleGenerate = useCallback(() => {
+  const handleGenerate = useCallback(async () => {
     setIsGenerating(true);
     setGenerationProgress(0);
+    setGenerationError(null);
     setGenerationMessage(generationMessages[0]);
 
-    // Simulate generation progress
-    const interval = setInterval(() => {
-      setGenerationProgress(prev => {
-        const newProgress = prev + Math.random() * 15;
-        if (newProgress >= 100) {
-          clearInterval(interval);
-          setTimeout(() => {
-            navigate('/criar/editor');
-          }, 500);
-          return 100;
-        }
-        // Update message based on progress
-        const messageIndex = Math.floor((newProgress / 100) * generationMessages.length);
+    // Progress simulation while API call is in progress
+    let progressInterval;
+    let currentProgress = 0;
+
+    const startProgressSimulation = () => {
+      progressInterval = setInterval(() => {
+        currentProgress += Math.random() * 8 + 2; // Slower, more realistic progress
+        if (currentProgress > 90) currentProgress = 90; // Cap at 90% until API returns
+
+        setGenerationProgress(currentProgress);
+        const messageIndex = Math.floor((currentProgress / 100) * generationMessages.length);
         setGenerationMessage(generationMessages[Math.min(messageIndex, generationMessages.length - 1)]);
-        return newProgress;
+      }, 1500);
+    };
+
+    try {
+      startProgressSimulation();
+
+      // Call the real generation API
+      const result = await generateArticle({
+        texto_base: reviewData._raw.textoBaseContent,
+        persona: reviewData._raw.persona || 'imparcial',
+        tom: reviewData._raw.tom || 'formal',
+        orientacao_lide: reviewData._raw.orientacaoLide || '',
+        citacoes: reviewData._raw.citacoes || [],
+        contexto: reviewData._raw.contexto || '',
+        creditos: reviewData._raw.creditos || ''
       });
-    }, 800);
-  }, [navigate, generationMessages]);
+
+      // Stop progress simulation
+      clearInterval(progressInterval);
+
+      // Complete progress
+      setGenerationProgress(100);
+      setGenerationMessage('Matéria gerada com sucesso!');
+
+      // Store result in context
+      if (setResultado) {
+        setResultado({
+          titulo: result.titulo,
+          linhaFina: result.linha_fina,
+          conteudo: result.conteudo,
+          tagsSugeridas: result.tags_sugeridas || [],
+          geradoEm: new Date().toISOString()
+        });
+      }
+
+      // Navigate to editor after brief delay
+      setTimeout(() => {
+        navigate('/criar/editor');
+      }, 500);
+
+    } catch (error) {
+      clearInterval(progressInterval);
+      console.error('Error generating article:', error);
+      setIsGenerating(false);
+      setGenerationError(error.message || 'Erro ao gerar matéria. Tente novamente.');
+    }
+  }, [navigate, generationMessages, reviewData, setResultado]);
 
   const handleStepClick = useCallback((stepIndex) => {
     const routes = ['/criar', '/criar/texto-base', '/criar/configurar', '/criar/editor'];
@@ -110,8 +241,10 @@ const RevisarPage = () => {
     }
   }, [navigate]);
 
-  const totalWords = mockReviewData.textoBase.words +
-    mockReviewData.materiais.reduce((acc, m) => acc + (m.words || 0), 0);
+  const totalWords = useMemo(() => {
+    return reviewData.textoBase.words +
+      reviewData.materiais.reduce((acc, m) => acc + (m.words || 0), 0);
+  }, [reviewData]);
 
   // Generation Overlay
   if (isGenerating) {
@@ -173,6 +306,23 @@ const RevisarPage = () => {
     );
   }
 
+  // Error state display
+  const ErrorAlert = generationError && (
+    <div className="bg-red-50 border border-red-200 rounded-xl p-4 mb-6 flex items-start gap-3">
+      <AlertCircle className="w-5 h-5 text-red-500 flex-shrink-0 mt-0.5" />
+      <div className="flex-1">
+        <p className="text-sm font-medium text-red-800">Erro ao gerar matéria</p>
+        <p className="text-sm text-red-600 mt-1">{generationError}</p>
+      </div>
+      <button
+        onClick={() => setGenerationError(null)}
+        className="text-red-400 hover:text-red-600"
+      >
+        ×
+      </button>
+    </div>
+  );
+
   return (
     <div className="min-h-screen bg-off-white">
       <div className="max-w-5xl mx-auto px-4 py-6">
@@ -206,6 +356,9 @@ const RevisarPage = () => {
           onStepClick={handleStepClick}
         />
 
+        {/* Error Alert */}
+        {ErrorAlert}
+
         {/* Review Header */}
         <div className="bg-gradient-to-r from-tmc-orange to-orange-600 text-white rounded-xl p-6 mb-6">
           <div className="flex items-center gap-3 mb-2">
@@ -237,13 +390,13 @@ const RevisarPage = () => {
                   </div>
                   <div className="text-left">
                     <p className="font-semibold text-dark-gray">TEXTO-BASE</p>
-                    <p className="text-sm text-medium-gray">{mockReviewData.textoBase.type}</p>
+                    <p className="text-sm text-medium-gray">{reviewData.textoBase.type}</p>
                   </div>
                 </div>
                 <div className="flex items-center gap-4">
                   <div className="text-right">
-                    <p className="text-sm text-dark-gray">{mockReviewData.textoBase.blocks} blocos</p>
-                    <p className="text-xs text-medium-gray">~{mockReviewData.textoBase.words} palavras</p>
+                    <p className="text-sm text-dark-gray">{reviewData.textoBase.blocks} blocos</p>
+                    <p className="text-xs text-medium-gray">~{reviewData.textoBase.words} palavras</p>
                   </div>
                   {expandedSections.textoBase ? <ChevronUp size={20} /> : <ChevronDown size={20} />}
                 </div>
@@ -252,7 +405,7 @@ const RevisarPage = () => {
               {expandedSections.textoBase && (
                 <div className="border-t border-light-gray p-4 bg-off-white/30">
                   <p className="text-sm text-dark-gray leading-relaxed mb-4">
-                    {mockReviewData.textoBase.content}
+                    {reviewData.textoBase.content}
                   </p>
                   <button
                     onClick={() => navigate('/criar/texto-base')}
@@ -266,7 +419,7 @@ const RevisarPage = () => {
             </div>
 
             {/* Materiais Cards */}
-            {mockReviewData.materiais.map(material => (
+            {reviewData.materiais.map(material => (
               <div key={material.id} className="bg-white border border-light-gray rounded-xl overflow-hidden">
                 <button
                   onClick={() => toggleSection('materiais', material.id)}
@@ -328,7 +481,7 @@ const RevisarPage = () => {
               </p>
               <p className="text-sm text-medium-gray mt-1">
                 <strong className="text-dark-gray">Fontes:</strong>{' '}
-                {1 + mockReviewData.materiais.length} (texto-base + {mockReviewData.materiais.length} complementares)
+                {1 + mockReviewData.materiais.length} (texto-base + {reviewData.materiais.length} complementares)
               </p>
             </div>
           </div>
@@ -344,7 +497,7 @@ const RevisarPage = () => {
                 <User size={18} className="text-tmc-orange" />
                 <div>
                   <p className="text-xs text-medium-gray">Persona</p>
-                  <p className="text-sm font-medium text-dark-gray">{mockReviewData.configuracoes.persona}</p>
+                  <p className="text-sm font-medium text-dark-gray">{reviewData.configuracoes.persona}</p>
                 </div>
               </div>
 
@@ -352,7 +505,7 @@ const RevisarPage = () => {
                 <Palette size={18} className="text-tmc-orange" />
                 <div>
                   <p className="text-xs text-medium-gray">Tom</p>
-                  <p className="text-sm font-medium text-dark-gray">{mockReviewData.configuracoes.tom}</p>
+                  <p className="text-sm font-medium text-dark-gray">{reviewData.configuracoes.tom}</p>
                 </div>
               </div>
 
@@ -360,7 +513,7 @@ const RevisarPage = () => {
                 <Building2 size={18} className="text-tmc-orange" />
                 <div>
                   <p className="text-xs text-medium-gray">Créditos</p>
-                  <p className="text-sm font-medium text-dark-gray">{mockReviewData.configuracoes.creditos}</p>
+                  <p className="text-sm font-medium text-dark-gray">{reviewData.configuracoes.creditos}</p>
                 </div>
               </div>
 
@@ -368,7 +521,7 @@ const RevisarPage = () => {
                 <Calendar size={18} className="text-tmc-orange" />
                 <div>
                   <p className="text-xs text-medium-gray">Data base</p>
-                  <p className="text-sm font-medium text-dark-gray">{mockReviewData.configuracoes.dataBase}</p>
+                  <p className="text-sm font-medium text-dark-gray">{reviewData.configuracoes.dataBase}</p>
                 </div>
               </div>
 
@@ -377,7 +530,7 @@ const RevisarPage = () => {
                   <FileText size={18} className="text-tmc-orange mt-0.5" />
                   <div>
                     <p className="text-xs text-medium-gray">Orientação do lide</p>
-                    <p className="text-sm text-dark-gray">&quot;{mockReviewData.configuracoes.orientacaoLide}&quot;</p>
+                    <p className="text-sm text-dark-gray">&quot;{reviewData.configuracoes.orientacaoLide}&quot;</p>
                   </div>
                 </div>
               </div>
@@ -386,17 +539,17 @@ const RevisarPage = () => {
                 <MessageSquare size={18} className="text-tmc-orange" />
                 <div>
                   <p className="text-xs text-medium-gray">Citações</p>
-                  <p className="text-sm font-medium text-dark-gray">{mockReviewData.configuracoes.citacoes} citação adicionada</p>
+                  <p className="text-sm font-medium text-dark-gray">{reviewData.configuracoes.citacoes} citação adicionada</p>
                 </div>
               </div>
 
-              {mockReviewData.configuracoes.instrucoes && (
+              {reviewData.configuracoes.instrucoes && (
                 <div className="border-t border-light-gray pt-4">
                   <div className="flex items-start gap-3">
                     <Edit size={18} className="text-tmc-orange mt-0.5" />
                     <div>
                       <p className="text-xs text-medium-gray">Instruções</p>
-                      <p className="text-sm text-dark-gray">&quot;{mockReviewData.configuracoes.instrucoes}&quot;</p>
+                      <p className="text-sm text-dark-gray">&quot;{reviewData.configuracoes.instrucoes}&quot;</p>
                     </div>
                   </div>
                 </div>
