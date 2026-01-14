@@ -1,10 +1,15 @@
-import { BrowserRouter as Router, Routes, Route, Navigate, useLocation } from 'react-router-dom';
+import { BrowserRouter, HashRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { useEffect, lazy, Suspense } from 'react';
 import Header from './components/layout/Header';
 import ErrorBoundary from './components/ui/ErrorBoundary';
 import Spinner from './components/ui/Spinner';
-import { ArticlesProvider, FiltersProvider, UIProvider, CriarProvider } from './context';
+import { ArticlesProvider, FiltersProvider, UIProvider, CriarProvider, WordPressProvider } from './context';
 import PropTypes from 'prop-types';
+
+// Use HashRouter in WordPress (detected via window.tmcRedacaoConfig)
+// Use BrowserRouter for standalone development
+const isWordPress = typeof window !== 'undefined' && window.tmcRedacaoConfig?.isWordPress;
+const Router = isWordPress ? HashRouter : BrowserRouter;
 
 // Lazy load page components for code splitting
 const RedacaoPage = lazy(() => import('./pages/RedacaoPage'));
@@ -95,76 +100,78 @@ const PageLoadingFallback = () => (
 function App() {
   return (
     <ErrorBoundary>
-      <Router>
-        <ArticlesProvider>
-          <FiltersProvider>
-            <UIProvider>
-              <CriarProvider>
-              <DocumentTitleUpdater />
-              <div className="min-h-screen bg-off-white">
-                {/* Skip Navigation Links - Multiple ways to navigate content */}
-                <a
-                  href="#main-content"
-                  className="sr-only focus:not-sr-only focus:absolute focus:top-4 focus:left-4 focus:z-50 focus:px-4 focus:py-2 focus:bg-tmc-orange focus:text-white focus:rounded-lg focus:font-semibold min-h-[44px] min-w-[44px]"
-                >
-                  Pular para o conteúdo principal
-                </a>
-                <a
-                  href="#site-search"
-                  className="sr-only focus:not-sr-only focus:absolute focus:top-4 focus:left-64 focus:z-50 focus:px-4 focus:py-2 focus:bg-tmc-orange focus:text-white focus:rounded-lg focus:font-semibold min-h-[44px] min-w-[44px]"
-                >
-                  Ir para busca
-                </a>
+      <WordPressProvider>
+        <Router>
+          <ArticlesProvider>
+            <FiltersProvider>
+              <UIProvider>
+                <CriarProvider>
+                  <DocumentTitleUpdater />
+                  <div className="min-h-screen bg-off-white">
+                    {/* Skip Navigation Links - Multiple ways to navigate content */}
+                    <a
+                      href="#main-content"
+                      className="sr-only focus:not-sr-only focus:absolute focus:top-4 focus:left-4 focus:z-50 focus:px-4 focus:py-2 focus:bg-tmc-orange focus:text-white focus:rounded-lg focus:font-semibold min-h-[44px] min-w-[44px]"
+                    >
+                      Pular para o conteúdo principal
+                    </a>
+                    <a
+                      href="#site-search"
+                      className="sr-only focus:not-sr-only focus:absolute focus:top-4 focus:left-64 focus:z-50 focus:px-4 focus:py-2 focus:bg-tmc-orange focus:text-white focus:rounded-lg focus:font-semibold min-h-[44px] min-w-[44px]"
+                    >
+                      Ir para busca
+                    </a>
 
-                <Header />
+                    <Header />
 
-                {/* Site-wide Search - Placeholder for multiple ways to find content */}
-                <div id="site-search" className="sr-only" role="search" aria-label="Busca no site">
-                  <p>
-                    Busca do site: Use a barra de filtros na página principal para buscar matérias.
-                    Use o menu de navegação para acessar diferentes seções do sistema.
-                  </p>
-                </div>
+                    {/* Site-wide Search - Placeholder for multiple ways to find content */}
+                    <div id="site-search" className="sr-only" role="search" aria-label="Busca no site">
+                      <p>
+                        Busca do site: Use a barra de filtros na página principal para buscar matérias.
+                        Use o menu de navegação para acessar diferentes seções do sistema.
+                      </p>
+                    </div>
 
-                <main id="main-content" role="main">
-                  <Suspense fallback={<PageLoadingFallback />}>
-                    <Routes>
-                      {/* Main Pages */}
-                      <Route path="/" element={<RedacaoPage />} />
+                    <main id="main-content" role="main">
+                      <Suspense fallback={<PageLoadingFallback />}>
+                        <Routes>
+                          {/* Main Pages */}
+                          <Route path="/" element={<RedacaoPage />} />
 
-                      {/* Novo Fluxo de Criação de Matéria */}
-                      <Route path="/criar" element={<SelecionarFontePage />} />
-                      <Route path="/criar/texto-base" element={<TextoBasePage />} />
-                      <Route path="/criar/configurar" element={<ConfigurarPage />} />
-                      <Route path="/criar/revisar" element={<RevisarPage />} />
-                      <Route path="/criar/editor" element={<CriarPostPage />} />
+                          {/* Novo Fluxo de Criação de Matéria */}
+                          <Route path="/criar" element={<SelecionarFontePage />} />
+                          <Route path="/criar/texto-base" element={<TextoBasePage />} />
+                          <Route path="/criar/configurar" element={<ConfigurarPage />} />
+                          <Route path="/criar/revisar" element={<RevisarPage />} />
+                          <Route path="/criar/editor" element={<CriarPostPage />} />
 
-                      {/* Redirects para rotas antigas (compatibilidade) */}
-                      <Route path="/selecionar-tema" element={<Navigate to="/criar" replace />} />
-                      <Route path="/criar-inspiracao" element={<Navigate to="/criar" replace />} />
+                          {/* Redirects para rotas antigas (compatibilidade) */}
+                          <Route path="/selecionar-tema" element={<Navigate to="/criar" replace />} />
+                          <Route path="/criar-inspiracao" element={<Navigate to="/criar" replace />} />
 
-                      {/* Other Pages */}
-                      <Route path="/transcricao" element={<TranscricaoPage />} />
-                      <Route path="/minhas-materias" element={<MinhasMaterias />} />
+                          {/* Other Pages */}
+                          <Route path="/transcricao" element={<TranscricaoPage />} />
+                          <Route path="/minhas-materias" element={<MinhasMaterias />} />
 
-                      {/* Configuration Pages */}
-                      <Route path="/configuracoes" element={<ConfiguracoesPage />}>
-                        <Route index element={<Navigate to="/configuracoes/buscador" replace />} />
-                        <Route path="buscador" element={<BuscadorPage />} />
-                        <Route path="trends" element={<TrendsPage />} />
-                        <Route path="perfil" element={<PlaceholderPage title="Perfil" />} />
-                        <Route path="integracoes" element={<PlaceholderPage title="Integrações" />} />
-                        <Route path="preferencias" element={<PlaceholderPage title="Preferências" />} />
-                      </Route>
-                    </Routes>
-                  </Suspense>
-                </main>
-              </div>
-              </CriarProvider>
-            </UIProvider>
-          </FiltersProvider>
-        </ArticlesProvider>
-      </Router>
+                          {/* Configuration Pages */}
+                          <Route path="/configuracoes" element={<ConfiguracoesPage />}>
+                            <Route index element={<Navigate to="/configuracoes/buscador" replace />} />
+                            <Route path="buscador" element={<BuscadorPage />} />
+                            <Route path="trends" element={<TrendsPage />} />
+                            <Route path="perfil" element={<PlaceholderPage title="Perfil" />} />
+                            <Route path="integracoes" element={<PlaceholderPage title="Integrações" />} />
+                            <Route path="preferencias" element={<PlaceholderPage title="Preferências" />} />
+                          </Route>
+                        </Routes>
+                      </Suspense>
+                    </main>
+                  </div>
+                </CriarProvider>
+              </UIProvider>
+            </FiltersProvider>
+          </ArticlesProvider>
+        </Router>
+      </WordPressProvider>
     </ErrorBoundary>
   );
 }

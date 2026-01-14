@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { Bell, Settings, User, PenLine, Menu, X, HelpCircle, ChevronDown, FileText, Youtube } from 'lucide-react';
 import { Link, useLocation } from 'react-router-dom';
 import logo from '../../assets/logo-tmc.svg';
+import { useWordPress } from '../../context';
 
 /**
  * Header Component
@@ -14,9 +15,15 @@ import logo from '../../assets/logo-tmc.svg';
  */
 const Header = () => {
   const location = useLocation();
+  const { user, isWordPress } = useWordPress();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [createMenuOpen, setCreateMenuOpen] = useState(false);
   const createMenuRef = useRef(null);
+
+  // Get user display name and role
+  const displayName = user?.displayName || 'Usuário';
+  const userRole = user?.roles?.[0] || 'Redator';
+  const userAvatar = user?.avatar;
 
   const createOptions = [
     { path: '/criar', label: 'Nova Matéria', icon: FileText, description: 'Escolha sua fonte inicial' },
@@ -158,12 +165,20 @@ const Header = () => {
           {/* User Info - Simplified on mobile */}
           <div className="hidden md:flex items-center gap-3 pl-4 border-l border-white/20" role="region" aria-label="Informações do usuário">
             <div className="text-right hidden lg:block">
-              <p className="text-sm font-medium">João Silva</p>
-              <p className="text-xs text-white/60">Redator</p>
+              <p className="text-sm font-medium">{displayName}</p>
+              <p className="text-xs text-white/60 capitalize">{userRole}</p>
             </div>
-            <div className="w-9 h-9 bg-tmc-orange rounded-full flex items-center justify-center" aria-hidden="true">
-              <User size={20} />
-            </div>
+            {userAvatar ? (
+              <img
+                src={userAvatar}
+                alt={displayName}
+                className="w-9 h-9 rounded-full object-cover"
+              />
+            ) : (
+              <div className="w-9 h-9 bg-tmc-orange rounded-full flex items-center justify-center" aria-hidden="true">
+                <User size={20} />
+              </div>
+            )}
           </div>
 
           {/* Mobile Menu Button */}
@@ -225,12 +240,20 @@ const Header = () => {
               </div>
 
               <div className="md:hidden flex items-center gap-3 px-4 py-3 bg-tmc-light-green/20 rounded-lg" role="region" aria-label="Informações do usuário">
-                <div className="w-9 h-9 bg-tmc-orange rounded-full flex items-center justify-center" aria-hidden="true">
-                  <User size={20} />
-                </div>
+                {userAvatar ? (
+                  <img
+                    src={userAvatar}
+                    alt={displayName}
+                    className="w-9 h-9 rounded-full object-cover"
+                  />
+                ) : (
+                  <div className="w-9 h-9 bg-tmc-orange rounded-full flex items-center justify-center" aria-hidden="true">
+                    <User size={20} />
+                  </div>
+                )}
                 <div>
-                  <p className="text-sm font-medium">João Silva</p>
-                  <p className="text-xs text-white/60">Redator</p>
+                  <p className="text-sm font-medium">{displayName}</p>
+                  <p className="text-xs text-white/60 capitalize">{userRole}</p>
                 </div>
               </div>
             </div>

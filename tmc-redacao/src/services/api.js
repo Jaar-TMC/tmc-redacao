@@ -3,9 +3,25 @@
  *
  * Centralized API calls with error handling and configuration.
  * Connects frontend to the Azure Functions backend.
+ * Supports both standalone development and WordPress plugin contexts.
  */
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:7071/api';
+/**
+ * Get the API base URL from WordPress config or environment variable
+ * @returns {string} API base URL
+ */
+function getBaseUrl() {
+  // First, check WordPress configuration (set via wp_localize_script)
+  if (typeof window !== 'undefined' && window.tmcRedacaoConfig?.apiBaseUrl) {
+    return window.tmcRedacaoConfig.apiBaseUrl;
+  }
+
+  // Fallback to environment variable (standalone development)
+  return import.meta.env.VITE_API_BASE_URL || 'http://localhost:7071/api';
+}
+
+// API Base URL - evaluated on each call to support dynamic WordPress config
+const getApiBaseUrl = () => getBaseUrl();
 
 /**
  * Custom error class for API errors
@@ -26,7 +42,7 @@ class ApiError extends Error {
  * @returns {Promise<any>} Response data
  */
 async function fetchApi(endpoint, options = {}) {
-  const url = `${API_BASE_URL}${endpoint}`;
+  const url = `${getApiBaseUrl()}${endpoint}`;
 
   const defaultOptions = {
     headers: {
@@ -209,12 +225,10 @@ export async function isApiAvailable() {
 }
 
 /**
- * Get the API base URL (for debugging)
+ * Get the current API base URL (for debugging)
  * @returns {string}
  */
-export function getApiBaseUrl() {
-  return API_BASE_URL;
-}
+export { getApiBaseUrl };
 
 // Export error class for type checking
 export { ApiError };

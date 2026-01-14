@@ -31,11 +31,26 @@
 ### In Progress
 | Task | File(s) | Started | Notes |
 |------|---------|---------|-------|
-| Deploy Azure Functions | N/A | 2026-01-13 | Requires Azure MFA login - see deployment instructions below |
+| Test in WordPress environment | N/A | 2026-01-13 | Install plugin in WP and test all flows |
 
 ### Pending - Core MVP
 | Task | Priority | Estimated Hours |
 |------|----------|-----------------|
+| Deploy Azure Functions | HIGH | 2h | Requires Azure MFA login |
+
+### WordPress Plugin Migration - Completed
+| Task | File(s) | Date | Notes |
+|------|---------|------|-------|
+| Create WP plugin structure | `tmc-redacao-wp/` | 2026-01-13 | Main plugin, admin, assets classes |
+| Create uninstall.php | `tmc-redacao-wp/uninstall.php` | 2026-01-13 | Cleanup on plugin delete |
+| Add capability checks | `class-tmc-redacao-admin.php` | 2026-01-13 | current_user_can('edit_posts') |
+| Add settings page | `views/settings-page.php` | 2026-01-13 | API URL configuration |
+| Modify Vite config | `vite.config.js` | 2026-01-13 | WordPress build with single bundle |
+| Add CSS scoping | `index.css` | 2026-01-13 | .tmc-app isolation, WP admin bar offset |
+| Change to HashRouter | `App.jsx` | 2026-01-13 | HashRouter for WP, BrowserRouter for dev |
+| Create WordPressContext | `WordPressContext.jsx` | 2026-01-13 | WP user data provider |
+| Update api.js | `api.js` | 2026-01-13 | Dynamic base URL from WP config |
+| Update Header.jsx | `Header.jsx` | 2026-01-13 | WP user name/avatar display |
 
 ### Azure Functions Deployment Instructions
 
@@ -73,20 +88,9 @@ func azure functionapp publish <function-app-name>
 ### Pending - WordPress Plugin Migration
 | Task | Priority | Estimated Hours |
 |------|----------|-----------------|
-| Create WP plugin structure (tmc-redacao-wp/) | CRITICAL | 4h |
-| Create uninstall.php for cleanup | CRITICAL | 1h |
-| Add capability checks (current_user_can) | CRITICAL | 1h |
-| Add settings page for API URL config | CRITICAL | 2h |
-| Modify Vite config for WordPress build | CRITICAL | 4h |
-| Add aggressive CSS scoping (.tmc-app + all:initial) | CRITICAL | 3h |
-| Adjust CSS for WP admin bar (32px offset) | HIGH | 1h |
-| Change BrowserRouter to HashRouter | HIGH | 2h |
-| Use unique root ID (#tmc-redacao-root) | HIGH | 1h |
-| Create WordPressContext.jsx | HIGH | 2h |
-| Update api.js for dynamic base URL | HIGH | 1h |
-| Update Header.jsx for WP user | MEDIUM | 1h |
-| Add nonce to wp_localize_script | HIGH | 1h |
 | Test in WordPress environment | HIGH | 8h |
+
+**Note:** All other WordPress migration tasks completed on 2026-01-13. See "WordPress Plugin Migration - Completed" section above.
 
 ### How to Continue Development
 

@@ -294,3 +294,103 @@ nav button {
  * - Escape to close modals and dropdowns
  * - Arrow keys for lists and menus (where implemented)
  */
+
+/* ============================================
+ * WordPress Plugin CSS Isolation
+ * ============================================
+ * These styles ensure the React app doesn't conflict with WordPress admin styles.
+ * Applied only when running inside WordPress (.tmc-app wrapper).
+ */
+
+/* WordPress admin root container - aggressive style reset */
+.tmc-app {
+  /* Reset all inherited styles from WordPress */
+  all: initial;
+  display: block;
+  font-family: var(--font-sans);
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Re-apply base styles inside .tmc-app */
+.tmc-app *,
+.tmc-app *::before,
+.tmc-app *::after {
+  box-sizing: border-box;
+}
+
+/* WordPress admin support for .tmc-app root element */
+#tmc-redacao-root.tmc-app {
+  min-height: calc(100vh - 32px); /* Account for WP admin bar */
+  background-color: var(--color-off-white);
+  color: var(--color-dark-gray);
+}
+
+/* Adjust header position for WordPress admin bar */
+.tmc-app header[role="banner"],
+.tmc-app .sticky.top-0 {
+  /* WordPress admin bar is 32px on desktop, 46px on mobile */
+  top: 32px;
+}
+
+@media screen and (max-width: 782px) {
+  .tmc-app header[role="banner"],
+  .tmc-app .sticky.top-0 {
+    top: 46px;
+  }
+
+  #tmc-redacao-root.tmc-app {
+    min-height: calc(100vh - 46px);
+  }
+}
+
+/* Fix for WordPress admin bar covering fixed elements */
+@media screen and (min-width: 601px) {
+  .tmc-app .fixed.top-0 {
+    top: 32px !important;
+  }
+}
+
+/* Ensure modals appear above WordPress admin */
+.tmc-app [role="dialog"],
+.tmc-app .modal-overlay {
+  z-index: 100001; /* WordPress admin bar is 100000 */
+}
+
+/* WordPress override: ensure our fonts are used */
+.tmc-app,
+.tmc-app button,
+.tmc-app input,
+.tmc-app select,
+.tmc-app textarea {
+  font-family: var(--font-sans);
+  font-size: 14px;
+}
+
+/* WordPress override: ensure our colors are used for form elements */
+.tmc-app input:focus,
+.tmc-app select:focus,
+.tmc-app textarea:focus {
+  border-color: var(--color-tmc-orange);
+  box-shadow: 0 0 0 1px var(--color-tmc-orange);
+  outline: none;
+}
+
+/* Hide WordPress notices inside our app container */
+.tmc-app .notice,
+.tmc-app .updated,
+.tmc-app .error {
+  display: none !important;
+}
+
+/* Ensure Tailwind classes work correctly inside WordPress */
+.tmc-app .min-h-screen {
+  min-height: calc(100vh - 32px);
+}
+
+@media screen and (max-width: 782px) {
+  .tmc-app .min-h-screen {
+    min-height: calc(100vh - 46px);
+  }
+}
