@@ -1,16 +1,7 @@
-import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { useNavigate, useSearchParams, useParams } from 'react-router-dom';
 import {
   ArrowLeft,
-  Bold,
-  Italic,
-  Underline,
-  List,
-  ListOrdered,
-  Link2,
-  Image,
-  Undo,
-  Redo,
   Sparkles,
   UserCircle,
   SpellCheck,
@@ -24,7 +15,7 @@ import {
   Newspaper,
   Flame,
   X,
-  ExternalLink,
+  Link2,
   Tag,
   Plus,
   Loader2,
@@ -33,15 +24,16 @@ import {
   Eye,
   Edit3,
   FileText,
-  Save
+  Save,
+  Code
 } from 'lucide-react';
-import { markdownToHtml, countWords } from '../utils/markdownRenderer';
+import { countWords, markdownToHtml } from '../utils/markdownRenderer';
 import { mockTones, mockPersonas } from '../data/mockData';
 import Tooltip from '../components/ui/Tooltip';
-import { SEOAnalyzerPanel, calculateSEOScore } from '../components/editor';
+import { SEOAnalyzerPanel, calculateSEOScore, RichTextEditor, EditorToolbar } from '../components/editor';
 import { useCriar } from '../context';
 import { useVersionHistory, useChatEditor } from '../hooks';
-import { createUserArticle, updateUserArticle, getUserArticle } from '../services/api';
+import { createUserArticle, updateUserArticle, getUserArticle, generateTags, editArticle } from '../services/api';
 
 // Tipos de matéria disponíveis
 const articleTypes = [
@@ -184,9 +176,14 @@ Com esse desempenho, o Brasil reafirma sua posição estratégica no cenário gl
   const [spellCheck, setSpellCheck] = useState(false);
   const [isSavingDraft, setIsSavingDraft] = useState(false);
   const [isPublishing, setIsPublishing] = useState(false);
-  const [isCopied, setIsCopied] = useState(false);
+  const [showCopyDropdown, setShowCopyDropdown] = useState(false);
+  const [copyType, setCopyType] = useState(null); // 'html' or 'text'
   const [isPreviewMode, setIsPreviewMode] = useState(false);
   const [showVersionDropdown, setShowVersionDropdown] = useState(false);
+  const [isGeneratingTitle, setIsGeneratingTitle] = useState(false);
+
+  // Rich text editor ref
+  const editorRef = useRef(null);
 
   // Persistence state
   const [articleId, setArticleId] = useState(null);
@@ -197,11 +194,13 @@ Com esse desempenho, o Brasil reafirma sua posição estratégica no cenário gl
   useEffect(() => {
     if (resultado?.geradoEm) {
       const newTags = resultado.tagsSugeridas?.length > 0 ? resultado.tagsSugeridas : tags;
+      // Convert markdown content to HTML for TipTap editor
+      const htmlContent = markdownToHtml(resultado.conteudo || '');
       // Reset version history with new content
       resetHistory({
         title: resultado.titulo || '',
         linhaFina: resultado.linhaFina || '',
-        body: resultado.conteudo || '',
+        body: htmlContent,
         tags: newTags
       });
     }
@@ -263,12 +262,24 @@ Com esse desempenho, o Brasil reafirma sua posição estratégica no cenário gl
     sendMessage: sendEditMessage,
     isProcessing: isChatProcessing,
     clearMessages: clearChatMessages,
-    setWelcomeMessages
+    setWelcomeMessages,
+    approveEdit,
+    rejectEdit,
+    requestModification
   } = useChatEditor({
     articleState: { title, linhaFina, content, tags },
     onEdit: (newContent, summary, messageId) => {
+      // Check if content is already HTML (contains HTML tags)
+      const bodyContent = newContent.body || '';
+      const isAlreadyHtml = bodyContent.trim().startsWith('<') || /<[a-z][\s\S]*>/i.test(bodyContent);
+
+      // Only convert markdown to HTML if content is not already HTML
+      const contentWithHtmlBody = {
+        ...newContent,
+        body: isAlreadyHtml ? bodyContent : markdownToHtml(bodyContent)
+      };
       // Push new version when AI edits are applied
-      pushVersion(newContent, 'ai', summary, messageId);
+      pushVersion(contentWithHtmlBody, 'ai', summary, messageId);
     },
     categoria: selectedPersona?.id || 'geral',
     tom: selectedTone?.id || 'conversacional'
@@ -281,6 +292,10 @@ Com esse desempenho, o Brasil reafirma sua posição estratégica no cenário gl
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const [chatInput, setChatInput] = useState('');
+
+  // State for edit approval workflow
+  const [modifyingMessageId, setModifyingMessageId] = useState(null);
+  const [modificationInput, setModificationInput] = useState('');
 
   // Sugestões rápidas contextualizadas para edição
   const quickSuggestions = useMemo(() => {
@@ -314,10 +329,12 @@ Com esse desempenho, o Brasil reafirma sua posição estratégica no cenário gl
     setChatInput(suggestion);
   };
 
-  const wordCount = useMemo(() => countWords(content), [content]);
-
-  // Render content as HTML for preview
-  const renderedContent = useMemo(() => markdownToHtml(content), [content]);
+  // Word count - strip HTML tags for accurate count
+  const wordCount = useMemo(() => {
+    // Strip HTML tags and count words
+    const textContent = content.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+    return textContent ? textContent.split(/\s+/).filter(Boolean).length : 0;
+  }, [content]);
 
   // Score SEO sincronizado com o painel SEO
   const seoScore = useMemo(() => {
@@ -344,68 +361,114 @@ Com esse desempenho, o Brasil reafirma sua posição estratégica no cenário gl
     }
   };
 
-  // Função para gerar tags com IA
+  // Função para gerar tags com IA - conectada ao API real
   const handleGenerateTagsWithAI = async () => {
-    // Verificar se há conteúdo para analisar
-    const hasContent = title.trim() || linhaFina.trim() || content.trim() || themeContext.tema;
-    if (!hasContent) return;
+    // Strip HTML tags for plain text analysis
+    const plainContent = content.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+    const textToAnalyze = [title, linhaFina, plainContent, themeContext.tema].filter(Boolean).join('\n\n');
+
+    if (!textToAnalyze.trim()) return;
 
     setIsGeneratingTags(true);
 
-    // Simular chamada à API de IA (mock)
-    await new Promise((resolve) => setTimeout(resolve, 1500));
+    try {
+      const result = await generateTags({ texto: textToAnalyze, max_tags: 10 });
+      const generatedTags = result.tags || [];
 
-    // Tags mock baseadas no contexto
-    const mockGeneratedTags = [];
+      // Filter duplicates and already existing tags
+      const newTags = generatedTags.filter(tag => tag && !tags.includes(tag));
 
-    // Extrair palavras-chave do título
-    if (title) {
-      const titleWords = title.split(' ').filter((w) => w.length > 4);
-      if (titleWords.length > 0) mockGeneratedTags.push(titleWords[0]);
+      // Add tags with small delay for animation
+      for (const tag of newTags) {
+        setTags((prev) => [...prev, tag]);
+        await new Promise((resolve) => setTimeout(resolve, 150));
+      }
+    } catch (err) {
+      console.error('Error generating tags:', err);
+      // Fallback: extract keywords from title
+      if (title) {
+        const titleWords = title.split(' ').filter((w) => w.length > 4 && !tags.includes(w));
+        if (titleWords.length > 0) {
+          setTags((prev) => [...prev, titleWords[0]]);
+        }
+      }
+    } finally {
+      setIsGeneratingTags(false);
     }
+  };
 
-    // Tags baseadas no tema do contexto
-    if (themeContext.tema) {
-      mockGeneratedTags.push(themeContext.tema);
+  // Função para sugerir título com IA
+  const handleSuggestTitle = async () => {
+    const plainContent = content.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+    if (!plainContent.trim()) return;
+
+    setIsGeneratingTitle(true);
+
+    try {
+      const result = await editArticle({
+        currentArticle: {
+          title: title || '',
+          linhaFina: linhaFina || '',
+          content: plainContent,
+          tags: tags
+        },
+        instruction: 'Sugira um título mais atraente e otimizado para SEO. Mantenha o título conciso (máximo 100 caracteres). Retorne APENAS o título sugerido.',
+        editScope: 'title',
+        categoria: selectedPersona?.id || 'geral',
+        tom: selectedTone?.id || 'conversacional'
+      });
+
+      if (result.titulo) {
+        setTitle(result.titulo);
+        // Push version for undo support
+        pushVersion({
+          title: result.titulo,
+          linhaFina,
+          body: content,
+          tags
+        }, 'ai', 'Título sugerido pela IA');
+      }
+    } catch (err) {
+      console.error('Error suggesting title:', err);
+    } finally {
+      setIsGeneratingTitle(false);
     }
+  };
 
-    // Tags genéricas de exemplo
-    const genericTags = ['Notícias', 'Brasil', 'Atualidades', 'Economia', 'Política', 'Tecnologia'];
-    const randomTags = genericTags.sort(() => 0.5 - Math.random()).slice(0, 3);
-    mockGeneratedTags.push(...randomTags);
-
-    // Filtrar duplicatas e tags já existentes
-    const newTags = [...new Set(mockGeneratedTags)]
-      .filter((tag) => tag && !tags.includes(tag))
-      .slice(0, 5);
-
-    // Adicionar tags com pequeno delay para animação
-    for (const tag of newTags) {
-      setTags((prev) => [...prev, tag]);
-      await new Promise((resolve) => setTimeout(resolve, 150));
-    }
-
-    setIsGeneratingTags(false);
+  // Helper para remover tags HTML e obter texto limpo
+  const stripHtmlTags = (html) => {
+    const tmp = document.createElement('div');
+    tmp.innerHTML = html;
+    return tmp.textContent || tmp.innerText || '';
   };
 
   // Função para copiar matéria para área de transferência
-  const handleCopyToClipboard = async () => {
-    // Formatar conteúdo para cópia
+  const handleCopyToClipboard = async (format = 'text') => {
+    let bodyContent;
+
+    if (format === 'html') {
+      // Manter tags HTML para colar em editores rich text
+      bodyContent = content;
+    } else {
+      // Remover tags HTML para texto simples
+      bodyContent = stripHtmlTags(content);
+    }
+
     const formattedContent = [
       title,
       '',
       linhaFina,
       '',
-      content,
+      bodyContent,
       '',
       tags.length > 0 ? `Tags: ${tags.join(', ')}` : ''
     ].filter(Boolean).join('\n');
 
     try {
       await navigator.clipboard.writeText(formattedContent);
-      setIsCopied(true);
-      // Reset após 2 segundos
-      setTimeout(() => setIsCopied(false), 2000);
+      setCopyType(format);
+      setShowCopyDropdown(false);
+      setTimeout(() => setCopyType(null), 2000);
     } catch (err) {
       console.error('Erro ao copiar:', err);
       // Fallback para navegadores antigos
@@ -415,8 +478,9 @@ Com esse desempenho, o Brasil reafirma sua posição estratégica no cenário gl
       textArea.select();
       document.execCommand('copy');
       document.body.removeChild(textArea);
-      setIsCopied(true);
-      setTimeout(() => setIsCopied(false), 2000);
+      setCopyType(format);
+      setShowCopyDropdown(false);
+      setTimeout(() => setCopyType(null), 2000);
     }
   };
 
@@ -644,31 +708,56 @@ Com esse desempenho, o Brasil reafirma sua posição estratégica no cenário gl
           </div>
 
           <div className="flex items-center gap-2 md:gap-3">
-            {/* Copy to Clipboard Button */}
-            <Tooltip content={isCopied ? 'Copiado!' : 'Copiar matéria para área de transferência'} position="bottom">
-              <button
-                onClick={handleCopyToClipboard}
-                disabled={!title && !content}
-                className={`flex items-center gap-2 px-3 md:px-4 py-2 text-sm font-medium border rounded-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed ${
-                  isCopied
-                    ? 'bg-success text-white border-success'
-                    : 'text-medium-gray hover:text-dark-gray border-light-gray hover:bg-off-white'
-                }`}
-                aria-label="Copiar matéria"
-              >
-                {isCopied ? (
-                  <>
-                    <Check size={16} />
-                    <span className="hidden sm:inline">Copiado!</span>
-                  </>
-                ) : (
-                  <>
-                    <Copy size={16} />
-                    <span className="hidden sm:inline">Copiar</span>
-                  </>
-                )}
-              </button>
-            </Tooltip>
+            {/* Copy Dropdown */}
+            <div className="relative">
+              <Tooltip content={copyType ? 'Copiado!' : 'Copiar matéria'} position="bottom">
+                <button
+                  onClick={() => setShowCopyDropdown(!showCopyDropdown)}
+                  disabled={!title && !content}
+                  className={`flex items-center gap-2 px-3 md:px-4 py-2 text-sm font-medium border rounded-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed ${
+                    copyType
+                      ? 'bg-success text-white border-success'
+                      : 'text-medium-gray hover:text-dark-gray border-light-gray hover:bg-off-white'
+                  }`}
+                  aria-label="Copiar matéria"
+                >
+                  {copyType ? (
+                    <>
+                      <Check size={16} />
+                      <span className="hidden sm:inline">Copiado!</span>
+                    </>
+                  ) : (
+                    <>
+                      <Copy size={16} />
+                      <span className="hidden sm:inline">Copiar</span>
+                      <ChevronDown size={14} />
+                    </>
+                  )}
+                </button>
+              </Tooltip>
+
+              {showCopyDropdown && (
+                <>
+                  <div className="fixed inset-0 z-40" onClick={() => setShowCopyDropdown(false)} />
+                  <div className="absolute right-0 top-full mt-1 w-48 bg-white rounded-lg shadow-lg border border-light-gray py-1 z-50">
+                    <button
+                      onClick={() => handleCopyToClipboard('text')}
+                      className="w-full px-4 py-2 text-left text-sm text-dark-gray hover:bg-off-white flex items-center gap-2"
+                    >
+                      <FileText size={14} />
+                      Copiar texto simples
+                    </button>
+                    <button
+                      onClick={() => handleCopyToClipboard('html')}
+                      className="w-full px-4 py-2 text-left text-sm text-dark-gray hover:bg-off-white flex items-center gap-2"
+                    >
+                      <Code size={14} />
+                      Copiar com HTML
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
 
             <Tooltip content={lastSavedAt ? `Último salvamento: ${lastSavedAt.toLocaleTimeString()}` : 'Salvar rascunho'} position="bottom">
               <button
@@ -760,119 +849,31 @@ Com esse desempenho, o Brasil reafirma sua posição estratégica no cenário gl
         <div className="flex-1 flex flex-col lg:border-r border-light-gray overflow-visible">
           {/* Toolbar */}
           <div className="bg-white border-b border-light-gray p-2 md:p-3 space-y-2 overflow-visible relative z-30 isolate">
-            {/* Formatting */}
-            <div className="flex items-center gap-1">
-              <Tooltip content="Negrito" shortcut="Ctrl+B">
-                <button className="p-2 hover:bg-off-white rounded transition-colors" aria-label="Negrito">
-                  <Bold size={18} className="text-medium-gray" />
-                </button>
-              </Tooltip>
-              <Tooltip content="Itálico" shortcut="Ctrl+I">
-                <button className="p-2 hover:bg-off-white rounded transition-colors" aria-label="Itálico">
-                  <Italic size={18} className="text-medium-gray" />
-                </button>
-              </Tooltip>
-              <Tooltip content="Sublinhado" shortcut="Ctrl+U">
-                <button className="p-2 hover:bg-off-white rounded transition-colors" aria-label="Sublinhado">
-                  <Underline size={18} className="text-medium-gray" />
-                </button>
-              </Tooltip>
-              <div className="w-px h-6 bg-light-gray mx-2" />
-              <Tooltip content="Lista com marcadores">
-                <button className="p-2 hover:bg-off-white rounded transition-colors" aria-label="Lista com marcadores">
-                  <List size={18} className="text-medium-gray" />
-                </button>
-              </Tooltip>
-              <Tooltip content="Lista numerada">
-                <button className="p-2 hover:bg-off-white rounded transition-colors" aria-label="Lista numerada">
-                  <ListOrdered size={18} className="text-medium-gray" />
-                </button>
-              </Tooltip>
-              <div className="w-px h-6 bg-light-gray mx-2" />
-              <Tooltip content="Inserir hyperlink" shortcut="Ctrl+K">
-                <button className="p-2 hover:bg-off-white rounded transition-colors" aria-label="Inserir hyperlink">
-                  <Link2 size={18} className="text-medium-gray" />
-                </button>
-              </Tooltip>
-              <Tooltip content="Inserir imagem">
-                <button className="p-2 hover:bg-off-white rounded transition-colors" aria-label="Inserir imagem">
-                  <Image size={18} className="text-medium-gray" />
-                </button>
-              </Tooltip>
-              <div className="w-px h-6 bg-light-gray mx-2" />
-              <Tooltip content={canUndo ? `Desfazer (${versionCount - 1} versões)` : 'Nada para desfazer'} shortcut="Ctrl+Z">
-                <button
-                  onClick={undo}
-                  disabled={!canUndo}
-                  className={`p-2 rounded transition-colors ${
-                    canUndo
-                      ? 'hover:bg-off-white text-medium-gray'
-                      : 'text-light-gray cursor-not-allowed'
-                  }`}
-                  aria-label="Desfazer"
-                >
-                  <Undo size={18} />
-                </button>
-              </Tooltip>
-              <Tooltip content={canRedo ? 'Refazer' : 'Nada para refazer'} shortcut="Ctrl+Y">
-                <button
-                  onClick={redo}
-                  disabled={!canRedo}
-                  className={`p-2 rounded transition-colors ${
-                    canRedo
-                      ? 'hover:bg-off-white text-medium-gray'
-                      : 'text-light-gray cursor-not-allowed'
-                  }`}
-                  aria-label="Refazer"
-                >
-                  <Redo size={18} />
-                </button>
-              </Tooltip>
-              {/* Version Dropdown - only shows when there are multiple versions */}
-              {versionCount > 1 && (
-                <div className="relative">
-                  <Tooltip content="Ver histórico de versões" position="bottom">
-                    <button
-                      onClick={() => setShowVersionDropdown(!showVersionDropdown)}
-                      className="flex items-center gap-1 px-2 py-1.5 text-xs text-medium-gray
-                                 hover:bg-off-white rounded transition-colors"
-                    >
-                      <span className="font-medium">v{currentIndex + 1}</span>
-                      <span className="text-light-gray">/{versionCount}</span>
-                      <ChevronDown size={12} />
-                    </button>
-                  </Tooltip>
-
-                  {showVersionDropdown && (
-                    <VersionDropdown
-                      versions={versions}
-                      currentIdx={currentIndex}
-                      onSelect={(id) => {
-                        goToVersion(id);
-                        setShowVersionDropdown(false);
-                      }}
-                      onClose={() => setShowVersionDropdown(false)}
-                    />
-                  )}
-                </div>
-              )}
-              <div className="w-px h-6 bg-light-gray mx-2" />
-              {/* Preview/Edit Toggle */}
-              <Tooltip content={isPreviewMode ? "Editar texto" : "Visualizar formatação"}>
-                <button
-                  onClick={() => setIsPreviewMode(!isPreviewMode)}
-                  className={`p-2 rounded transition-colors ${
-                    isPreviewMode
-                      ? 'bg-tmc-orange text-white'
-                      : 'hover:bg-off-white text-medium-gray'
-                  }`}
-                  aria-label={isPreviewMode ? "Editar texto" : "Visualizar formatação"}
-                  aria-pressed={isPreviewMode}
-                >
-                  {isPreviewMode ? <Edit3 size={18} /> : <Eye size={18} />}
-                </button>
-              </Tooltip>
-            </div>
+            {/* Rich Text Formatting Toolbar */}
+            <EditorToolbar
+              editor={editorRef.current?.editor}
+              onUndo={undo}
+              onRedo={redo}
+              canUndo={canUndo}
+              canRedo={canRedo}
+              versionCount={versionCount}
+              currentIndex={currentIndex}
+              showVersionDropdown={showVersionDropdown}
+              onToggleVersionDropdown={() => setShowVersionDropdown(!showVersionDropdown)}
+              VersionDropdownComponent={
+                showVersionDropdown && (
+                  <VersionDropdown
+                    versions={versions}
+                    currentIdx={currentIndex}
+                    onSelect={(id) => {
+                      goToVersion(id);
+                      setShowVersionDropdown(false);
+                    }}
+                    onClose={() => setShowVersionDropdown(false)}
+                  />
+                )
+              }
+            />
 
             {/* AI Tools */}
             <div className="flex flex-wrap items-center gap-2 pb-2">
@@ -1011,38 +1012,49 @@ Com esse desempenho, o Brasil reafirma sua posição estratégica no cenário gl
               </Tooltip>
 
               <Tooltip content="Analisar e otimizar seu texto para mecanismos de busca" position="bottom">
-                <button className="hidden md:flex items-center gap-2 px-3 py-1.5 bg-off-white text-dark-gray hover:bg-light-gray rounded-lg text-sm font-medium transition-colors flex-shrink-0" aria-label="Insights SEO">
+                <button
+                  onClick={() => setActiveSidebarTab('seo')}
+                  className="hidden md:flex items-center gap-2 px-3 py-1.5 bg-off-white text-dark-gray hover:bg-light-gray rounded-lg text-sm font-medium transition-colors flex-shrink-0"
+                  aria-label="Insights SEO"
+                >
                   <BarChart3 size={16} />
                   <span>Insights SEO</span>
                 </button>
               </Tooltip>
 
               <Tooltip content="Gerar sugestões de título com base no conteúdo" position="bottom">
-                <button className="hidden lg:flex items-center gap-2 px-3 py-1.5 bg-off-white text-dark-gray hover:bg-light-gray rounded-lg text-sm font-medium transition-colors flex-shrink-0" aria-label="Sugerir título">
-                  <Lightbulb size={16} />
-                  <span>Sugerir título</span>
+                <button
+                  onClick={handleSuggestTitle}
+                  disabled={isGeneratingTitle || !content.trim()}
+                  className="hidden lg:flex items-center gap-2 px-3 py-1.5 bg-off-white text-dark-gray hover:bg-light-gray rounded-lg text-sm font-medium transition-colors flex-shrink-0 disabled:opacity-50 disabled:cursor-not-allowed"
+                  aria-label="Sugerir título"
+                >
+                  {isGeneratingTitle ? (
+                    <>
+                      <Loader2 size={16} className="animate-spin" />
+                      <span>Gerando...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Lightbulb size={16} />
+                      <span>Sugerir título</span>
+                    </>
+                  )}
                 </button>
               </Tooltip>
             </div>
           </div>
 
           {/* Editor */}
-          <div className="flex-1 p-4 md:p-8 overflow-y-auto">
-            {isPreviewMode ? (
-              /* Preview Mode - Rendered HTML */
-              <div
-                className="prose prose-sm max-w-none text-dark-gray"
-                dangerouslySetInnerHTML={{ __html: renderedContent || '<p class="text-light-gray">Nenhum conteúdo para visualizar...</p>' }}
-              />
-            ) : (
-              /* Edit Mode - Textarea */
-              <textarea
-                placeholder="Comece a escrever seu texto aqui ou use o assistente de IA para obter sugestões..."
-                value={content}
-                onChange={(e) => setContent(e.target.value)}
-                className="w-full h-full resize-none text-dark-gray text-base leading-relaxed focus:outline-none placeholder:text-light-gray"
-              />
-            )}
+          <div className="flex-1 p-4 md:p-8 overflow-y-auto bg-white">
+            <RichTextEditor
+              ref={editorRef}
+              content={content}
+              onChange={setContent}
+              placeholder="Comece a escrever seu texto aqui ou use o assistente de IA para obter sugestões..."
+              spellCheck={spellCheck}
+              className="text-dark-gray text-base leading-relaxed"
+            />
           </div>
 
           {/* Seção de Tópicos/Tags */}
@@ -1225,11 +1237,111 @@ Com esse desempenho, o Brasil reafirma sua posição estratégica no cenário gl
                       ) : (
                         <p className="text-sm whitespace-pre-wrap">{message.content}</p>
                       )}
-                      {message.isEdit && message.type === 'ai' && (
+
+                      {/* Pending Approval - Show action buttons */}
+                      {message.isPendingApproval && message.type === 'ai' && (
+                        <div className="mt-3 pt-3 border-t border-light-gray">
+                          <p className="text-xs text-medium-gray mb-2">Deseja aplicar estas alterações?</p>
+
+                          {/* Show modification input if user clicked "Modificar" */}
+                          {modifyingMessageId === message.id ? (
+                            <div className="space-y-2">
+                              <input
+                                type="text"
+                                placeholder="Descreva o ajuste desejado..."
+                                value={modificationInput}
+                                onChange={(e) => setModificationInput(e.target.value)}
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter' && modificationInput.trim()) {
+                                    requestModification(message.id, modificationInput);
+                                    setModifyingMessageId(null);
+                                    setModificationInput('');
+                                  }
+                                }}
+                                disabled={isChatProcessing}
+                                className="w-full px-3 py-1.5 bg-white border border-light-gray rounded-lg text-xs focus:outline-none focus:ring-1 focus:ring-tmc-orange"
+                                autoFocus
+                              />
+                              <div className="flex gap-2">
+                                <button
+                                  onClick={() => {
+                                    if (modificationInput.trim()) {
+                                      requestModification(message.id, modificationInput);
+                                      setModifyingMessageId(null);
+                                      setModificationInput('');
+                                    }
+                                  }}
+                                  disabled={!modificationInput.trim() || isChatProcessing}
+                                  className="flex-1 px-3 py-1.5 bg-tmc-orange text-white text-xs font-medium rounded-lg hover:bg-tmc-orange/90 transition-colors disabled:opacity-50"
+                                >
+                                  Enviar Ajuste
+                                </button>
+                                <button
+                                  onClick={() => {
+                                    setModifyingMessageId(null);
+                                    setModificationInput('');
+                                  }}
+                                  className="px-3 py-1.5 bg-light-gray text-medium-gray text-xs font-medium rounded-lg hover:bg-medium-gray/20 transition-colors"
+                                >
+                                  Cancelar
+                                </button>
+                              </div>
+                            </div>
+                          ) : (
+                            /* Show approve/reject/modify buttons */
+                            <div className="flex gap-2">
+                              <button
+                                onClick={() => approveEdit(message.id)}
+                                className="flex-1 px-3 py-1.5 bg-success text-white text-xs font-medium rounded-lg hover:bg-success/90 transition-colors flex items-center justify-center gap-1"
+                              >
+                                <Check size={12} />
+                                Aprovar
+                              </button>
+                              <button
+                                onClick={() => setModifyingMessageId(message.id)}
+                                className="flex-1 px-3 py-1.5 bg-tmc-orange text-white text-xs font-medium rounded-lg hover:bg-tmc-orange/90 transition-colors flex items-center justify-center gap-1"
+                              >
+                                <Edit3 size={12} />
+                                Modificar
+                              </button>
+                              <button
+                                onClick={() => rejectEdit(message.id)}
+                                className="flex-1 px-3 py-1.5 bg-medium-gray text-white text-xs font-medium rounded-lg hover:bg-medium-gray/90 transition-colors flex items-center justify-center gap-1"
+                              >
+                                <X size={12} />
+                                Rejeitar
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                      {/* Approved - Show success badge */}
+                      {message.isApproved && message.type === 'ai' && (
                         <div className="mt-2 pt-2 border-t border-light-gray flex items-center gap-2">
                           <Check size={12} className="text-success" />
                           <span className="text-xs text-success font-medium">
                             Alterações aplicadas
+                          </span>
+                        </div>
+                      )}
+
+                      {/* Modified - Show modified badge */}
+                      {message.isModified && message.type === 'ai' && (
+                        <div className="mt-2 pt-2 border-t border-light-gray flex items-center gap-2">
+                          <Edit3 size={12} className="text-tmc-orange" />
+                          <span className="text-xs text-tmc-orange font-medium">
+                            Proposta ajustada
+                          </span>
+                        </div>
+                      )}
+
+                      {/* Rejected - Show rejected badge */}
+                      {message.isRejected && message.type === 'ai' && (
+                        <div className="mt-2 pt-2 border-t border-light-gray flex items-center gap-2">
+                          <X size={12} className="text-medium-gray" />
+                          <span className="text-xs text-medium-gray font-medium">
+                            Alterações rejeitadas
                           </span>
                         </div>
                       )}

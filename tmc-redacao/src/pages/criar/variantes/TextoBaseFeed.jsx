@@ -1,6 +1,6 @@
 import { useState, useCallback, useMemo, useEffect } from 'react';
 import PropTypes from 'prop-types';
-import { Plus, ExternalLink, FileText, List, AlertCircle, X, RefreshCw } from 'lucide-react';
+import { Plus, ExternalLink, FileText, List, AlertCircle, X, RefreshCw, Loader2 } from 'lucide-react';
 import {
   SourceBadge,
   ContentStats,
@@ -9,7 +9,7 @@ import {
   TopicCard,
   StoryFusionView
 } from '../../../components/criar';
-import { getArticles } from '../../../services/api';
+import { getArticles, extractTopics } from '../../../services/api';
 
 // Threshold for using Story Fusion View (2 or more articles)
 const STORY_FUSION_THRESHOLD = 2;
@@ -19,14 +19,13 @@ const STORY_FUSION_THRESHOLD = 2;
  *
  * Permite:
  * - Ver materias selecionadas na etapa anterior
- * - Extrair topicos de cada materia
+ * - Extrair topicos de cada materia (usando IA)
  * - Selecionar/desselecionar topicos
  * - Alternar entre modo topicos e texto completo
  */
 
-// Função para extrair tópicos simulados de um artigo
-const extractTopicsFromArticle = (article, index) => {
-  // Em produção, isso seria feito por IA. Por ora, criamos tópicos a partir do preview/content
+// Fallback function for topic extraction when API fails
+const extractTopicsFromArticleFallback = (article, index) => {
   const baseTopics = [
     { type: 'fato', prefix: 'Fato principal: ' },
     { type: 'contexto', prefix: 'Contexto: ' },
@@ -43,8 +42,30 @@ const extractTopicsFromArticle = (article, index) => {
   }));
 };
 
-// Função para transformar artigos da Redação em formato com tópicos
-const transformArticlesToMaterias = (articles) => {
+// Async function to extract topics using AI API
+const extractTopicsWithAI = async (article) => {
+  const text = article.content || article.preview || article.title;
+
+  try {
+    const result = await extractTopics({ texto: text });
+
+    if (result.topics && result.topics.length > 0) {
+      return result.topics.map((topic, i) => ({
+        id: `top-${article.id}-${i}`,
+        type: topic.type || 'fato',
+        text: topic.content || topic.text
+      }));
+    }
+  } catch (err) {
+    console.error('Error extracting topics with AI:', err);
+  }
+
+  // Fallback to simple extraction if API fails
+  return extractTopicsFromArticleFallback(article, 0);
+};
+
+// Function to transform articles with topics (initially uses fallback, then updates with AI)
+const transformArticlesToMateriasInitial = (articles) => {
   if (!articles || !Array.isArray(articles) || articles.length === 0) {
     return [];
   }
@@ -53,8 +74,9 @@ const transformArticlesToMaterias = (articles) => {
     id: `art-${article.id}`,
     title: article.title,
     source: article.source,
-    topics: extractTopicsFromArticle(article, index),
-    fullText: article.content || article.preview || article.title
+    topics: extractTopicsFromArticleFallback(article, index),
+    fullText: article.content || article.preview || article.title,
+    isLoadingTopics: true
   }));
 };
 
@@ -63,12 +85,9 @@ const TextoBaseFeed = ({
   onChangeSource,
   onDataChange
 }) => {
-  // Transforma os artigos da fonte em matérias com tópicos
-  const materias = useMemo(() => {
-    return transformArticlesToMaterias(fonte?.dados);
-  }, [fonte?.dados]);
-
   // States
+  const [materias, setMaterias] = useState([]);
+  const [isExtractingTopics, setIsExtractingTopics] = useState(false);
   const [activeMateria, setActiveMateria] = useState(null);
   const [selectedTopics, setSelectedTopics] = useState(new Set());
   const [activeTab, setActiveTab] = useState('topics');
@@ -79,18 +98,71 @@ const TextoBaseFeed = ({
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [loadMoreError, setLoadMoreError] = useState(null);
 
-  // Inicializar quando matérias carregarem
+  // Initialize materias when fonte changes (with fallback topics)
   useEffect(() => {
-    if (materias.length > 0 && !activeMateria) {
-      setActiveMateria(materias[0].id);
-      // Seleciona todos os tópicos por padrão
-      const allTopics = new Set();
-      materias.forEach(m => {
-        m.topics.forEach(t => allTopics.add(t.id));
-      });
-      setSelectedTopics(allTopics);
+    if (fonte?.dados && fonte.dados.length > 0) {
+      const initialMaterias = transformArticlesToMateriasInitial(fonte.dados);
+      setMaterias(initialMaterias);
+
+      // Set active materia and select all topics
+      if (initialMaterias.length > 0) {
+        setActiveMateria(initialMaterias[0].id);
+        const allTopics = new Set();
+        initialMaterias.forEach(m => {
+          m.topics.forEach(t => allTopics.add(t.id));
+        });
+        setSelectedTopics(allTopics);
+      }
     }
-  }, [materias, activeMateria]);
+  }, [fonte?.dados]);
+
+  // Extract topics with AI after initial load
+  useEffect(() => {
+    const extractAllTopics = async () => {
+      if (!fonte?.dados || fonte.dados.length === 0) return;
+
+      setIsExtractingTopics(true);
+
+      try {
+        // Process articles one by one to avoid overwhelming the API
+        const updatedMaterias = [...materias];
+
+        for (let i = 0; i < fonte.dados.length; i++) {
+          const article = fonte.dados[i];
+          const aiTopics = await extractTopicsWithAI(article);
+
+          // Update the materia with AI-extracted topics
+          const materiaIndex = updatedMaterias.findIndex(m => m.id === `art-${article.id}`);
+          if (materiaIndex >= 0) {
+            updatedMaterias[materiaIndex] = {
+              ...updatedMaterias[materiaIndex],
+              topics: aiTopics,
+              isLoadingTopics: false
+            };
+
+            // Update state incrementally for better UX
+            setMaterias([...updatedMaterias]);
+
+            // Update selected topics to include new AI topics
+            setSelectedTopics(prev => {
+              const newSet = new Set(prev);
+              aiTopics.forEach(t => newSet.add(t.id));
+              return newSet;
+            });
+          }
+        }
+      } catch (err) {
+        console.error('Error extracting topics:', err);
+      } finally {
+        setIsExtractingTopics(false);
+      }
+    };
+
+    // Only run if we have materias with isLoadingTopics=true
+    if (materias.some(m => m.isLoadingTopics)) {
+      extractAllTopics();
+    }
+  }, [materias.length]); // Only run when materias array length changes
 
   // Carregar artigos disponíveis do API (excluindo já selecionados)
   const loadAvailableArticles = useCallback(async () => {

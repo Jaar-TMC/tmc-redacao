@@ -115,30 +115,18 @@ export function useChatEditor({
       // Remove loading message
       setMessages((prev) => prev.filter((m) => m.id !== loadingMessageId));
 
-      // Add success message with changes summary
-      const aiMessageId = addMessage('ai', result.changes_summary || 'Artigo editado com sucesso!', {
+      // Add pending approval message with changes summary
+      // Changes are NOT applied until user approves
+      const aiMessageId = addMessage('ai', result.changes_summary || 'Proposta de edição:', {
         editResult: {
           titulo: result.titulo,
           linha_fina: result.linha_fina,
           conteudo: result.conteudo,
           tags: result.tags
         },
-        isEdit: true
+        isPendingApproval: true,
+        originalInstruction: instruction
       });
-
-      // Call the onEdit callback to update content and version history
-      if (onEdit) {
-        onEdit(
-          {
-            title: result.titulo,
-            linhaFina: result.linha_fina,
-            body: result.conteudo,
-            tags: result.tags
-          },
-          `AI: ${result.changes_summary || instruction.slice(0, 50)}`,
-          aiMessageId
-        );
-      }
 
       setIsProcessing(false);
       return result;
@@ -185,6 +173,128 @@ export function useChatEditor({
   }, [isProcessing, addMessage]);
 
   /**
+   * Approve a pending edit and apply changes
+   * @param {string} messageId - ID of the message with pending edit
+   */
+  const approveEdit = useCallback((messageId) => {
+    setMessages((prev) => prev.map((msg) => {
+      if (msg.id === messageId && msg.isPendingApproval) {
+        // Call onEdit with the stored editResult
+        if (onEdit && msg.editResult) {
+          onEdit(
+            {
+              title: msg.editResult.titulo,
+              linhaFina: msg.editResult.linha_fina,
+              body: msg.editResult.conteudo,
+              tags: msg.editResult.tags
+            },
+            `AI: ${msg.content || msg.originalInstruction?.slice(0, 50)}`,
+            messageId
+          );
+        }
+        // Update message state
+        return {
+          ...msg,
+          isPendingApproval: false,
+          isApproved: true,
+          isEdit: true
+        };
+      }
+      return msg;
+    }));
+  }, [onEdit]);
+
+  /**
+   * Reject a pending edit and discard changes
+   * @param {string} messageId - ID of the message with pending edit
+   */
+  const rejectEdit = useCallback((messageId) => {
+    setMessages((prev) => prev.map((msg) => {
+      if (msg.id === messageId && msg.isPendingApproval) {
+        return {
+          ...msg,
+          isPendingApproval: false,
+          isRejected: true,
+          content: msg.content + '\n\n(Alterações rejeitadas pelo usuário)'
+        };
+      }
+      return msg;
+    }));
+  }, []);
+
+  /**
+   * Request a modification to a pending edit
+   * @param {string} messageId - ID of the message with pending edit
+   * @param {string} modificationRequest - User's modification request
+   * @returns {Promise<Object|null>} Edit result or null if failed
+   */
+  const requestModification = useCallback(async (messageId, modificationRequest) => {
+    if (!modificationRequest.trim() || isProcessing) return null;
+
+    // Find the pending message with the edit result
+    const pendingMessage = messages.find(m => m.id === messageId && m.isPendingApproval);
+    if (!pendingMessage || !pendingMessage.editResult) return null;
+
+    // Mark the old pending message as modified (no longer pending)
+    setMessages((prev) => prev.map((msg) => {
+      if (msg.id === messageId) {
+        return {
+          ...msg,
+          isPendingApproval: false,
+          isModified: true,
+          content: msg.content + '\n\n(Solicitada modificação)'
+        };
+      }
+      return msg;
+    }));
+
+    // Add user's modification request as a new message
+    addMessage('user', `Ajuste: ${modificationRequest}`);
+
+    // Add loading message
+    const loadingMessageId = addMessage('ai', 'Ajustando a proposta...', { isLoading: true });
+    setIsProcessing(true);
+
+    try {
+      // Call API with the proposed content + modification instruction
+      const result = await editArticle({
+        currentArticle: {
+          title: pendingMessage.editResult.titulo || '',
+          linhaFina: pendingMessage.editResult.linha_fina || '',
+          content: pendingMessage.editResult.conteudo || '',
+          tags: pendingMessage.editResult.tags || []
+        },
+        instruction: modificationRequest,
+        editScope: 'full',
+        categoria,
+        tom
+      });
+
+      // Remove loading, add new pending message
+      setMessages((prev) => prev.filter((m) => m.id !== loadingMessageId));
+
+      addMessage('ai', result.changes_summary || 'Proposta ajustada:', {
+        editResult: {
+          titulo: result.titulo,
+          linha_fina: result.linha_fina,
+          conteudo: result.conteudo,
+          tags: result.tags
+        },
+        isPendingApproval: true,
+        originalInstruction: modificationRequest
+      });
+
+      setIsProcessing(false);
+      return result;
+    } catch (err) {
+      setMessages((prev) => prev.filter((m) => m.id !== loadingMessageId));
+      addMessage('error', `Erro ao ajustar: ${err.message || 'Erro desconhecido'}`, { isError: true });
+      setIsProcessing(false);
+      return null;
+    }
+  }, [messages, isProcessing, addMessage, categoria, tom]);
+
+  /**
    * Clear all messages
    */
   const clearMessages = useCallback(() => {
@@ -226,7 +336,12 @@ export function useChatEditor({
     addMessage,
     clearMessages,
     setWelcomeMessages,
-    revertToMessage
+    revertToMessage,
+
+    // Approval workflow actions
+    approveEdit,
+    rejectEdit,
+    requestModification
   };
 }
 
