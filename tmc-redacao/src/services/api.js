@@ -110,6 +110,7 @@ export async function checkHealth() {
  * @param {number} [params.limit=50] - Max articles to return
  * @param {number} [params.offset=0] - Pagination offset
  * @param {string} [params.search] - Search query
+ * @param {string} [params.tag] - Filter by exact tag match
  * @returns {Promise<{articles: Array, total: number}>}
  */
 export async function getArticles(params = {}) {
@@ -120,6 +121,7 @@ export async function getArticles(params = {}) {
   if (params.limit) queryParams.append('limit', params.limit.toString());
   if (params.offset) queryParams.append('offset', params.offset.toString());
   if (params.search) queryParams.append('search', params.search);
+  if (params.tag) queryParams.append('tag', params.tag);
 
   const queryString = queryParams.toString();
   const endpoint = `/articles${queryString ? `?${queryString}` : ''}`;
@@ -142,10 +144,62 @@ export async function getArticle(articleId) {
 
 /**
  * Get all RSS sources
- * @returns {Promise<{sources: Array}>}
+ * @returns {Promise<{items: Array, total: number}>}
  */
 export async function getSources() {
   return fetchApi('/sources');
+}
+
+/**
+ * Create a new RSS source
+ * @param {Object} sourceData - Source data
+ * @param {string} sourceData.name - Source name
+ * @param {string} sourceData.url - RSS feed URL
+ * @param {string} [sourceData.category] - Category
+ * @param {string} [sourceData.frequency] - Collection frequency (15min, 30min, 1h, 2h, 6h)
+ * @param {boolean} [sourceData.active] - Whether source is active
+ * @returns {Promise<Object>} Created source
+ */
+export async function createSource(sourceData) {
+  return fetchApi('/sources', {
+    method: 'POST',
+    body: JSON.stringify(sourceData),
+  });
+}
+
+/**
+ * Update an existing RSS source
+ * @param {string} sourceId - Source ID
+ * @param {Object} sourceData - Fields to update
+ * @returns {Promise<Object>} Updated source
+ */
+export async function updateSource(sourceId, sourceData) {
+  return fetchApi(`/sources/${sourceId}`, {
+    method: 'PUT',
+    body: JSON.stringify(sourceData),
+  });
+}
+
+/**
+ * Delete (deactivate) an RSS source
+ * @param {string} sourceId - Source ID
+ * @returns {Promise<{message: string}>}
+ */
+export async function deleteSource(sourceId) {
+  return fetchApi(`/sources/${sourceId}`, {
+    method: 'DELETE',
+  });
+}
+
+/**
+ * Trigger manual collection for a source
+ * @param {string} sourceId - Source ID
+ * @returns {Promise<Object>} Collection result
+ */
+export async function collectSource(sourceId) {
+  return fetchApi(`/sources/${sourceId}/collect`, {
+    method: 'POST',
+  });
 }
 
 /**
@@ -156,6 +210,26 @@ export async function getCategories() {
   return fetchApi('/categories');
 }
 
+/**
+ * Get trending tags with article counts from ALL articles in database
+ * This is the source of truth for "Feed em Alta" / "Temas Quentes"
+ * @param {Object} params - Query parameters
+ * @param {number} [params.limit=20] - Maximum tags to return (max: 50)
+ * @param {number} [params.period] - Optional filter for articles within last N hours
+ * @returns {Promise<{items: Array<{id: number, theme: string, tag: string, count: number, trend: string}>, total: number}>}
+ */
+export async function getTrendingTags(params = {}) {
+  const queryParams = new URLSearchParams();
+
+  if (params.limit) queryParams.append('limit', params.limit.toString());
+  if (params.period) queryParams.append('period', params.period.toString());
+
+  const queryString = queryParams.toString();
+  const endpoint = `/trending-tags${queryString ? `?${queryString}` : ''}`;
+
+  return fetchApi(endpoint);
+}
+
 // ============================================
 // AI Generation API
 // ============================================
@@ -164,14 +238,16 @@ export async function getCategories() {
  * Generate article using AI
  * @param {Object} params - Generation parameters
  * @param {string} params.texto_base - Source text content
- * @param {string} params.persona - Writer persona (imparcial|especialista|colunista|influencer)
- * @param {string} params.tom - Writing tone (formal|informal|tecnico|persuasivo|neutro)
+ * @param {string} [params.persona] - Writer persona - LEGACY (imparcial|especialista|colunista|influencer)
+ * @param {string} params.tom - Writing tone (varies by category)
  * @param {string} [params.orientacao_lide] - Lead paragraph guidance
  * @param {string[]} [params.citacoes] - Quotes to include
  * @param {string} [params.contexto] - Background context
  * @param {string} [params.creditos] - Source credits
  * @param {string} [params.tipo_materia] - Article type (destaque|coluna|servico|etc)
- * @param {string[]} [params.tags] - Tags for SEO
+ * @param {string[]} [params.tags] - User-selected tags for SEO optimization
+ * @param {string} [params.categoria] - Editorial category (esportes|entretenimento|politica|economia|geral) - NEW
+ * @param {boolean} [params.modo_opinativo] - Enable opinion mode for categories that allow it - NEW
  * @returns {Promise<{titulo: string, linha_fina: string, conteudo: string, tags_sugeridas: string[]}>}
  */
 export async function generateArticle(params) {
@@ -207,6 +283,172 @@ export async function generateTags(params) {
   });
 }
 
+/**
+ * Edit an existing article using AI
+ *
+ * Allows incremental edits to article content via chat with AI.
+ * Supports version history (undo/redo) on the frontend.
+ *
+ * @param {Object} params - Edit parameters
+ * @param {Object} params.currentArticle - Current article state
+ * @param {string} params.currentArticle.title - Current title
+ * @param {string} params.currentArticle.linhaFina - Current subtitle
+ * @param {string} params.currentArticle.content - Current body content
+ * @param {string[]} params.currentArticle.tags - Current tags
+ * @param {string} params.instruction - User's edit instruction (e.g., "Melhore o SEO do título")
+ * @param {string} [params.editScope="full"] - Scope: "full"|"title"|"linha_fina"|"content"|"tags"
+ * @param {string} [params.categoria="geral"] - Editorial category
+ * @param {string} [params.tom="conversacional"] - Writing tone
+ * @returns {Promise<{
+ *   titulo: string,
+ *   linha_fina: string,
+ *   conteudo: string,
+ *   tags: string[],
+ *   changes_summary: string
+ * }>}
+ */
+export async function editArticle({
+  currentArticle,
+  instruction,
+  editScope = 'full',
+  categoria = 'geral',
+  tom = 'conversacional'
+}) {
+  return fetchApi('/edit-article', {
+    method: 'POST',
+    body: JSON.stringify({
+      current_article: {
+        title: currentArticle.title,
+        linha_fina: currentArticle.linhaFina,
+        content: currentArticle.content,
+        tags: currentArticle.tags || []
+      },
+      instruction,
+      edit_scope: editScope,
+      categoria,
+      tom
+    })
+  });
+}
+
+/**
+ * Merge topics from multiple articles into a story-centric structure.
+ *
+ * Transforms article-by-article view into unified story view,
+ * grouping content by story element (fact, context, reaction, etc.)
+ * instead of by source.
+ *
+ * @param {Object[]} articles - Articles to merge (max 3)
+ * @param {string|number} articles[].id - Article identifier
+ * @param {string} articles[].title - Article title
+ * @param {string} articles[].content - Article content
+ * @param {string} [articles[].preview] - Article preview (fallback for content)
+ * @param {string} articles[].source - Source name
+ * @returns {Promise<{
+ *   groups: Array<{
+ *     id: string,
+ *     type: string,
+ *     label: string,
+ *     versions: Array<{id: string, articleId: string, content: string, source: string, wordCount: number, isRecommended: boolean}>,
+ *     aiSuggestion: {recommendedId: string, reason: string}
+ *   }>,
+ *   exclusives: Array<{id: string, type: string, content: string, source: string, articleId: string, wordCount: number}>,
+ *   quotes: Array<{id: string, text: string, speaker: string, role: string, source: string, articleId: string}>,
+ *   summary: {mainTopic: string, totalElements: number, commonElements: number, exclusiveCount: number}
+ * }>}
+ */
+export async function mergeTopics(articles) {
+  return fetchApi('/merge-topics', {
+    method: 'POST',
+    body: JSON.stringify({ articles }),
+  });
+}
+
+// ============================================
+// User Articles API (Minhas Matérias)
+// ============================================
+
+/**
+ * Get user articles (drafts and published)
+ * @param {Object} params - Query parameters
+ * @param {number} [params.page=1] - Page number
+ * @param {number} [params.limit=20] - Items per page
+ * @param {string} [params.status] - Filter by status ('draft' | 'published')
+ * @param {string} [params.category] - Filter by category
+ * @param {string} [params.search] - Search in title/content
+ * @param {string} [params.dateRange] - Filter by date ('24h', '7d', '30d', '3m', 'year')
+ * @returns {Promise<{items: Array, total: number, page: number, pages: number}>}
+ */
+export async function getUserArticles(params = {}) {
+  const queryParams = new URLSearchParams();
+
+  if (params.page) queryParams.append('page', params.page.toString());
+  if (params.limit) queryParams.append('limit', params.limit.toString());
+  if (params.status) queryParams.append('status', params.status);
+  if (params.category) queryParams.append('category', params.category);
+  if (params.search) queryParams.append('search', params.search);
+  if (params.dateRange) queryParams.append('dateRange', params.dateRange);
+
+  const queryString = queryParams.toString();
+  const endpoint = `/user-articles${queryString ? `?${queryString}` : ''}`;
+
+  return fetchApi(endpoint);
+}
+
+/**
+ * Get a single user article by ID
+ * @param {string} articleId - Article UUID
+ * @returns {Promise<Object>} Article data
+ */
+export async function getUserArticle(articleId) {
+  return fetchApi(`/user-articles/${articleId}`);
+}
+
+/**
+ * Create a new user article
+ * @param {Object} articleData - Article data
+ * @param {string} articleData.title - Article title
+ * @param {string} [articleData.linhaFina] - Subtitle
+ * @param {string} articleData.content - Article content
+ * @param {string} [articleData.status='draft'] - 'draft' or 'published'
+ * @param {string} [articleData.category] - Category
+ * @param {string[]} [articleData.tags] - Tags
+ * @param {string} [articleData.authorName] - Author name
+ * @param {string[]} [articleData.sourceArticleIds] - IDs of source RSS articles
+ * @param {Object} [articleData.generationConfig] - AI generation settings
+ * @returns {Promise<Object>} Created article
+ */
+export async function createUserArticle(articleData) {
+  return fetchApi('/user-articles', {
+    method: 'POST',
+    body: JSON.stringify(articleData),
+  });
+}
+
+/**
+ * Update an existing user article
+ * @param {string} articleId - Article UUID
+ * @param {Object} articleData - Fields to update (partial)
+ * @returns {Promise<Object>} Updated article
+ */
+export async function updateUserArticle(articleId, articleData) {
+  return fetchApi(`/user-articles/${articleId}`, {
+    method: 'PUT',
+    body: JSON.stringify(articleData),
+  });
+}
+
+/**
+ * Delete a user article (soft delete)
+ * @param {string} articleId - Article UUID
+ * @returns {Promise<{message: string}>}
+ */
+export async function deleteUserArticle(articleId) {
+  return fetchApi(`/user-articles/${articleId}`, {
+    method: 'DELETE',
+  });
+}
+
 // ============================================
 // Utility Functions
 // ============================================
@@ -239,10 +481,22 @@ export default {
   getArticles,
   getArticle,
   getSources,
+  createSource,
+  updateSource,
+  deleteSource,
+  collectSource,
   getCategories,
+  getTrendingTags,
   generateArticle,
   extractTopics,
   generateTags,
+  mergeTopics,
+  editArticle,
+  getUserArticles,
+  getUserArticle,
+  createUserArticle,
+  updateUserArticle,
+  deleteUserArticle,
   isApiAvailable,
   getApiBaseUrl,
   ApiError,

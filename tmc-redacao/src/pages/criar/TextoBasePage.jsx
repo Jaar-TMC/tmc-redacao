@@ -68,7 +68,11 @@ const TextoBasePage = () => {
         (data.selectedTrechos && data.selectedTrechos.length > 0) ||
         (data.selectedArticles && data.selectedArticles.length > 0) ||
         (data.tema && !data.selectedArticles) || // Tema sem matérias (pular)
-        (data.wordCount && data.wordCount > 0)
+        (data.wordCount && data.wordCount > 0) ||
+        // StoryFusionView data
+        (data.groups && data.groups.length > 0) ||
+        (data.exclusives && data.exclusives.length > 0) ||
+        (data.quotes && data.quotes.length > 0)
       );
       setCanProceed(hasSelection);
     }
@@ -144,13 +148,45 @@ const TextoBasePage = () => {
             content: variantData.editedTexts?.[id] || `Trecho ${index + 1}`
           });
         });
+      } else if (variantData.groups || variantData.exclusives || variantData.quotes) {
+        // StoryFusionView - múltiplas matérias combinadas
+        // Extract content from groups (selected versions)
+        variantData.groups?.forEach((group, index) => {
+          const version = group.selectedVersion;
+          if (version) {
+            blocos.push({
+              id: `group-${group.id}`,
+              type: group.type || 'fato',
+              content: version.text || version.content || ''
+            });
+          }
+        });
+
+        // Extract exclusive content
+        variantData.exclusives?.forEach((exc, index) => {
+          blocos.push({
+            id: `exc-${exc.id}`,
+            type: 'exclusivo',
+            content: exc.text || exc.content || ''
+          });
+        });
+
+        // Extract quotes
+        variantData.quotes?.forEach((quote, index) => {
+          blocos.push({
+            id: `quote-${quote.id}`,
+            type: 'citacao',
+            content: `"${quote.text}" - ${quote.speaker || quote.source || 'Fonte'}`
+          });
+        });
       } else if (variantData.selectedTopics) {
-        // Variante de link ou feed
+        // Variante de link ou feed (single article)
         variantData.selectedTopics.forEach((id, index) => {
           blocos.push({
             id,
             type: 'topic',
-            content: variantData.editedTexts?.[id] || `Tópico ${index + 1}`
+            // Use topicTexts (actual content), then editedTexts, then fallback
+            content: variantData.topicTexts?.[id] || variantData.editedTexts?.[id] || `Tópico ${index + 1}`
           });
         });
       } else if (variantData.selectedArticles) {

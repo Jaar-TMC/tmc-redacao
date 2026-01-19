@@ -1,6 +1,7 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
+import svgr from 'vite-plugin-svgr'
 import path from 'path'
 
 // Check if building for WordPress
@@ -8,7 +9,15 @@ const isWordPress = process.env.BUILD_TARGET === 'wordpress'
 
 // https://vite.dev/config/
 export default defineConfig({
-  plugins: [react(), tailwindcss()],
+  plugins: [
+    react(),
+    tailwindcss(),
+    svgr({
+      svgrOptions: {
+        icon: true,
+      },
+    }),
+  ],
 
   // Define global constants
   define: {

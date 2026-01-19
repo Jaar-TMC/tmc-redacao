@@ -27,6 +27,7 @@ async def list_articles_handler(req: func.HttpRequest) -> func.HttpResponse:
         source: str - Filtrar por source_id
         period: str - 'today', 'week', 'month'
         search: str - Busca em titulo/conteudo
+        tag: str - Filtrar por tag exata
     """
     try:
         # Parse query params
@@ -36,6 +37,7 @@ async def list_articles_handler(req: func.HttpRequest) -> func.HttpResponse:
         source = req.params.get('source')
         period = req.params.get('period')
         search = req.params.get('search')
+        tag = req.params.get('tag')
 
         # Validar page
         if page < 1:
@@ -49,7 +51,8 @@ async def list_articles_handler(req: func.HttpRequest) -> func.HttpResponse:
             category=category,
             source_id=source,
             period=period,
-            search=search
+            search=search,
+            tag=tag
         )
 
         # Calcular total de paginas
@@ -152,6 +155,68 @@ async def get_categories_handler(req: func.HttpRequest) -> func.HttpResponse:
 
     except Exception as e:
         logger.error(f"Error getting categories: {e}")
+        return func.HttpResponse(
+            json.dumps({"error": "Internal server error"}),
+            status_code=500,
+            mimetype="application/json"
+        )
+
+
+async def get_trending_tags_handler(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    GET /api/trending-tags
+
+    Returns trending tags with distinct article counts from ALL articles in the database.
+    This is the source of truth for "Feed em Alta" / "Temas Quentes".
+
+    Query Parameters:
+        limit: int - Maximum tags to return (default: 20, max: 50)
+        period: int - Optional filter for articles within last N hours
+    """
+    try:
+        # Parse query params
+        limit = min(int(req.params.get('limit', '20')), 50)
+        period = req.params.get('period')
+
+        # Convert period to hours if provided
+        period_hours = None
+        if period:
+            period_hours = int(period)
+
+        # Get trending tags from database
+        db = get_db()
+        tags = db.get_trending_tags(limit=limit, period_hours=period_hours)
+
+        # Format response with proper display names
+        items = []
+        for i, tag_data in enumerate(tags):
+            tag = tag_data['tag']
+            # Capitalize first letter of each word (for display)
+            display_name = ' '.join(
+                word.capitalize() for word in tag.replace('-', ' ').split()
+            )
+            items.append({
+                "id": i + 1,
+                "theme": display_name,
+                "tag": tag,  # Original lowercase tag for filtering
+                "count": tag_data['count'],
+                "trend": "stable"  # Could be calculated comparing to previous period
+            })
+
+        return func.HttpResponse(
+            json.dumps({"items": items, "total": len(items)}),
+            status_code=200,
+            mimetype="application/json"
+        )
+
+    except ValueError as e:
+        return func.HttpResponse(
+            json.dumps({"error": f"Invalid parameter: {e}"}),
+            status_code=400,
+            mimetype="application/json"
+        )
+    except Exception as e:
+        logger.error(f"Error getting trending tags: {e}")
         return func.HttpResponse(
             json.dumps({"error": "Internal server error"}),
             status_code=500,

@@ -1,14 +1,18 @@
 import { useCallback, useMemo } from 'react';
-import { Sparkles, X, FileText } from 'lucide-react';
+import { Sparkles, X, FileText, AlertTriangle } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import PropTypes from 'prop-types';
 import { useCriar } from '../../context';
+
+const MAX_ARTICLES = 3;
 
 const ActionPanel = ({ selectedArticles = [], onRemove, onClearAll, isOpen, onClose }) => {
   const navigate = useNavigate();
   const { setFonte } = useCriar();
 
   const hasSelection = useMemo(() => selectedArticles.length > 0, [selectedArticles.length]);
+  const isOverLimit = useMemo(() => selectedArticles.length > MAX_ARTICLES, [selectedArticles.length]);
+  const canProceed = useMemo(() => hasSelection && !isOverLimit, [hasSelection, isOverLimit]);
 
   const handleCreateWithInspiration = useCallback(() => {
     // Define a fonte como 'feed' com as matérias selecionadas
@@ -69,9 +73,9 @@ const ActionPanel = ({ selectedArticles = [], onRemove, onClearAll, isOpen, onCl
           ) : (
             /* Selected Articles */
             <>
-              <div className="flex items-center justify-between mb-4" role="status" aria-live="polite">
-                <span className="text-sm font-semibold text-dark-gray">
-                  {selectedArticles.length} {selectedArticles.length === 1 ? 'matéria selecionada' : 'matérias selecionadas'}
+              <div className="flex items-center justify-between mb-2" role="status" aria-live="polite">
+                <span className={`text-sm font-semibold ${isOverLimit ? 'text-red-600' : 'text-dark-gray'}`}>
+                  {selectedArticles.length}/{MAX_ARTICLES} {selectedArticles.length === 1 ? 'matéria' : 'matérias'}
                 </span>
                 <button
                   type="button"
@@ -82,6 +86,16 @@ const ActionPanel = ({ selectedArticles = [], onRemove, onClearAll, isOpen, onCl
                   Remover tudo
                 </button>
               </div>
+
+              {/* Over limit warning */}
+              {isOverLimit && (
+                <div className="flex items-start gap-2 p-3 mb-3 bg-red-50 border border-red-200 rounded-lg">
+                  <AlertTriangle size={16} className="text-red-500 flex-shrink-0 mt-0.5" />
+                  <p className="text-xs text-red-700">
+                    Máximo de {MAX_ARTICLES} matérias para combinar. Remova {selectedArticles.length - MAX_ARTICLES} para continuar.
+                  </p>
+                </div>
+              )}
 
               <div
                 className="flex-1 overflow-y-auto space-y-2 mb-4"
@@ -122,12 +136,19 @@ const ActionPanel = ({ selectedArticles = [], onRemove, onClearAll, isOpen, onCl
               <button
                 type="button"
                 onClick={handleCreateWithInspiration}
-                className="w-full bg-tmc-orange hover:bg-tmc-orange/90 text-white py-3 px-4 rounded-lg font-semibold transition-colors"
+                disabled={!canProceed}
+                className={`w-full py-3 px-4 rounded-lg font-semibold transition-colors ${
+                  canProceed
+                    ? 'bg-tmc-orange hover:bg-tmc-orange/90 text-white'
+                    : 'bg-gray-200 text-gray-400 cursor-not-allowed'
+                }`}
                 aria-label="Criar nova matéria com base nas selecionadas"
               >
                 <div className="flex items-center justify-center gap-2">
                   <Sparkles size={20} aria-hidden="true" className="flex-shrink-0" />
-                  <span className="text-center leading-tight">Criar Nova Matéria</span>
+                  <span className="text-center leading-tight">
+                    {isOverLimit ? 'Remova matérias para continuar' : 'Criar Nova Matéria'}
+                  </span>
                 </div>
               </button>
             </>

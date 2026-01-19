@@ -96,6 +96,25 @@ async def get_categories(req: func.HttpRequest) -> func.HttpResponse:
     return await get_categories_handler(req)
 
 
+@app.route(route="trending-tags", methods=["GET"])
+async def get_trending_tags(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    GET /api/trending-tags - Retorna tags em alta com contagem de artigos.
+
+    Query params:
+        limit: int - Máximo de tags (default: 20, max: 50)
+        period: int - Filtrar artigos das últimas N horas (opcional)
+
+    Returns:
+        {
+            "items": [{"id": 1, "theme": "Tag Name", "tag": "tag-name", "count": 15, "trend": "stable"}, ...],
+            "total": 20
+        }
+    """
+    from functions.articles_api import get_trending_tags_handler
+    return await get_trending_tags_handler(req)
+
+
 # ========================================
 # HTTP TRIGGERS - SOURCES API
 # ========================================
@@ -217,6 +236,152 @@ async def generate_tags(req: func.HttpRequest) -> func.HttpResponse:
     return await generate_tags_handler(req)
 
 
+@app.route(route="merge-topics", methods=["POST"])
+async def merge_topics(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    POST /api/merge-topics - Agrupa tópicos de múltiplas matérias usando IA.
+
+    Transforma a visualização de "artigo por artigo" para "história unificada",
+    agrupando conteúdo por elemento da história (fato, contexto, reação, etc.)
+    em vez de por fonte.
+
+    Body:
+        {
+            "articles": [
+                {
+                    "id": "art-1",
+                    "title": "Título da matéria",
+                    "content": "Conteúdo completo...",
+                    "source": "Nome da Fonte"
+                },
+                ...  (máximo 3 artigos)
+            ]
+        }
+
+    Returns:
+        {
+            "groups": [
+                {
+                    "id": "group-1",
+                    "type": "fato|contexto|reacao|dado",
+                    "label": "FATO PRINCIPAL",
+                    "versions": [
+                        {"id": "v1", "articleId": "art-1", "content": "...", "source": "Folha", "isRecommended": true}
+                    ],
+                    "aiSuggestion": {"recommendedId": "v1", "reason": "Versão mais completa"}
+                }
+            ],
+            "exclusives": [
+                {"id": "exc-1", "content": "...", "source": "G1", "type": "dado"}
+            ],
+            "quotes": [
+                {"id": "q1", "text": "...", "speaker": "Nome", "source": "Estadão"}
+            ],
+            "summary": {"mainTopic": "...", "totalElements": 5}
+        }
+    """
+    from functions.generation_api import merge_topics_handler
+    return await merge_topics_handler(req)
+
+
+@app.route(route="edit-article", methods=["POST"])
+async def edit_article(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    POST /api/edit-article - Edita uma matéria existente usando IA.
+
+    Permite edições incrementais do artigo via chat com a IA.
+    Suporta histórico de versões no frontend (undo/redo).
+
+    Body:
+        {
+            "current_article": {
+                "title": "Título atual",
+                "linha_fina": "Linha fina atual",
+                "content": "Conteúdo atual...",
+                "tags": ["tag1", "tag2"]
+            },
+            "instruction": "Melhore o SEO do título",
+            "edit_scope": "full|title|linha_fina|content|tags",
+            "categoria": "geral",
+            "tom": "conversacional"
+        }
+
+    Returns:
+        {
+            "titulo": "Título editado",
+            "linha_fina": "Linha fina editada",
+            "conteudo": "Conteúdo editado...",
+            "tags": ["tag1", "tag2", "nova-tag"],
+            "changes_summary": "Descrição das alterações feitas"
+        }
+    """
+    from functions.edit_api import edit_article_handler
+    return await edit_article_handler(req)
+
+
+# ========================================
+# HTTP TRIGGERS - USER ARTICLES API
+# ========================================
+
+@app.route(route="user-articles", methods=["GET"])
+async def list_user_articles(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    GET /api/user-articles - Lista matérias do usuário.
+
+    Query params:
+        page: int - Página (default: 1)
+        limit: int - Itens por página (default: 20, max: 100)
+        status: str - 'draft' ou 'published'
+        category: str - Filtrar por categoria
+        search: str - Busca em título/conteúdo
+        dateRange: str - '24h', '7d', '30d', '3m', 'year'
+    """
+    from functions.user_articles_api import list_user_articles_handler
+    return await list_user_articles_handler(req)
+
+
+@app.route(route="user-articles/{id}", methods=["GET"])
+async def get_user_article(req: func.HttpRequest) -> func.HttpResponse:
+    """GET /api/user-articles/{id} - Retorna uma matéria específica."""
+    from functions.user_articles_api import get_user_article_handler
+    return await get_user_article_handler(req)
+
+
+@app.route(route="user-articles", methods=["POST"])
+async def create_user_article(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    POST /api/user-articles - Cria uma nova matéria.
+
+    Body:
+        {
+            "title": "Título da matéria",
+            "linhaFina": "Subtítulo",
+            "content": "Conteúdo...",
+            "status": "draft" | "published",
+            "category": "Categoria",
+            "tags": ["tag1", "tag2"],
+            "authorName": "Autor",
+            "sourceArticleIds": ["id1", "id2"]
+        }
+    """
+    from functions.user_articles_api import create_user_article_handler
+    return await create_user_article_handler(req)
+
+
+@app.route(route="user-articles/{id}", methods=["PUT"])
+async def update_user_article(req: func.HttpRequest) -> func.HttpResponse:
+    """PUT /api/user-articles/{id} - Atualiza uma matéria existente."""
+    from functions.user_articles_api import update_user_article_handler
+    return await update_user_article_handler(req)
+
+
+@app.route(route="user-articles/{id}", methods=["DELETE"])
+async def delete_user_article(req: func.HttpRequest) -> func.HttpResponse:
+    """DELETE /api/user-articles/{id} - Remove uma matéria (soft delete)."""
+    from functions.user_articles_api import delete_user_article_handler
+    return await delete_user_article_handler(req)
+
+
 # ========================================
 # STARTUP
 # ========================================
@@ -229,6 +394,7 @@ logger.info("  - GET  /api/stats")
 logger.info("  - GET  /api/articles")
 logger.info("  - GET  /api/articles/{id}")
 logger.info("  - GET  /api/categories")
+logger.info("  - GET  /api/trending-tags")
 logger.info("  - GET  /api/sources")
 logger.info("  - GET  /api/sources/{id}")
 logger.info("  - POST /api/sources")
@@ -238,3 +404,10 @@ logger.info("  - POST /api/sources/{id}/collect")
 logger.info("  - POST /api/generate")
 logger.info("  - POST /api/extract-topics")
 logger.info("  - POST /api/generate-tags")
+logger.info("  - POST /api/merge-topics")
+logger.info("  - POST /api/edit-article")
+logger.info("  - GET  /api/user-articles")
+logger.info("  - GET  /api/user-articles/{id}")
+logger.info("  - POST /api/user-articles")
+logger.info("  - PUT  /api/user-articles/{id}")
+logger.info("  - DELETE /api/user-articles/{id}")

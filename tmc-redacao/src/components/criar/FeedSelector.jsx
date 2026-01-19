@@ -1,6 +1,6 @@
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo, useEffect, useCallback } from 'react';
 import PropTypes from 'prop-types';
-import { X, Search, FileText, Check, RefreshCw, AlertCircle } from 'lucide-react';
+import { X, Search, FileText, Check, RefreshCw, AlertCircle, Tag } from 'lucide-react';
 import { getArticles, getSources } from '../../services/api';
 import { formatRelativeTime } from '../../data/mockData';
 
@@ -13,6 +13,7 @@ import { formatRelativeTime } from '../../data/mockData';
 const FeedSelector = ({ onClose, onSelect }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedArticles, setSelectedArticles] = useState([]);
+  const [selectedTags, setSelectedTags] = useState(new Set());
   const [filterCategory, setFilterCategory] = useState('all');
   const [filterSource, setFilterSource] = useState('all');
 
@@ -151,9 +152,30 @@ const FeedSelector = ({ onClose, onSelect }) => {
     });
   };
 
+  const handleTagToggle = useCallback((tag) => {
+    setSelectedTags(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(tag)) {
+        newSet.delete(tag);
+      } else {
+        newSet.add(tag);
+      }
+      return newSet;
+    });
+  }, []);
+
+  // Get all unique tags from selected articles
+  const availableTags = useMemo(() => {
+    const allTags = new Set();
+    selectedArticles.forEach(article => {
+      (article.tags || []).forEach(tag => allTags.add(tag));
+    });
+    return Array.from(allTags).sort();
+  }, [selectedArticles]);
+
   const handleContinue = () => {
     if (selectedArticles.length > 0 && onSelect) {
-      onSelect(selectedArticles);
+      onSelect(selectedArticles, Array.from(selectedTags));
     }
   };
 
@@ -338,20 +360,33 @@ const FeedSelector = ({ onClose, onSelect }) => {
                       <p className="text-xs text-medium-gray mt-1 line-clamp-2">
                         {article.preview}
                       </p>
-                      {/* Tags display */}
+                      {/* Tags display - Clickable */}
                       {article.tags && article.tags.length > 0 && (
                         <div className="flex flex-wrap gap-1 mt-2">
-                          {article.tags.slice(0, 3).map(tag => (
-                            <span
-                              key={tag}
-                              className="text-xs bg-off-white text-medium-gray px-1.5 py-0.5 rounded"
-                            >
-                              #{tag}
-                            </span>
-                          ))}
-                          {article.tags.length > 3 && (
+                          {article.tags.slice(0, 5).map(tag => {
+                            const isTagSelected = selectedTags.has(tag);
+                            return (
+                              <button
+                                key={tag}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleTagToggle(tag);
+                                }}
+                                className={`text-xs px-1.5 py-0.5 rounded-full flex items-center gap-0.5 transition-all ${
+                                  isTagSelected
+                                    ? 'bg-tmc-orange text-white'
+                                    : 'bg-off-white text-medium-gray hover:bg-tmc-orange/10 hover:text-tmc-orange'
+                                }`}
+                                aria-pressed={isTagSelected}
+                              >
+                                {isTagSelected && <Check size={8} strokeWidth={3} />}
+                                #{tag}
+                              </button>
+                            );
+                          })}
+                          {article.tags.length > 5 && (
                             <span className="text-xs text-medium-gray">
-                              +{article.tags.length - 3}
+                              +{article.tags.length - 5}
                             </span>
                           )}
                         </div>
@@ -363,11 +398,50 @@ const FeedSelector = ({ onClose, onSelect }) => {
             )}
           </div>
 
+          {/* Selected Tags Summary */}
+          {selectedTags.size > 0 && (
+            <div className="mb-4 p-3 bg-orange-50 border border-tmc-orange/20 rounded-lg">
+              <div className="flex items-center gap-2 mb-2">
+                <Tag size={14} className="text-tmc-orange" />
+                <span className="text-xs font-semibold text-dark-gray uppercase">
+                  Tags selecionadas para SEO ({selectedTags.size})
+                </span>
+              </div>
+              <div className="flex flex-wrap gap-1.5">
+                {Array.from(selectedTags).map(tag => (
+                  <button
+                    key={tag}
+                    onClick={() => handleTagToggle(tag)}
+                    className="text-xs bg-tmc-orange text-white px-2 py-1 rounded-full flex items-center gap-1 hover:bg-tmc-orange/80 transition-colors"
+                  >
+                    #{tag}
+                    <X size={10} />
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Available Tags from Selected Articles */}
+          {availableTags.length > 0 && selectedTags.size === 0 && selectedArticles.length > 0 && (
+            <div className="mb-4 p-3 bg-off-white rounded-lg">
+              <div className="flex items-center gap-2 mb-2">
+                <Tag size={14} className="text-medium-gray" />
+                <span className="text-xs font-medium text-medium-gray">
+                  Clique nas tags para selecionar para SEO
+                </span>
+              </div>
+            </div>
+          )}
+
           {/* Footer */}
           <div className="flex items-center justify-between pt-4 border-t border-light-gray">
-            <span className="text-sm text-medium-gray">
-              {selectedArticles.length} {selectedArticles.length === 1 ? 'matéria selecionada' : 'matérias selecionadas'}
-            </span>
+            <div className="text-sm text-medium-gray">
+              <span>{selectedArticles.length} {selectedArticles.length === 1 ? 'matéria' : 'matérias'}</span>
+              {selectedTags.size > 0 && (
+                <span className="ml-2">• {selectedTags.size} {selectedTags.size === 1 ? 'tag' : 'tags'}</span>
+              )}
+            </div>
             <div className="flex items-center gap-3">
               <button
                 onClick={onClose}

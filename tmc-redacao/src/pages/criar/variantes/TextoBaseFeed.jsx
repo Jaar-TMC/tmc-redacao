@@ -6,9 +6,13 @@ import {
   ContentStats,
   SelectionToggleBar,
   ModeTabs,
-  TopicCard
+  TopicCard,
+  StoryFusionView
 } from '../../../components/criar';
 import { getArticles } from '../../../services/api';
+
+// Threshold for using Story Fusion View (2 or more articles)
+const STORY_FUSION_THRESHOLD = 2;
 
 /**
  * TextoBaseFeed - Variante da pagina Texto-Base para Materias do Feed
@@ -191,22 +195,35 @@ const TextoBaseFeed = ({
     setSelectedTopics(newSet);
   }, [currentMateria, selectedTopics]);
 
-  // Notificar mudancas
+  // Notificar mudancas - include actual topic texts for context
   useEffect(() => {
     if (onDataChange) {
+      // Build a map of topic ID to actual text content
+      const topicTexts = {};
+      materias.forEach(materia => {
+        materia.topics.forEach(topic => {
+          // Use edited text if available, otherwise original
+          topicTexts[topic.id] = editedTexts[topic.id] || topic.text;
+        });
+      });
+
       onDataChange({
         selectedTopics: Array.from(selectedTopics),
         editedTexts,
+        topicTexts, // Include the actual texts
         wordCount: stats.words
       });
     }
-  }, [selectedTopics, editedTexts, stats.words, onDataChange]);
+  }, [selectedTopics, editedTexts, stats.words, materias, onDataChange]);
 
   // Tabs para modo de visualizacao
   const tabs = [
     { id: 'topics', label: 'Tópicos', icon: <List size={16} /> },
     { id: 'fulltext', label: 'Texto Completo', icon: <FileText size={16} /> }
   ];
+
+  // Determine if we should use Story Fusion View (2+ articles)
+  const shouldUseStoryFusion = fonte?.dados?.length >= STORY_FUSION_THRESHOLD;
 
   // Estado vazio - sem matérias
   if (materias.length === 0) {
@@ -233,6 +250,18 @@ const TextoBaseFeed = ({
     );
   }
 
+  // Use Story Fusion View for multiple articles (2-3)
+  if (shouldUseStoryFusion) {
+    return (
+      <StoryFusionView
+        fonte={fonte}
+        onChangeSource={onChangeSource}
+        onDataChange={onDataChange}
+      />
+    );
+  }
+
+  // Single article view - use traditional topic extraction
   return (
     <div className="space-y-6">
       <SourceBadge

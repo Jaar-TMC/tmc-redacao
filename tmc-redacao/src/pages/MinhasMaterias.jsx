@@ -1,12 +1,13 @@
-import { useState, useMemo, useCallback } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { PenLine } from 'lucide-react';
+import { PenLine, Loader2, AlertCircle, RefreshCw } from 'lucide-react';
 import MyArticleFilterBar from '../components/ui/MyArticleFilterBar';
 import MyArticleCard from '../components/cards/MyArticleCard';
 import Pagination from '../components/ui/Pagination';
 import EmptyState, { EmptyStatePresets } from '../components/ui/EmptyState';
 import ConfirmDialog from '../components/ui/ConfirmDialog';
-import { myArticles } from '../data/mockData';
+import ArticleViewModal from '../components/ui/ArticleViewModal';
+import { getUserArticles, deleteUserArticle } from '../services/api';
 
 const ITEMS_PER_PAGE = 6;
 
@@ -38,65 +39,70 @@ const MinhasMaterias = () => {
     articleTitle: ''
   });
 
-  // Filter articles based on active filters
-  const filteredArticles = useMemo(() => {
-    let results = [...myArticles];
+  // View modal state
+  const [viewModal, setViewModal] = useState({
+    open: false,
+    article: null
+  });
 
-    // Search query filter
-    if (filters.searchQuery) {
-      const query = filters.searchQuery.toLowerCase();
-      results = results.filter(article =>
-        article.title.toLowerCase().includes(query) ||
-        article.preview.toLowerCase().includes(query) ||
-        article.tags.some(tag => tag.toLowerCase().includes(query))
-      );
+  // API state
+  const [articles, setArticles] = useState([]);
+  const [totalArticles, setTotalArticles] = useState(0);
+  const [totalPages, setTotalPages] = useState(1);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [isDeleting, setIsDeleting] = useState(false);
+
+  // Fetch articles from API
+  const fetchArticles = useCallback(async () => {
+    setIsLoading(true);
+    setError(null);
+
+    try {
+      const params = {
+        page: currentPage,
+        limit: ITEMS_PER_PAGE,
+      };
+
+      // Add filters to params (server-side filtering)
+      if (filters.searchQuery) {
+        params.search = filters.searchQuery;
+      }
+      if (filters.status) {
+        params.status = filters.status;
+      }
+      if (filters.category) {
+        params.category = filters.category;
+      }
+      if (filters.dateRange) {
+        params.dateRange = filters.dateRange;
+      }
+
+      const response = await getUserArticles(params);
+
+      // Convert dates from ISO strings to Date objects for compatibility
+      const articlesWithDates = response.items.map(article => ({
+        ...article,
+        createdAt: article.createdAt ? new Date(article.createdAt) : null,
+        updatedAt: article.updatedAt ? new Date(article.updatedAt) : null,
+        publishedAt: article.publishedAt ? new Date(article.publishedAt) : null
+      }));
+
+      setArticles(articlesWithDates);
+      setTotalArticles(response.total);
+      setTotalPages(response.pages);
+    } catch (err) {
+      console.error('Error fetching articles:', err);
+      setError(err.message || 'Erro ao carregar matérias');
+    } finally {
+      setIsLoading(false);
     }
+  }, [currentPage, filters]);
 
-    // Status filter
-    if (filters.status) {
-      results = results.filter(article => article.status === filters.status);
-    }
-
-    // Category filter
-    if (filters.category) {
-      results = results.filter(article => article.category === filters.category);
-    }
-
-    // Date range filter
-    if (filters.dateRange) {
-      const now = new Date();
-      results = results.filter(article => {
-        const articleDate = article.createdAt;
-        const diffInMs = now - articleDate;
-        const diffInHours = diffInMs / (1000 * 60 * 60);
-        const diffInDays = diffInHours / 24;
-
-        switch (filters.dateRange) {
-          case '24h':
-            return diffInHours <= 24;
-          case '7d':
-            return diffInDays <= 7;
-          case '30d':
-            return diffInDays <= 30;
-          case '3m':
-            return diffInDays <= 90;
-          case 'year':
-            return articleDate.getFullYear() === now.getFullYear();
-          default:
-            return true;
-        }
-      });
-    }
-
-    return results;
-  }, [filters]);
-
-  // Pagination
-  const totalPages = Math.ceil(filteredArticles.length / ITEMS_PER_PAGE);
-  const paginatedArticles = useMemo(() => {
-    const startIndex = (currentPage - 1) * ITEMS_PER_PAGE;
-    return filteredArticles.slice(startIndex, startIndex + ITEMS_PER_PAGE);
-  }, [filteredArticles, currentPage]);
+  // Fetch articles when page or filters change
+  useEffect(() => {
+    fetchArticles();
+  }, [fetchArticles]);
 
   // Reset to page 1 when filters change
   const handleFilterChange = useCallback((newFilters) => {
@@ -110,8 +116,17 @@ const MinhasMaterias = () => {
   }, [navigate]);
 
   const handleView = useCallback((articleId) => {
-    console.log('Viewing article:', articleId);
-    // TODO: Implement view functionality
+    const article = articles.find(a => a.id === articleId);
+    if (article) {
+      setViewModal({
+        open: true,
+        article
+      });
+    }
+  }, [articles]);
+
+  const handleViewClose = useCallback(() => {
+    setViewModal({ open: false, article: null });
   }, []);
 
   const handleEdit = useCallback((articleId) => {
@@ -125,7 +140,7 @@ const MinhasMaterias = () => {
   }, []);
 
   const handleDeleteClick = useCallback((articleId) => {
-    const article = myArticles.find(a => a.id === articleId);
+    const article = articles.find(a => a.id === articleId);
     if (article) {
       setDeleteDialog({
         open: true,
@@ -133,18 +148,27 @@ const MinhasMaterias = () => {
         articleTitle: article.title
       });
     }
-  }, []);
+  }, [articles]);
 
-  const handleDeleteConfirm = useCallback(() => {
-    // TODO: Actually delete the article
-    console.log('Deleting article:', deleteDialog.articleId);
+  const handleDeleteConfirm = useCallback(async () => {
+    if (!deleteDialog.articleId) return;
 
-    // Reset dialog state (will be closed by ConfirmDialog)
-    setDeleteDialog({ open: false, articleId: null, articleTitle: '' });
+    setIsDeleting(true);
+    try {
+      await deleteUserArticle(deleteDialog.articleId);
 
-    // Show success toast
-    // TODO: Implement toast notification
-  }, [deleteDialog.articleId]);
+      // Refetch articles to update the list
+      await fetchArticles();
+
+      // Reset dialog state
+      setDeleteDialog({ open: false, articleId: null, articleTitle: '' });
+    } catch (err) {
+      console.error('Error deleting article:', err);
+      setError(err.message || 'Erro ao excluir matéria');
+    } finally {
+      setIsDeleting(false);
+    }
+  }, [deleteDialog.articleId, fetchArticles]);
 
   const handleDeleteCancel = useCallback(() => {
     setDeleteDialog({ open: false, articleId: null, articleTitle: '' });
@@ -162,8 +186,8 @@ const MinhasMaterias = () => {
   }, []);
 
   const hasActiveFilters = Object.values(filters).some(v => v !== null && v !== '');
-  const hasNoArticles = myArticles.length === 0;
-  const hasNoResults = filteredArticles.length === 0 && !hasNoArticles;
+  const hasNoArticles = totalArticles === 0 && !hasActiveFilters && !isLoading;
+  const hasNoResults = articles.length === 0 && !hasNoArticles && !isLoading;
 
   return (
     <div className="min-h-screen pt-16 bg-off-white">
@@ -176,7 +200,11 @@ const MinhasMaterias = () => {
                 Minhas Matérias
               </h1>
               <p className="text-sm text-medium-gray">
-                {filteredArticles.length} {filteredArticles.length === 1 ? 'matéria encontrada' : 'matérias encontradas'}
+                {isLoading ? (
+                  'Carregando...'
+                ) : (
+                  `${totalArticles} ${totalArticles === 1 ? 'matéria encontrada' : 'matérias encontradas'}`
+                )}
               </p>
             </div>
             <button
@@ -194,14 +222,38 @@ const MinhasMaterias = () => {
         {!hasNoArticles && (
           <MyArticleFilterBar
             onFilterChange={handleFilterChange}
-            resultsCount={filteredArticles.length}
+            resultsCount={totalArticles}
           />
         )}
 
         {/* Content Area */}
         <main>
-          {/* Empty States */}
-          {hasNoArticles ? (
+          {/* Loading State */}
+          {isLoading ? (
+            <div className="flex flex-col items-center justify-center py-16">
+              <Loader2 className="w-10 h-10 text-tmc-orange animate-spin mb-4" />
+              <p className="text-medium-gray">Carregando matérias...</p>
+            </div>
+          ) : error ? (
+            /* Error State */
+            <div className="flex flex-col items-center justify-center py-16 bg-white rounded-xl border border-light-gray">
+              <AlertCircle className="w-12 h-12 text-error mb-4" />
+              <h3 className="text-lg font-semibold text-dark-gray mb-2">
+                Erro ao carregar matérias
+              </h3>
+              <p className="text-medium-gray text-center mb-6 max-w-md">
+                {error}
+              </p>
+              <button
+                onClick={fetchArticles}
+                className="flex items-center gap-2 px-4 py-2 bg-tmc-orange text-white rounded-lg hover:bg-tmc-orange/90 transition-colors"
+              >
+                <RefreshCw size={18} />
+                <span>Tentar novamente</span>
+              </button>
+            </div>
+          ) : hasNoArticles ? (
+            /* Empty States */
             <EmptyStatePresets.NoArticles onCreateArticle={handleCreateNew} />
           ) : hasNoResults ? (
             hasActiveFilters ? (
@@ -216,7 +268,7 @@ const MinhasMaterias = () => {
             <>
               {/* Articles Grid */}
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
-                {paginatedArticles.map((article) => (
+                {articles.map((article) => (
                   <MyArticleCard
                     key={article.id}
                     article={article}
@@ -234,7 +286,7 @@ const MinhasMaterias = () => {
                 <Pagination
                   currentPage={currentPage}
                   totalPages={totalPages}
-                  totalItems={filteredArticles.length}
+                  totalItems={totalArticles}
                   itemsPerPage={ITEMS_PER_PAGE}
                   onPageChange={setCurrentPage}
                   showInfo={true}
@@ -250,11 +302,20 @@ const MinhasMaterias = () => {
         isOpen={deleteDialog.open}
         title="Excluir Matéria?"
         message={`Tem certeza que deseja excluir "${deleteDialog.articleTitle}"? Esta ação não pode ser desfeita.`}
-        confirmText="Excluir"
+        confirmText={isDeleting ? "Excluindo..." : "Excluir"}
         cancelText="Cancelar"
         variant="danger"
         onConfirm={handleDeleteConfirm}
         onClose={handleDeleteCancel}
+        isLoading={isDeleting}
+      />
+
+      {/* Article View Modal */}
+      <ArticleViewModal
+        article={viewModal.article}
+        isOpen={viewModal.open}
+        onClose={handleViewClose}
+        onEdit={handleEdit}
       />
     </div>
   );

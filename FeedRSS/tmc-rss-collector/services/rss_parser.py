@@ -7,6 +7,8 @@ import feedparser
 import httpx
 import logging
 import re
+import unicodedata
+import html
 from datetime import datetime
 from typing import List, Optional
 from uuid import UUID
@@ -86,7 +88,7 @@ class RSSParser:
             logger.error(f"Error fetching/parsing feed {url}: {e}")
             raise
 
-    async def _fetch_feed(self, url: str) -> Optional[str]:
+    async def _fetch_feed(self, url: str) -> Optional[bytes]:
         """
         Faz fetch do conteudo do feed via HTTP.
 
@@ -94,7 +96,8 @@ class RSSParser:
             url: URL do feed
 
         Returns:
-            Conteudo do feed como string ou None se falhar
+            Conteudo do feed como bytes ou None se falhar
+            (feedparser handles encoding detection better with raw bytes)
         """
         headers = {
             'User-Agent': self.user_agent,
@@ -113,7 +116,9 @@ class RSSParser:
                 )
 
                 response.raise_for_status()
-                return response.text
+                # Return raw bytes - feedparser handles encoding detection
+                # better than httpx, using XML declaration and content sniffing
+                return response.content
 
         except httpx.TimeoutException:
             logger.error(f"Timeout fetching {url}")
@@ -337,28 +342,34 @@ class RSSParser:
         return datetime.utcnow()
 
     def _clean_text(self, text: str) -> str:
-        """Limpa texto removendo espacos extras."""
+        """Limpa texto removendo espacos extras e normalizando unicode."""
         if not text:
             return ""
+
+        # Normalize unicode (NFC form - composed characters)
+        text = unicodedata.normalize('NFC', text)
+
+        # Remove null bytes and other control characters (except newlines/tabs)
+        text = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]', '', text)
+
+        # Clean whitespace
         return ' '.join(text.split()).strip()
 
-    def _clean_html(self, html: str) -> str:
+    def _clean_html(self, html_content: str) -> str:
         """Remove tags HTML e limpa texto."""
-        if not html:
+        if not html_content:
             return ""
 
-        # Remover tags HTML
-        text = re.sub(r'<[^>]+>', ' ', html)
+        # Decode HTML entities first (handles &aacute; &#225; etc.)
+        text = html.unescape(html_content)
 
-        # Decodificar entities HTML comuns
+        # Remove tags HTML
+        text = re.sub(r'<[^>]+>', ' ', text)
+
+        # Additional common entity replacements (in case html.unescape missed any)
         text = text.replace('&nbsp;', ' ')
-        text = text.replace('&amp;', '&')
-        text = text.replace('&lt;', '<')
-        text = text.replace('&gt;', '>')
-        text = text.replace('&quot;', '"')
-        text = text.replace('&#39;', "'")
 
-        # Limpar espacos
+        # Normalize unicode and clean
         return self._clean_text(text)
 
     def _generate_preview(self, text: str, max_length: int = 500) -> str:

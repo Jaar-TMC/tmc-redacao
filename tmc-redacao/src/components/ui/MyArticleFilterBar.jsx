@@ -1,6 +1,7 @@
-import { Search, ChevronDown, X, Tag, Calendar, User } from 'lucide-react';
+import { Search, ChevronDown, X, Tag, Calendar } from 'lucide-react';
 import { useState, useCallback, useEffect, useMemo } from 'react';
-import { mockCategories } from '../../data/mockData';
+import { getCategories } from '../../services/api';
+import { transformCategories } from '../../utils/transformers';
 import PropTypes from 'prop-types';
 
 /**
@@ -24,6 +25,22 @@ const MyArticleFilterBar = ({ onFilterChange, resultsCount = 0 }) => {
     dateRange: null,
     author: null
   });
+
+  // API State for categories
+  const [categories, setCategories] = useState([]);
+
+  // Fetch categories from API on mount
+  useEffect(() => {
+    const fetchCategories = async () => {
+      try {
+        const response = await getCategories();
+        setCategories(transformCategories(response?.categories));
+      } catch (err) {
+        console.error('Error fetching categories:', err);
+      }
+    };
+    fetchCategories();
+  }, []);
 
   const statusOptions = useMemo(() => [
     { id: 'all', label: 'Todos' },
@@ -183,7 +200,7 @@ const MyArticleFilterBar = ({ onFilterChange, resultsCount = 0 }) => {
               >
                 Todos os temas
               </button>
-              {mockCategories.map((cat) => (
+              {categories.map((cat) => (
                 <button
                   type="button"
                   key={cat.id}

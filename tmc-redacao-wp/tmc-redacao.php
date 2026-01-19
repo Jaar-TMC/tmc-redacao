@@ -1,9 +1,9 @@
 <?php
 /**
- * Plugin Name: TMC Redacao
+ * Plugin Name: TMC Redacao (TEST)
  * Plugin URI: https://tmc.com.br
  * Description: Ferramenta de redacao jornalistica com IA para o portal TMC.
- * Version: 1.0.0
+ * Version: 1.2.0-test
  * Requires at least: 6.0
  * Requires PHP: 8.0
  * Author: TMC / JaarConsult
@@ -22,7 +22,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 }
 
 // Plugin constants
-define( 'TMC_REDACAO_VERSION', '1.0.0' );
+define( 'TMC_REDACAO_VERSION', '1.2.0-test' );
 define( 'TMC_REDACAO_PLUGIN_DIR', plugin_dir_path( __FILE__ ) );
 define( 'TMC_REDACAO_PLUGIN_URL', plugin_dir_url( __FILE__ ) );
 define( 'TMC_REDACAO_PLUGIN_BASENAME', plugin_basename( __FILE__ ) );

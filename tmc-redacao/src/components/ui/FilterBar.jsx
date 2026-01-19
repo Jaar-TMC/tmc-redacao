@@ -1,6 +1,7 @@
 import { Search, ChevronDown, Building2, Tag } from 'lucide-react';
 import { useState, useCallback, useEffect } from 'react';
-import { mockCategories, mockSources } from '../../data/mockData';
+import { getSources, getCategories } from '../../services/api';
+import { transformSources, transformCategories } from '../../utils/transformers';
 import { useFilters } from '../../context';
 
 /**
@@ -17,6 +18,25 @@ const FilterBar = () => {
   const [searchTerm, setSearchTerm] = useState(filters.searchQuery || '');
   const [openDropdown, setOpenDropdown] = useState(null);
   const [isExternalUpdate, setIsExternalUpdate] = useState(false);
+
+  // API State for filters
+  const [categories, setCategories] = useState([]);
+  const [sources, setSources] = useState([]);
+
+  // Fetch filter data from API on mount
+  useEffect(() => {
+    const fetchFilters = async () => {
+      try {
+        const [catRes, srcRes] = await Promise.all([getCategories(), getSources()]);
+        setCategories(transformCategories(catRes?.categories));
+        // API returns 'items' not 'sources'
+        setSources(transformSources(srcRes?.items || srcRes?.sources));
+      } catch (err) {
+        console.error('Error fetching filters:', err);
+      }
+    };
+    fetchFilters();
+  }, []);
 
   // Sync local state when filters.searchQuery changes externally (e.g., from TrendsSidebar)
   useEffect(() => {
@@ -122,7 +142,7 @@ const FilterBar = () => {
                 >
                   Todos os temas
                 </button>
-                {mockCategories.map((cat) => (
+                {categories.map((cat) => (
                   <button
                     type="button"
                     key={cat.id}
@@ -171,7 +191,7 @@ const FilterBar = () => {
                 >
                   Todas as origens
                 </button>
-                {mockSources.filter(s => s.active).map((source) => (
+                {sources.filter(s => s.active).map((source) => (
                   <button
                     type="button"
                     key={source.id}

@@ -35,6 +35,23 @@ const initialState = {
     blocosSelecionados: new Set(),
   },
 
+  // Etapa 2 (Multi-Source): Story Fusion state
+  storyFusion: {
+    mergedGroups: [], // Groups from AI merge
+    exclusives: [], // Exclusive content
+    quotes: [], // Extracted quotes
+    selectedVersions: {}, // {groupId: versionId}
+    includedGroups: new Set(), // Which groups are included
+    includedExclusives: new Set(), // Which exclusives are included
+    includedQuotes: new Set(), // Which quotes are included
+    editedTexts: {}, // {articleId: {original, edited, source}}
+    activeTab: 'grouped', // 'grouped' | 'originals'
+    wordCount: 0,
+  },
+
+  // Tags selecionadas para SEO (extraídas das matérias do feed)
+  selectedTags: new Set(),
+
   // Etapa 3: Configurações
   configuracoes: {
     data: new Date().toISOString().split('T')[0],
@@ -42,9 +59,12 @@ const initialState = {
     citacoes: [],
     contexto: '',
     creditos: '',
-    persona: 'imparcial', // 'imparcial' | 'analista' | 'especialista' | 'popular'
-    tom: 'formal', // 'formal' | 'informal' | 'tecnico' | 'casual'
+    // NEW: Category-based system (replaces persona)
+    categoria: 'geral', // 'esportes' | 'entretenimento' | 'politica' | 'economia' | 'geral'
+    tom: 'conversacional', // Now category-dependent
+    modoOpinativo: false, // NEW: Opinion mode toggle for categories that allow it
     instrucoes: '',
+    tipoMateria: '', // Article type
   },
 
   // Materiais complementares
@@ -154,6 +174,58 @@ export const CriarProvider = ({ children }) => {
     }));
   }, []);
 
+  // === Ações para Story Fusion (Etapa 2 Multi-Source) ===
+  const setStoryFusionData = useCallback((data) => {
+    setState(prev => ({
+      ...prev,
+      storyFusion: {
+        ...prev.storyFusion,
+        mergedGroups: data.groups || [],
+        exclusives: data.exclusives || [],
+        quotes: data.quotes || [],
+        // Initialize selections
+        selectedVersions: data.groups?.reduce((acc, group) => {
+          const recommended = group.versions?.find(v => v.isRecommended) || group.versions?.[0];
+          if (recommended) acc[group.id] = recommended.id;
+          return acc;
+        }, {}) || {},
+        includedGroups: new Set(data.groups?.map(g => g.id) || []),
+        includedExclusives: new Set(data.exclusives?.map(e => e.id) || []),
+        includedQuotes: new Set(data.quotes?.map(q => q.id) || []),
+      },
+    }));
+  }, []);
+
+  const updateStoryFusionSelection = useCallback((updates) => {
+    setState(prev => ({
+      ...prev,
+      storyFusion: {
+        ...prev.storyFusion,
+        ...updates,
+      },
+    }));
+  }, []);
+
+  const setStoryFusionEditedTexts = useCallback((editedTexts) => {
+    setState(prev => ({
+      ...prev,
+      storyFusion: {
+        ...prev.storyFusion,
+        editedTexts,
+      },
+    }));
+  }, []);
+
+  const setStoryFusionActiveTab = useCallback((tab) => {
+    setState(prev => ({
+      ...prev,
+      storyFusion: {
+        ...prev.storyFusion,
+        activeTab: tab,
+      },
+    }));
+  }, []);
+
   // === Ações para Configurações (Etapa 3) ===
   const setConfiguracao = useCallback((campo, valor) => {
     setState(prev => ({
@@ -223,6 +295,36 @@ export const CriarProvider = ({ children }) => {
     }));
   }, []);
 
+  // === Ações para Tags ===
+  const toggleTag = useCallback((tag) => {
+    setState(prev => {
+      const newSet = new Set(prev.selectedTags);
+      if (newSet.has(tag)) {
+        newSet.delete(tag);
+      } else {
+        newSet.add(tag);
+      }
+      return {
+        ...prev,
+        selectedTags: newSet,
+      };
+    });
+  }, []);
+
+  const setSelectedTags = useCallback((tags) => {
+    setState(prev => ({
+      ...prev,
+      selectedTags: new Set(tags),
+    }));
+  }, []);
+
+  const clearSelectedTags = useCallback(() => {
+    setState(prev => ({
+      ...prev,
+      selectedTags: new Set(),
+    }));
+  }, []);
+
   // === Ações para Resultado (Etapa 4) ===
   const setResultado = useCallback((resultado) => {
     setState(prev => ({
@@ -279,6 +381,10 @@ export const CriarProvider = ({ children }) => {
     );
   }, [state]);
 
+  const getSelectedTagsArray = useCallback(() => {
+    return Array.from(state.selectedTags);
+  }, [state.selectedTags]);
+
   // Valor do contexto memoizado
   const value = useMemo(
     () => ({
@@ -297,6 +403,12 @@ export const CriarProvider = ({ children }) => {
       setModoEdicao,
       confirmarTextoBase,
 
+      // Ações Story Fusion
+      setStoryFusionData,
+      updateStoryFusionSelection,
+      setStoryFusionEditedTexts,
+      setStoryFusionActiveTab,
+
       // Ações Configurações
       setConfiguracao,
       setConfiguracoes,
@@ -307,6 +419,11 @@ export const CriarProvider = ({ children }) => {
       // Ações Materiais
       adicionarMaterial,
       removerMaterial,
+
+      // Ações Tags
+      toggleTag,
+      setSelectedTags,
+      clearSelectedTags,
 
       // Ações Resultado
       setResultado,
@@ -322,6 +439,7 @@ export const CriarProvider = ({ children }) => {
       getTextoBaseParaGeracao,
       getTotalPalavras,
       getTotalMateriais,
+      getSelectedTagsArray,
     }),
     [
       state,
@@ -333,6 +451,10 @@ export const CriarProvider = ({ children }) => {
       setTextoCompleto,
       setModoEdicao,
       confirmarTextoBase,
+      setStoryFusionData,
+      updateStoryFusionSelection,
+      setStoryFusionEditedTexts,
+      setStoryFusionActiveTab,
       setConfiguracao,
       setConfiguracoes,
       adicionarCitacao,
@@ -340,6 +462,9 @@ export const CriarProvider = ({ children }) => {
       confirmarConfiguracoes,
       adicionarMaterial,
       removerMaterial,
+      toggleTag,
+      setSelectedTags,
+      clearSelectedTags,
       setResultado,
       setEtapaAtual,
       podeAvancar,
@@ -347,6 +472,7 @@ export const CriarProvider = ({ children }) => {
       getTextoBaseParaGeracao,
       getTotalPalavras,
       getTotalMateriais,
+      getSelectedTagsArray,
     ]
   );
 

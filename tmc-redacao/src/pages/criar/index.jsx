@@ -22,7 +22,7 @@ import { FEATURES } from '../../config/featureFlags';
  */
 const CriarMateria = () => {
   const navigate = useNavigate();
-  const { setFonte } = useCriar();
+  const { setFonte, setSelectedTags } = useCriar();
   const [selectedSource, setSelectedSource] = useState(null);
   const [showUrlModal, setShowUrlModal] = useState(false);
   const [urlModalType, setUrlModalType] = useState('youtube');
@@ -70,10 +70,15 @@ const CriarMateria = () => {
     navigate('/criar/texto-base');
   };
 
-  const handleFeedSelect = (articles) => {
+  const handleFeedSelect = (articles, tags = []) => {
     console.log('Articles selected:', articles);
+    console.log('Tags selected:', tags);
     // Salvar fonte no contexto e navegar
     setFonte('feed', articles);
+    // Salvar tags selecionadas para SEO
+    if (tags.length > 0) {
+      setSelectedTags(tags);
+    }
     navigate('/criar/texto-base');
   };
 

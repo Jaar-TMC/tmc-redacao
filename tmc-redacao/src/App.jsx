@@ -40,6 +40,7 @@ function DocumentTitleUpdater() {
       '/criar/editor': 'Editor de Matéria',
       '/transcricao': 'Transcrever Vídeo',
       '/minhas-materias': 'Minhas Matérias',
+      '/editar': 'Editar Matéria',
       '/configuracoes': 'Configurações',
       '/configuracoes/buscador': 'Buscador de Notícias - Configurações',
       '/configuracoes/trends': 'Google Trends - Configurações',
@@ -152,6 +153,7 @@ function App() {
                           {/* Other Pages */}
                           <Route path="/transcricao" element={<TranscricaoPage />} />
                           <Route path="/minhas-materias" element={<MinhasMaterias />} />
+                          <Route path="/editar/:articleId" element={<CriarPostPage />} />
 
                           {/* Configuration Pages */}
                           <Route path="/configuracoes" element={<ConfiguracoesPage />}>

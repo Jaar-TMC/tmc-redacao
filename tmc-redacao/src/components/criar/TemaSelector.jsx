@@ -1,7 +1,8 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect, useCallback } from 'react';
 import PropTypes from 'prop-types';
-import { X, Search, Flame, TrendingUp, Twitter } from 'lucide-react';
-import { mockFeedThemes, mockGoogleTrends, mockTwitterTrends } from '../../data/mockData';
+import { X, Search, Flame, TrendingUp, Twitter, RefreshCw, AlertCircle } from 'lucide-react';
+import { getArticles } from '../../services/api';
+import { transformArticles, computeFeedThemes } from '../../utils/transformers';
 
 /**
  * TemaSelector - Seletor inline de temas em alta
@@ -14,11 +15,42 @@ const TemaSelector = ({ onClose, onSelect }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedTheme, setSelectedTheme] = useState(null);
 
+  // API State
+  const [feedThemes, setFeedThemes] = useState([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState(null);
+
+  // Google Trends and Twitter are post-MVP features - use empty arrays
+  const googleTrends = [];
+  const twitterTrends = [];
+
+  // Fetch articles and compute themes
+  const fetchThemes = useCallback(async () => {
+    setIsLoading(true);
+    setError(null);
+    try {
+      const response = await getArticles({ limit: 100 });
+      const articles = transformArticles(response?.articles);
+      const themes = computeFeedThemes(articles);
+      setFeedThemes(themes);
+    } catch (err) {
+      console.error('Error fetching themes:', err);
+      setError(err.message || 'Erro ao carregar temas');
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
+
+  // Fetch on mount
+  useEffect(() => {
+    fetchThemes();
+  }, [fetchThemes]);
+
   // Obter dados baseado na tab ativa
   const getThemesData = () => {
     switch (activeTab) {
       case 'feed':
-        return mockFeedThemes.map(t => ({
+        return feedThemes.map(t => ({
           id: `feed-${t.id}`,
           name: t.theme,
           count: `${t.count} matérias`,
@@ -26,7 +58,7 @@ const TemaSelector = ({ onClose, onSelect }) => {
           source: 'feed'
         }));
       case 'google':
-        return mockGoogleTrends.map(t => ({
+        return googleTrends.map(t => ({
           id: `google-${t.id}`,
           name: t.topic,
           count: t.searches,
@@ -34,7 +66,7 @@ const TemaSelector = ({ onClose, onSelect }) => {
           source: 'google'
         }));
       case 'twitter':
-        return mockTwitterTrends.map(t => ({
+        return twitterTrends.map(t => ({
           id: `twitter-${t.id}`,
           name: t.hashtag,
           count: `${t.mentions} menções`,
@@ -53,7 +85,7 @@ const TemaSelector = ({ onClose, onSelect }) => {
     return themes.filter(t =>
       t.name.toLowerCase().includes(searchQuery.toLowerCase())
     );
-  }, [activeTab, searchQuery]);
+  }, [activeTab, searchQuery, feedThemes]);
 
   const handleThemeClick = (theme) => {
     setSelectedTheme(theme);
@@ -152,7 +184,24 @@ const TemaSelector = ({ onClose, onSelect }) => {
 
       {/* Lista de Temas */}
       <div className="max-h-80 overflow-y-auto space-y-2 mb-4">
-        {filteredThemes.length === 0 ? (
+        {isLoading ? (
+          <div className="flex flex-col items-center justify-center py-8">
+            <RefreshCw size={24} className="text-tmc-orange animate-spin mb-2" />
+            <p className="text-sm text-medium-gray">Carregando temas...</p>
+          </div>
+        ) : error ? (
+          <div className="flex flex-col items-center justify-center py-8 text-center">
+            <AlertCircle size={24} className="text-red-500 mb-2" />
+            <p className="text-sm text-medium-gray mb-3">{error}</p>
+            <button
+              onClick={fetchThemes}
+              className="text-sm text-tmc-orange hover:underline flex items-center gap-1"
+            >
+              <RefreshCw size={14} />
+              Tentar novamente
+            </button>
+          </div>
+        ) : filteredThemes.length === 0 ? (
           <div className="text-center py-8 text-medium-gray">
             <p className="text-sm">Nenhum tema encontrado</p>
           </div>

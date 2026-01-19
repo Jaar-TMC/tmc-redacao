@@ -1,6 +1,8 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { Plus, Edit2, Trash2, X, Check, ExternalLink, Newspaper } from 'lucide-react';
-import { mockSources, formatRelativeTime } from '../../data/mockData';
+import { Plus, Edit2, Trash2, X, ExternalLink, RefreshCw, AlertCircle } from 'lucide-react';
+import { formatRelativeTime } from '../../data/mockData';
+import { getSources, createSource, updateSource, deleteSource } from '../../services/api';
+import { transformSources } from '../../utils/transformers';
 import ConfirmDialog from '../../components/ui/ConfirmDialog';
 import StatusMessage from '../../components/ui/StatusMessage';
 import Skeleton from '../../components/ui/Skeleton';
@@ -25,10 +27,11 @@ import EmptyState from '../../components/ui/EmptyState';
  * - Headings and Labels (2.4.6): All form inputs have descriptive labels
  */
 const BuscadorPage = () => {
-  const [sources, setSources] = useState(mockSources);
+  const [sources, setSources] = useState([]);
   const [showModal, setShowModal] = useState(false);
   const [editingSource, setEditingSource] = useState(null);
-  const [isLoading, setIsLoading] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState(null);
   const [formData, setFormData] = useState({
     name: '',
     url: '',
@@ -60,8 +63,49 @@ const BuscadorPage = () => {
     'Entretenimento'
   ], []);
 
+  // Fetch sources from API on mount
+  useEffect(() => {
+    const fetchSources = async () => {
+      setIsLoading(true);
+      setError(null);
+      try {
+        const response = await getSources();
+        const transformedSources = transformSources(response?.items).map(source => ({
+          ...source,
+          lastFetch: source.last_fetch ? new Date(source.last_fetch) : null
+        }));
+        setSources(transformedSources);
+      } catch (err) {
+        console.error('Error fetching sources:', err);
+        setError(err.message || 'Erro ao carregar fontes');
+      } finally {
+        setIsLoading(false);
+      }
+    };
+    fetchSources();
+  }, []);
+
+  // Retry fetch after error
+  const handleRetry = useCallback(async () => {
+    setIsLoading(true);
+    setError(null);
+    try {
+      const response = await getSources();
+      const transformedSources = transformSources(response?.items).map(source => ({
+        ...source,
+        lastFetch: source.last_fetch ? new Date(source.last_fetch) : null
+      }));
+      setSources(transformedSources);
+    } catch (err) {
+      console.error('Error fetching sources:', err);
+      setError(err.message || 'Erro ao carregar fontes');
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
+
   const activeSources = useMemo(() => sources.filter(s => s.active).length, [sources]);
-  const totalArticles = 156;
+  const totalSources = sources.length;
 
   // Focus trap for modal
   useEffect(() => {
@@ -118,29 +162,72 @@ const BuscadorPage = () => {
     setTimeout(() => document.body.removeChild(announcement), 1000);
   }, []);
 
-  const handleToggleActive = useCallback((id, sourceName) => {
+  const handleToggleActive = useCallback(async (id, sourceName) => {
     const source = sources.find(s => s.id === id);
     const newStatus = !source.active;
+
+    // Optimistic update
     setSources(sources.map(s => s.id === id ? { ...s, active: newStatus } : s));
 
-    // Announce to screen readers
-    const message = `${sourceName} ${newStatus ? 'ativada' : 'desativada'}`;
-    announceToScreenReader(message);
+    try {
+      await updateSource(id, { active: newStatus });
+      // Announce to screen readers
+      const message = `${sourceName} ${newStatus ? 'ativada' : 'desativada'}`;
+      announceToScreenReader(message);
+    } catch (err) {
+      // Revert on error
+      setSources(sources.map(s => s.id === id ? { ...s, active: !newStatus } : s));
+      setStatusMessage({
+        isVisible: true,
+        type: 'error',
+        message: `Erro ao atualizar status de "${sourceName}"`
+      });
+    }
   }, [sources, announceToScreenReader]);
 
   const handleDeleteClick = useCallback((source) => {
     setDeleteConfirm({ isOpen: true, source });
   }, []);
 
-  const handleDeleteConfirm = useCallback(() => {
-    if (deleteConfirm.source) {
-      setSources(sources.filter(s => s.id !== deleteConfirm.source.id));
+  const handleFrequencyChange = useCallback(async (id, newFrequency, sourceName) => {
+    const previousSources = [...sources];
+
+    // Optimistic update
+    setSources(sources.map(s => s.id === id ? { ...s, frequency: newFrequency } : s));
+
+    try {
+      await updateSource(id, { frequency: newFrequency });
+    } catch (err) {
+      // Revert on error
+      setSources(previousSources);
       setStatusMessage({
         isVisible: true,
-        type: 'success',
-        message: `Fonte "${deleteConfirm.source.name}" excluída com sucesso`
+        type: 'error',
+        message: `Erro ao atualizar frequência de "${sourceName}"`
       });
+    }
+  }, [sources]);
+
+  const handleDeleteConfirm = useCallback(async () => {
+    if (deleteConfirm.source) {
+      const sourceToDelete = deleteConfirm.source;
       setDeleteConfirm({ isOpen: false, source: null });
+
+      try {
+        await deleteSource(sourceToDelete.id);
+        setSources(sources.filter(s => s.id !== sourceToDelete.id));
+        setStatusMessage({
+          isVisible: true,
+          type: 'success',
+          message: `Fonte "${sourceToDelete.name}" excluída com sucesso`
+        });
+      } catch (err) {
+        setStatusMessage({
+          isVisible: true,
+          type: 'error',
+          message: `Erro ao excluir fonte "${sourceToDelete.name}"`
+        });
+      }
     }
   }, [deleteConfirm.source, sources]);
 
@@ -150,8 +237,8 @@ const BuscadorPage = () => {
       setFormData({
         name: source.name,
         url: source.url,
-        category: 'Notícias Gerais',
-        frequency: source.frequency,
+        category: source.category || 'Notícias Gerais',
+        frequency: source.frequency || '1h',
         onlyFeatured: false
       });
     } else {
@@ -175,16 +262,29 @@ const BuscadorPage = () => {
     }
   }, []);
 
-  const handleSubmit = useCallback((e) => {
+  const handleSubmit = useCallback(async (e) => {
     e.preventDefault();
     setIsSubmitting(true);
 
-    // Simulate async operation
-    setTimeout(() => {
+    try {
       if (editingSource) {
+        // Update existing source
+        const updated = await updateSource(editingSource.id, {
+          name: formData.name,
+          url: formData.url,
+          category: formData.category,
+          frequency: formData.frequency
+        });
+
+        // Update local state with API response
         setSources(sources.map(s =>
           s.id === editingSource.id
-            ? { ...s, name: formData.name, url: formData.url, frequency: formData.frequency }
+            ? {
+                ...s,
+                name: updated.name || formData.name,
+                url: updated.url || formData.url,
+                frequency: updated.frequency || formData.frequency
+              }
             : s
         ));
         setStatusMessage({
@@ -193,13 +293,30 @@ const BuscadorPage = () => {
           message: `Fonte "${formData.name}" atualizada com sucesso`
         });
       } else {
-        const newSource = {
-          id: Date.now(),
+        // Create new source
+        const created = await createSource({
           name: formData.name,
           url: formData.url,
-          favicon: `https://www.google.com/s2/favicons?domain=${formData.url}&sz=32`,
-          active: true,
+          category: formData.category,
           frequency: formData.frequency,
+          active: true
+        });
+
+        // Extract domain for favicon
+        let domain = '';
+        try {
+          domain = new URL(formData.url).hostname;
+        } catch {
+          domain = 'example.com';
+        }
+
+        const newSource = {
+          id: created.id,
+          name: created.name || formData.name,
+          url: created.url || formData.url,
+          favicon: `https://www.google.com/s2/favicons?domain=${domain}&sz=32`,
+          active: true,
+          frequency: created.frequency || formData.frequency,
           lastFetch: new Date()
         };
         setSources([...sources, newSource]);
@@ -209,9 +326,18 @@ const BuscadorPage = () => {
           message: `Fonte "${formData.name}" adicionada com sucesso`
         });
       }
-      setIsSubmitting(false);
       handleCloseModal();
-    }, 500);
+    } catch (err) {
+      setStatusMessage({
+        isVisible: true,
+        type: 'error',
+        message: editingSource
+          ? `Erro ao atualizar fonte "${formData.name}"`
+          : `Erro ao adicionar fonte "${formData.name}"`
+      });
+    } finally {
+      setIsSubmitting(false);
+    }
   }, [editingSource, formData, sources, handleCloseModal]);
 
   return (
@@ -247,7 +373,36 @@ const BuscadorPage = () => {
         </button>
       </div>
 
+      {/* Loading State */}
+      {isLoading && (
+        <div className="bg-white rounded-xl border border-light-gray p-8">
+          <div className="flex flex-col items-center justify-center py-8">
+            <RefreshCw size={32} className="text-tmc-orange animate-spin mb-4" />
+            <p className="text-sm text-medium-gray">Carregando fontes...</p>
+          </div>
+        </div>
+      )}
+
+      {/* Error State */}
+      {error && !isLoading && (
+        <div className="bg-white rounded-xl border border-light-gray p-8">
+          <div className="flex flex-col items-center justify-center py-8">
+            <AlertCircle size={32} className="text-red-500 mb-4" />
+            <p className="text-lg font-semibold text-dark-gray mb-2">Erro ao carregar fontes</p>
+            <p className="text-sm text-medium-gray mb-4">{error}</p>
+            <button
+              onClick={handleRetry}
+              className="px-4 py-2 bg-tmc-orange text-white rounded-lg hover:bg-tmc-orange/90 transition-colors font-medium flex items-center gap-2"
+            >
+              <RefreshCw size={16} />
+              Tentar novamente
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Desktop Table */}
+      {!isLoading && !error && (
       <div className="hidden md:block bg-white rounded-xl border border-light-gray overflow-hidden">
         <table className="w-full" role="table" aria-label="Lista de fontes de notícias">
           <thead className="bg-off-white border-b border-light-gray">
@@ -310,13 +465,13 @@ const BuscadorPage = () => {
                 </td>
                 <td className="px-6 py-4">
                   <a
-                    href={`https://${source.url}`}
+                    href={source.url.startsWith('http') ? source.url : `https://${source.url}`}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="text-tmc-orange hover:underline flex items-center gap-1"
                     aria-label={`Abrir ${source.url} em nova aba`}
                   >
-                    {source.url}
+                    <span className="truncate max-w-[200px]">{source.url}</span>
                     <ExternalLink size={14} aria-hidden="true" />
                   </a>
                 </td>
@@ -327,9 +482,7 @@ const BuscadorPage = () => {
                   <select
                     id={`frequency-${source.id}`}
                     value={source.frequency}
-                    onChange={(e) => setSources(sources.map(s =>
-                      s.id === source.id ? { ...s, frequency: e.target.value } : s
-                    ))}
+                    onChange={(e) => handleFrequencyChange(source.id, e.target.value, source.name)}
                     className="text-sm bg-off-white border border-light-gray rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-tmc-orange/50"
                     aria-label={`Alterar frequência de coleta para ${source.name}`}
                   >
@@ -370,8 +523,10 @@ const BuscadorPage = () => {
           </tbody>
         </table>
       </div>
+      )}
 
       {/* Mobile Cards */}
+      {!isLoading && !error && (
       <div className="md:hidden space-y-4">
         {sources.map((source) => (
           <div key={source.id} className="bg-white rounded-xl border border-light-gray p-4">
@@ -413,7 +568,7 @@ const BuscadorPage = () => {
 
             {/* URL */}
             <a
-              href={`https://${source.url}`}
+              href={source.url.startsWith('http') ? source.url : `https://${source.url}`}
               target="_blank"
               rel="noopener noreferrer"
               className="text-tmc-orange hover:underline flex items-center gap-1 text-sm mb-3"
@@ -431,9 +586,7 @@ const BuscadorPage = () => {
               <select
                 id={`frequency-mobile-${source.id}`}
                 value={source.frequency}
-                onChange={(e) => setSources(sources.map(s =>
-                  s.id === source.id ? { ...s, frequency: e.target.value } : s
-                ))}
+                onChange={(e) => handleFrequencyChange(source.id, e.target.value, source.name)}
                 className="w-full text-sm bg-off-white border border-light-gray rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-tmc-orange/50"
               >
                 {frequencies.map((f) => (
@@ -466,12 +619,24 @@ const BuscadorPage = () => {
           </div>
         ))}
       </div>
+      )}
+
+      {/* Empty State */}
+      {!isLoading && !error && sources.length === 0 && (
+        <EmptyState
+          icon={RefreshCw}
+          title="Nenhuma fonte cadastrada"
+          description="Adicione fontes RSS para começar a coletar matérias automaticamente."
+        />
+      )}
 
       {/* Stats Footer */}
-      <div className="mt-4 text-center text-sm text-medium-gray" role="status" aria-live="polite">
-        <span className="font-semibold text-dark-gray">{activeSources}</span> fontes ativas |{' '}
-        <span className="font-semibold text-dark-gray">{totalArticles}</span> matérias coletadas hoje
-      </div>
+      {!isLoading && !error && sources.length > 0 && (
+        <div className="mt-4 text-center text-sm text-medium-gray" role="status" aria-live="polite">
+          <span className="font-semibold text-dark-gray">{activeSources}</span> fontes ativas de{' '}
+          <span className="font-semibold text-dark-gray">{totalSources}</span> cadastradas
+        </div>
+      )}
 
       {/* Modal */}
       {showModal && (

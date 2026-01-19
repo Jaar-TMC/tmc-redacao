@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { Bell, Settings, User, PenLine, Menu, X, HelpCircle, ChevronDown, FileText, Youtube } from 'lucide-react';
 import { Link, useLocation } from 'react-router-dom';
-import logo from '../../assets/logo-tmc.svg';
+import LogoTMC from '../../assets/logo-tmc.svg?react';
 import { useWordPress } from '../../context';
 
 /**
@@ -62,13 +62,18 @@ const Header = () => {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
+  // In WordPress, use sticky positioning instead of fixed to work with admin layout
+  const headerClasses = isWordPress
+    ? "bg-tmc-dark-green text-white h-16 sticky top-0 z-50 shadow-lg"
+    : "bg-tmc-dark-green text-white h-16 fixed top-0 left-0 right-0 z-50 shadow-lg";
+
   return (
-    <header className="bg-tmc-dark-green text-white h-16 fixed top-0 left-0 right-0 z-50 shadow-lg" role="banner">
+    <header className={headerClasses} role="banner">
       <div className="h-full px-4 md:px-6 flex items-center justify-between">
         {/* Left: Logo + Desktop Navigation */}
         <div className="flex items-center gap-4 md:gap-8">
           <Link to="/" className="flex items-center gap-2 min-h-[44px]" aria-label="Página inicial TMC">
-            <img src={logo} alt="TMC - The Media Company" className="h-7 md:h-8" />
+            <LogoTMC className="h-7 md:h-8" aria-label="TMC - The Media Company" />
           </Link>
 
           {/* Desktop Navigation */}

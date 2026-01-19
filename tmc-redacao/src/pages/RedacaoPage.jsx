@@ -1,5 +1,5 @@
-import { useState, useMemo, useCallback } from 'react';
-import { TrendingUp, Sparkles, FileText } from 'lucide-react';
+import { useState, useMemo, useCallback, useEffect } from 'react';
+import { TrendingUp, Sparkles, FileText, RefreshCw, AlertCircle } from 'lucide-react';
 import TrendsSidebar from '../components/layout/TrendsSidebar';
 import ActionPanel from '../components/layout/ActionPanel';
 import FilterBar from '../components/ui/FilterBar';
@@ -7,7 +7,8 @@ import ArticleCard from '../components/cards/ArticleCard';
 import Skeleton from '../components/ui/Skeleton';
 import EmptyState from '../components/ui/EmptyState';
 import Spinner from '../components/ui/Spinner';
-import { mockArticles } from '../data/mockData';
+import { getArticles } from '../services/api';
+import { transformArticles } from '../utils/transformers';
 import { useArticles, useFilters, useUI } from '../context';
 
 const RedacaoPage = () => {
@@ -22,8 +23,84 @@ const RedacaoPage = () => {
     closeActionPanel,
   } = useUI();
 
-  const [isLoading, setIsLoading] = useState(false);
+  // API State
+  const [articles, setArticles] = useState([]);
+  const [isLoading, setIsLoading] = useState(true);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
+  const [error, setError] = useState(null);
+  const [offset, setOffset] = useState(0);
+  const [hasMore, setHasMore] = useState(true);
+  const ARTICLES_PER_PAGE = 100;
+
+  // Deduplicate articles by title (keep first occurrence)
+  const deduplicateByTitle = (articles) => {
+    const seen = new Set();
+    return articles.filter(article => {
+      const normalizedTitle = article.title.toLowerCase().trim();
+      if (seen.has(normalizedTitle)) {
+        return false;
+      }
+      seen.add(normalizedTitle);
+      return true;
+    });
+  };
+
+  // Fetch articles from API - re-fetch when search query or tag filter changes
+  useEffect(() => {
+    const fetchArticles = async () => {
+      setIsLoading(true);
+      setError(null);
+      try {
+        // Build API params - use server-side search for better results
+        const params = {
+          limit: ARTICLES_PER_PAGE,
+          ...(filters.searchQuery && { search: filters.searchQuery }),
+          ...(filters.tag && { tag: filters.tag }),
+          ...(filters.category && { category: filters.category }),
+          ...(filters.source && { source: filters.source }),
+        };
+
+        const response = await getArticles(params);
+        const transformedArticles = transformArticles(response?.items);
+        const uniqueArticles = deduplicateByTitle(transformedArticles);
+        setArticles(uniqueArticles);
+        setHasMore((response?.items?.length || 0) >= ARTICLES_PER_PAGE);
+        setOffset(ARTICLES_PER_PAGE);
+      } catch (err) {
+        console.error('Error fetching articles:', err);
+        setError(err.message || 'Erro ao carregar matérias');
+      } finally {
+        setIsLoading(false);
+      }
+    };
+    fetchArticles();
+  }, [filters.searchQuery, filters.tag, filters.category, filters.source]);
+
+  // Retry fetch after error
+  const handleRetry = useCallback(async () => {
+    setIsLoading(true);
+    setError(null);
+    try {
+      const params = {
+        limit: ARTICLES_PER_PAGE,
+        ...(filters.searchQuery && { search: filters.searchQuery }),
+        ...(filters.tag && { tag: filters.tag }),
+        ...(filters.category && { category: filters.category }),
+        ...(filters.source && { source: filters.source }),
+      };
+      const response = await getArticles(params);
+      const transformedArticles = transformArticles(response?.items);
+      const uniqueArticles = deduplicateByTitle(transformedArticles);
+      setArticles(uniqueArticles);
+      setHasMore((response?.items?.length || 0) >= ARTICLES_PER_PAGE);
+      setOffset(ARTICLES_PER_PAGE);
+    } catch (err) {
+      console.error('Error fetching articles:', err);
+      setError(err.message || 'Erro ao carregar matérias');
+    } finally {
+      setIsLoading(false);
+    }
+  }, [filters]);
 
   const handleSelectArticle = useCallback((article) => {
     addArticle(article);
@@ -37,29 +114,39 @@ const RedacaoPage = () => {
     clearSelection();
   }, [clearSelection]);
 
-  const handleLoadMore = useCallback(() => {
-    setIsLoadingMore(true);
-    // Simulate API call
-    setTimeout(() => {
-      setIsLoadingMore(false);
-    }, 1000);
-  }, []);
+  const handleLoadMore = useCallback(async () => {
+    if (isLoadingMore || !hasMore) return;
 
-  // Filter articles based on active filters - memoized for performance
+    setIsLoadingMore(true);
+    try {
+      const params = {
+        limit: ARTICLES_PER_PAGE,
+        offset,
+        ...(filters.searchQuery && { search: filters.searchQuery }),
+        ...(filters.tag && { tag: filters.tag }),
+        ...(filters.category && { category: filters.category }),
+        ...(filters.source && { source: filters.source }),
+      };
+      const response = await getArticles(params);
+      const newArticles = transformArticles(response?.items);
+      setArticles(prev => deduplicateByTitle([...prev, ...newArticles]));
+      setHasMore(newArticles.length >= ARTICLES_PER_PAGE);
+      setOffset(prev => prev + ARTICLES_PER_PAGE);
+    } catch (err) {
+      console.error('Error loading more articles:', err);
+    } finally {
+      setIsLoadingMore(false);
+    }
+  }, [offset, isLoadingMore, hasMore, filters]);
+
+  // Articles are now server-side filtered, so we just return them directly
+  // Client-side filtering is only kept as a visual fallback during loading transitions
   const filteredArticles = useMemo(() => {
-    return mockArticles.filter((article) => {
-      if (filters.category && article.category !== filters.category) return false;
-      if (filters.source && article.source !== filters.source) return false;
-      if (filters.searchQuery) {
-        const query = filters.searchQuery.toLowerCase();
-        return (
-          article.title.toLowerCase().includes(query) ||
-          article.preview.toLowerCase().includes(query)
-        );
-      }
-      return true;
-    });
-  }, [filters]);
+    // Since server-side filtering is now in place, articles are already filtered
+    // We only need to do additional client-side filtering if the server doesn't support
+    // certain filter types or during transitional states
+    return articles;
+  }, [articles]);
 
   return (
     <div className="min-h-screen pt-16 bg-off-white">
@@ -120,6 +207,19 @@ const RedacaoPage = () => {
                 </div>
               ))}
             </div>
+          ) : error ? (
+            <div className="flex flex-col items-center justify-center py-16">
+              <AlertCircle size={48} className="text-red-500 mb-4" />
+              <h3 className="text-lg font-semibold text-dark-gray mb-2">Erro ao carregar matérias</h3>
+              <p className="text-sm text-medium-gray mb-6 text-center max-w-md">{error}</p>
+              <button
+                onClick={handleRetry}
+                className="px-6 py-3 bg-tmc-orange text-white rounded-lg hover:bg-tmc-orange/90 transition-colors font-medium flex items-center gap-2"
+              >
+                <RefreshCw size={18} />
+                Tentar novamente
+              </button>
+            </div>
           ) : filteredArticles.length === 0 ? (
             <EmptyState
               icon={FileText}
@@ -140,24 +240,26 @@ const RedacaoPage = () => {
               </div>
 
               {/* Load More */}
-              <div className="flex justify-center mt-8 mb-20 lg:mb-8">
-                <button
-                  type="button"
-                  onClick={handleLoadMore}
-                  disabled={isLoadingMore}
-                  className="px-6 py-3 bg-white border border-light-gray rounded-lg text-sm font-medium text-dark-gray hover:bg-off-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 min-h-[44px]"
-                  aria-label="Carregar mais matérias"
-                >
-                  {isLoadingMore ? (
-                    <>
-                      <Spinner size="sm" />
-                      <span>Carregando...</span>
-                    </>
-                  ) : (
-                    'Carregar mais matérias'
-                  )}
-                </button>
-              </div>
+              {hasMore && (
+                <div className="flex justify-center mt-8 mb-20 lg:mb-8">
+                  <button
+                    type="button"
+                    onClick={handleLoadMore}
+                    disabled={isLoadingMore}
+                    className="px-6 py-3 bg-white border border-light-gray rounded-lg text-sm font-medium text-dark-gray hover:bg-off-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 min-h-[44px]"
+                    aria-label="Carregar mais matérias"
+                  >
+                    {isLoadingMore ? (
+                      <>
+                        <Spinner size="sm" />
+                        <span>Carregando...</span>
+                      </>
+                    ) : (
+                      'Carregar mais matérias'
+                    )}
+                  </button>
+                </div>
+              )}
             </>
           )}
         </div>

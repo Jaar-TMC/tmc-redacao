@@ -14,6 +14,7 @@ from services.database import get_db
 from services.rss_parser import RSSParser
 from services.deduplication import deduplicate_with_db
 from services.enrichment import enrich_article_image
+from services.ai_enrichment import enrich_articles_with_ai, is_ai_enrichment_enabled
 from models import Source
 
 logger = logging.getLogger(__name__)
@@ -40,6 +41,18 @@ async def rss_collector_handler(timer: func.TimerRequest) -> None:
     if not db.test_connection():
         logger.error(f"[{execution_id}] Database connection failed")
         return
+
+    # Limpar artigos antigos (> 24 horas) e duplicados
+    try:
+        deleted_old = db.delete_old_articles(hours=24)
+        if deleted_old > 0:
+            logger.info(f"[{execution_id}] Cleanup: deleted {deleted_old} articles older than 24h")
+
+        deleted_dupes = db.delete_duplicate_articles_by_title()
+        if deleted_dupes > 0:
+            logger.info(f"[{execution_id}] Cleanup: deleted {deleted_dupes} duplicate articles")
+    except Exception as e:
+        logger.warning(f"[{execution_id}] Cleanup failed: {e}")
 
     # Buscar fontes que devem ser coletadas
     try:
@@ -94,8 +107,9 @@ async def process_single_source(source: Source, db, parser: RSSParser,
     1. Fetch e parse do feed
     2. Deduplicar artigos
     3. Enriquecer artigos sem imagem
-    4. Inserir no banco
-    5. Atualizar fonte e logar
+    4. Enriquecer com AI (categoria semantica e tags SEO)
+    5. Inserir no banco
+    6. Atualizar fonte e logar
     """
     start_time = datetime.utcnow()
     source_name = source.name
@@ -141,15 +155,25 @@ async def process_single_source(source: Source, db, parser: RSSParser,
             except Exception as e:
                 logger.debug(f"[{execution_id}] Failed to enrich image for {article.url}: {e}")
 
-        # 4. Inserir no banco
+        # 4. Enriquecer artigos com AI (categoria semantica e tags SEO)
+        try:
+            if is_ai_enrichment_enabled():
+                logger.info(f"[{execution_id}] {source_name}: Starting AI enrichment for {len(unique_articles)} articles")
+                unique_articles = await enrich_articles_with_ai(unique_articles)
+                logger.info(f"[{execution_id}] {source_name}: AI enrichment completed")
+        except Exception as e:
+            logger.warning(f"[{execution_id}] {source_name}: AI enrichment failed, using RSS data: {e}")
+            # Graceful degradation - continue with RSS metadata
+
+        # 5. Inserir no banco
         articles_new = db.insert_articles(unique_articles)
 
         logger.info(f"[{execution_id}] {source_name}: Inserted {articles_new} new articles")
 
-        # 5. Atualizar fonte
+        # 6. Atualizar fonte
         db.update_source_last_fetch(source.id, articles_new)
 
-        # 6. Logar coleta
+        # 7. Logar coleta
         duration_ms = _get_duration_ms(start_time)
         db.log_collection(
             source_id=source.id,

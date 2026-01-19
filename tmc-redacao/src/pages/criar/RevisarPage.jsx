@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import {
   ArrowLeft, HelpCircle, FileText, ChevronDown, ChevronUp,
   Link, Youtube, File, User, Palette, Building2, Calendar,
-  MessageSquare, Edit, Sparkles, Check, AlertCircle
+  MessageSquare, Edit, Sparkles, Check, AlertCircle, Tag, X
 } from 'lucide-react';
 import { Stepper } from '../../components/criar';
 import { useCriar } from '../../context';
@@ -30,35 +30,42 @@ const mockReviewData = {
     { id: 2, type: 'pdf', title: 'relatorio_trimestral.pdf', pages: 12, words: 3400, status: 'extracted' }
   ],
   configuracoes: {
-    persona: 'Jornalista Imparcial',
-    tom: 'Formal',
+    categoria: 'Economia',
+    tom: 'Didático',
+    modoOpinativo: false,
     creditos: 'Agência Brasil',
     dataBase: '18/12/2024',
     orientacaoLide: 'Focar no impacto econômico para o cidadão comum',
     citacoes: 1,
-    instrucoes: 'Evitar termos técnicos, manter parágrafos curtos'
+    instrucoes: 'Evitar termos técnicos, manter parágrafos curtos',
+    tipoMateria: 'destaque'
   }
 };
 
-// Map context persona/tom to display names
-const PERSONA_NAMES = {
-  imparcial: 'Jornalista Imparcial',
-  especialista: 'Especialista',
-  colunista: 'Colunista',
-  influencer: 'Influenciador Digital'
+// Map context categoria to display names
+const CATEGORIA_NAMES = {
+  esportes: 'Esportes',
+  entretenimento: 'Entretenimento',
+  politica: 'Política',
+  economia: 'Economia',
+  geral: 'Geral/Variedades'
 };
 
 const TOM_NAMES = {
-  formal: 'Formal',
   informal: 'Informal',
-  tecnico: 'Técnico',
-  persuasivo: 'Persuasivo',
-  neutro: 'Neutro'
+  emocional: 'Emocional',
+  sobrio: 'Sóbrio',
+  leve: 'Leve',
+  criativo: 'Criativo',
+  didatico: 'Didático',
+  analitico: 'Analítico',
+  conversacional: 'Conversacional',
+  informativo: 'Informativo'
 };
 
 const RevisarPage = () => {
   const navigate = useNavigate();
-  const { fonte, textoBase, configuracoes, materiaisComplementares, setResultado } = useCriar();
+  const { fonte, textoBase, configuracoes, materiaisComplementares, setResultado, selectedTags, toggleTag, getSelectedTagsArray } = useCriar();
 
   // State
   const [expandedSections, setExpandedSections] = useState({
@@ -115,23 +122,28 @@ const RevisarPage = () => {
           }))
         ],
         configuracoes: {
-          persona: PERSONA_NAMES[configuracoes.persona] || configuracoes.persona,
+          categoria: CATEGORIA_NAMES[configuracoes.categoria] || configuracoes.categoria || 'Geral/Variedades',
           tom: TOM_NAMES[configuracoes.tom] || configuracoes.tom,
+          modoOpinativo: configuracoes.modoOpinativo,
           creditos: configuracoes.creditos || 'Não informado',
           dataBase: configuracoes.data || new Date().toLocaleDateString('pt-BR'),
           orientacaoLide: configuracoes.orientacaoLide || '',
           citacoes: configuracoes.citacoes?.length || 0,
-          instrucoes: configuracoes.instrucoes || ''
+          instrucoes: configuracoes.instrucoes || '',
+          tipoMateria: configuracoes.tipoMateria || ''
         },
         // Keep raw data for API
         _raw: {
           textoBaseContent,
-          persona: configuracoes.persona,
+          categoria: configuracoes.categoria,
           tom: configuracoes.tom,
+          modoOpinativo: configuracoes.modoOpinativo,
+          tipoMateria: configuracoes.tipoMateria,
           citacoes: configuracoes.citacoes,
           contexto: configuracoes.contexto,
           creditos: configuracoes.creditos,
-          orientacaoLide: configuracoes.orientacaoLide
+          orientacaoLide: configuracoes.orientacaoLide,
+          tags: getSelectedTagsArray()
         }
       };
     }
@@ -139,17 +151,25 @@ const RevisarPage = () => {
     // Fall back to mock data
     return {
       ...mockReviewData,
+      configuracoes: {
+        ...mockReviewData.configuracoes,
+        categoria: 'Geral/Variedades',
+        modoOpinativo: false
+      },
       _raw: {
         textoBaseContent: mockReviewData.textoBase.content,
-        persona: 'imparcial',
-        tom: 'formal',
+        categoria: 'geral',
+        tom: 'conversacional',
+        modoOpinativo: false,
+        tipoMateria: 'destaque',
         citacoes: [],
         contexto: '',
         creditos: mockReviewData.configuracoes.creditos,
-        orientacaoLide: mockReviewData.configuracoes.orientacaoLide
+        orientacaoLide: mockReviewData.configuracoes.orientacaoLide,
+        tags: getSelectedTagsArray()
       }
     };
-  }, [fonte, textoBase, configuracoes, materiaisComplementares]);
+  }, [fonte, textoBase, configuracoes, materiaisComplementares, getSelectedTagsArray]);
 
   const toggleSection = useCallback((section, id = null) => {
     if (id) {
@@ -195,12 +215,15 @@ const RevisarPage = () => {
       // Call the real generation API
       const result = await generateArticle({
         texto_base: reviewData._raw.textoBaseContent,
-        persona: reviewData._raw.persona || 'imparcial',
-        tom: reviewData._raw.tom || 'formal',
+        categoria: reviewData._raw.categoria || 'geral',
+        tom: reviewData._raw.tom || 'conversacional',
+        modo_opinativo: reviewData._raw.modoOpinativo || false,
+        tipo_materia: reviewData._raw.tipoMateria || 'destaque',
         orientacao_lide: reviewData._raw.orientacaoLide || '',
         citacoes: reviewData._raw.citacoes || [],
         contexto: reviewData._raw.contexto || '',
-        creditos: reviewData._raw.creditos || ''
+        creditos: reviewData._raw.creditos || '',
+        tags: reviewData._raw.tags || []
       });
 
       // Stop progress simulation
@@ -496,8 +519,8 @@ const RevisarPage = () => {
               <div className="flex items-center gap-3">
                 <User size={18} className="text-tmc-orange" />
                 <div>
-                  <p className="text-xs text-medium-gray">Persona</p>
-                  <p className="text-sm font-medium text-dark-gray">{reviewData.configuracoes.persona}</p>
+                  <p className="text-xs text-medium-gray">Categoria Editorial</p>
+                  <p className="text-sm font-medium text-dark-gray">{reviewData.configuracoes.categoria}</p>
                 </div>
               </div>
 
@@ -508,6 +531,16 @@ const RevisarPage = () => {
                   <p className="text-sm font-medium text-dark-gray">{reviewData.configuracoes.tom}</p>
                 </div>
               </div>
+
+              {reviewData.configuracoes.modoOpinativo && (
+                <div className="flex items-center gap-3">
+                  <MessageSquare size={18} className="text-orange-500" />
+                  <div>
+                    <p className="text-xs text-medium-gray">Modo</p>
+                    <p className="text-sm font-medium text-orange-600">Opinativo Ativo</p>
+                  </div>
+                </div>
+              )}
 
               <div className="flex items-center gap-3">
                 <Building2 size={18} className="text-tmc-orange" />
@@ -550,6 +583,31 @@ const RevisarPage = () => {
                     <div>
                       <p className="text-xs text-medium-gray">Instruções</p>
                       <p className="text-sm text-dark-gray">&quot;{reviewData.configuracoes.instrucoes}&quot;</p>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Tags SEO Section */}
+              {selectedTags && selectedTags.size > 0 && (
+                <div className="border-t border-light-gray pt-4">
+                  <div className="flex items-start gap-3">
+                    <Tag size={18} className="text-tmc-orange mt-0.5" />
+                    <div className="flex-1">
+                      <p className="text-xs text-medium-gray mb-2">Tags para SEO ({selectedTags.size})</p>
+                      <div className="flex flex-wrap gap-1.5">
+                        {Array.from(selectedTags).map(tag => (
+                          <button
+                            key={tag}
+                            onClick={() => toggleTag(tag)}
+                            className="text-xs bg-tmc-orange text-white px-2 py-1 rounded-full flex items-center gap-1 hover:bg-tmc-orange/80 transition-colors"
+                            title={`Remover tag "${tag}"`}
+                          >
+                            #{tag}
+                            <X size={10} />
+                          </button>
+                        ))}
+                      </div>
                     </div>
                   </div>
                 </div>

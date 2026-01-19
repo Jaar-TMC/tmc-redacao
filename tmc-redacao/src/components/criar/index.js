@@ -16,8 +16,17 @@ export { default as VideoTimeline } from './VideoTimeline';
 export { default as IntervalFilter } from './IntervalFilter';
 export { default as ContentBlock } from './ContentBlock';
 
+// Componentes de Story Fusion (Multi-Source Composition)
+export { default as StoryFusionView } from './StoryFusionView';
+export { default as GroupedStructureTab } from './GroupedStructureTab';
+export { default as OriginalTextsTab } from './OriginalTextsTab';
+
 // Componentes da Etapa 3 - Configurar
 export { default as ConfigField } from './ConfigField';
+export { default as PromptPreview } from './PromptPreview';
+export { default as CategorySelector } from './CategorySelector';
+export { default as CategoryGuidelines } from './CategoryGuidelines';
+export { default as OpinionToggle } from './OpinionToggle';
 
 // Componentes Compartilhados
 export { default as TooltipEducativo } from './TooltipEducativo';

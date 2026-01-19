@@ -123,6 +123,7 @@ async def deduplicate_with_db(articles: List[ArticleCreate],
     1. Gerar hash para todos os artigos
     2. Buscar hashes existentes no banco (query batch)
     3. Filtrar artigos com hash novo
+    4. Filtrar artigos com títulos similares aos já existentes no banco
 
     Args:
         articles: Lista de artigos para filtrar
@@ -146,8 +147,62 @@ async def deduplicate_with_db(articles: List[ArticleCreate],
     existing_hashes = db_service.check_existing_hashes(hashes)
     logger.info(f"Found {len(existing_hashes)} existing hashes in DB")
 
-    # 4. Filtrar artigos únicos
-    return deduplicate_articles(articles, existing_hashes)
+    # 4. Filtrar artigos únicos por hash
+    unique_by_hash = deduplicate_articles(articles, existing_hashes)
+
+    # 5. Filtrar artigos com títulos similares aos já existentes no banco
+    unique_articles = await deduplicate_by_title_similarity(unique_by_hash, db_service)
+
+    return unique_articles
+
+
+async def deduplicate_by_title_similarity(articles: List[ArticleCreate],
+                                          db_service,
+                                          similarity_threshold: float = 0.85) -> List[ArticleCreate]:
+    """
+    Remove artigos cujos títulos são muito similares aos já existentes no banco.
+
+    Isso evita que a mesma notícia de diferentes fontes apareça múltiplas vezes
+    (ex: "Trump anuncia medidas econômicas" do G1 e "Trump anuncia medidas para economia" do UOL)
+
+    Args:
+        articles: Lista de artigos já filtrados por hash
+        db_service: Instância do DatabaseService
+        similarity_threshold: Limiar de similaridade (0-1), padrão 0.85
+
+    Returns:
+        Lista de artigos com títulos únicos
+    """
+    if not articles:
+        return []
+
+    # Buscar títulos recentes do banco (últimas 24h)
+    existing_titles = db_service.get_recent_titles(hours=24)
+
+    if not existing_titles:
+        return articles
+
+    unique_articles = []
+    filtered_count = 0
+
+    for article in articles:
+        is_duplicate = False
+        normalized_title = normalize_text(article.title)
+
+        for existing_title in existing_titles:
+            if is_similar_title(normalized_title, existing_title, similarity_threshold):
+                logger.debug(f"Title similarity duplicate: '{article.title[:50]}' ~ '{existing_title[:50]}'")
+                is_duplicate = True
+                filtered_count += 1
+                break
+
+        if not is_duplicate:
+            unique_articles.append(article)
+
+    if filtered_count > 0:
+        logger.info(f"Filtered {filtered_count} articles with similar titles")
+
+    return unique_articles
 
 
 def is_similar_title(title1: str, title2: str, threshold: float = 0.9) -> bool:

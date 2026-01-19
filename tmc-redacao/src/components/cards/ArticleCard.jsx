@@ -22,7 +22,7 @@ const categoryColors = {
   'Educação': 'bg-yellow-500'
 };
 
-const ArticleCard = ({ article, isSelected, onSelect }) => {
+const ArticleCard = ({ article, isSelected, onSelect, selectedTags = new Set(), onTagSelect }) => {
   const [isExpanded, setIsExpanded] = useState(false);
   const categoryColor = useMemo(
     () => categoryColors[article.category] || 'bg-gray-500',
@@ -134,17 +134,35 @@ const ArticleCard = ({ article, isSelected, onSelect }) => {
           </a>
         </div>
 
-        {/* Tags */}
-        <div className="flex flex-wrap gap-1 mt-3">
-          {article.tags.map((tag) => (
-            <span
-              key={tag}
-              className="text-xs bg-off-white text-medium-gray px-2 py-0.5 rounded"
-            >
-              #{tag}
-            </span>
-          ))}
-        </div>
+        {/* Tags - Selectable */}
+        {article.tags && article.tags.length > 0 && (
+          <div className="flex flex-wrap gap-1.5 mt-3">
+            {article.tags.map((tag) => {
+              const isTagSelected = selectedTags.has(tag);
+              return (
+                <button
+                  key={tag}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    if (onTagSelect) {
+                      onTagSelect(tag);
+                    }
+                  }}
+                  className={`text-xs px-2 py-1 rounded-full flex items-center gap-1 transition-all ${
+                    isTagSelected
+                      ? 'bg-tmc-orange text-white'
+                      : 'bg-off-white text-medium-gray hover:bg-tmc-orange/10 hover:text-tmc-orange'
+                  }`}
+                  aria-pressed={isTagSelected}
+                  aria-label={isTagSelected ? `Remover tag ${tag}` : `Adicionar tag ${tag}`}
+                >
+                  {isTagSelected && <Check size={10} strokeWidth={3} />}
+                  #{tag}
+                </button>
+              );
+            })}
+          </div>
+        )}
       </div>
     </div>
   );
@@ -160,10 +178,12 @@ ArticleCard.propTypes = {
     url: PropTypes.string.isRequired,
     favicon: PropTypes.string.isRequired,
     publishedAt: PropTypes.instanceOf(Date).isRequired,
-    tags: PropTypes.arrayOf(PropTypes.string).isRequired,
+    tags: PropTypes.arrayOf(PropTypes.string),
   }).isRequired,
   isSelected: PropTypes.bool.isRequired,
   onSelect: PropTypes.func.isRequired,
+  selectedTags: PropTypes.instanceOf(Set),
+  onTagSelect: PropTypes.func,
 };
 
 export default ArticleCard;

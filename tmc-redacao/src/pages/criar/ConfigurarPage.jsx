@@ -1,56 +1,36 @@
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useCriar } from '../../context/CriarContext';
 import {
   ArrowLeft, ArrowRight, HelpCircle, Calendar, FileText, Quote,
-  Info, Building2, User, Palette, MessageSquare, Link, Youtube,
-  FileUp, X, Plus, ExternalLink, Check, Newspaper
+  Info, Building2, Palette, MessageSquare, Newspaper, Layers,
+  X, Plus, Eye, EyeOff, Edit3, Code
 } from 'lucide-react';
-import { Stepper, ConfigField } from '../../components/criar';
+import {
+  Stepper,
+  ConfigField,
+  PromptPreview,
+  CategorySelector,
+  CategoryGuidelines,
+  OpinionToggle
+} from '../../components/criar';
+import {
+  CATEGORIAS_EDITORIAIS,
+  TIPO_MATERIA_OPTIONS,
+  CREDITO_OPTIONS,
+  getTonesForCategory,
+  getDefaultToneForCategory,
+  categoryAllowsOpinion
+} from '../../constants/editorial';
 
 /**
  * ConfigurarPage - Etapa 3 do fluxo de criação de matéria
  *
- * Permite ao usuário configurar parâmetros de geração e adicionar
- * materiais complementares.
+ * Permite ao usuário configurar parâmetros de geração e revisar
+ * o texto base antes de gerar a matéria.
+ *
+ * Refactored to use TMC's category-based editorial guidelines.
  */
-
-// Opções de persona
-const personaOptions = [
-  { id: 'jornalista', label: 'Jornalista Imparcial', description: 'Objetivo, factual, sem opinião' },
-  { id: 'especialista', label: 'Especialista', description: 'Análise técnica aprofundada' },
-  { id: 'colunista', label: 'Colunista', description: 'Pode incluir opinião fundamentada' },
-  { id: 'influencer', label: 'Influencer', description: 'Linguagem próxima e engajadora' }
-];
-
-// Opções de tom
-const tomOptions = [
-  { id: 'formal', label: 'Formal' },
-  { id: 'informal', label: 'Informal' },
-  { id: 'tecnico', label: 'Técnico' },
-  { id: 'persuasivo', label: 'Persuasivo' },
-  { id: 'neutro', label: 'Neutro' }
-];
-
-// Opções de crédito
-const creditoOptions = [
-  { id: 'agencia-brasil', label: 'Agência Brasil' },
-  { id: 'reuters', label: 'Reuters' },
-  { id: 'afp', label: 'AFP' },
-  { id: 'assessoria', label: 'Assessoria de Imprensa' },
-  { id: 'outro', label: 'Outro...' }
-];
-
-// Tipos de matéria disponíveis
-const tipoMateriaOptions = [
-  { id: 'destaque', label: 'Destaque Principal', description: 'Matéria principal da home' },
-  { id: 'principal-secao', label: 'Principal da Seção', description: 'Destaque dentro de uma editoria' },
-  { id: 'secundaria', label: 'Secundária da Seção', description: 'Matéria de apoio na editoria' },
-  { id: 'coluna', label: 'Coluna', description: 'Texto opinativo ou de colunista' },
-  { id: 'mais-lidas', label: 'Mais Lidas', description: 'Conteúdo para seção popular' },
-  { id: 'original', label: 'Conteúdo Original', description: 'Reportagem exclusiva' },
-  { id: 'servico', label: 'Serviço', description: 'Informação útil ao leitor' }
-];
 
 // Tooltips content
 const tooltips = {
@@ -70,7 +50,7 @@ const tooltips = {
       <div className="space-y-2">
         <p>O lide é o primeiro parágrafo da matéria - deve responder às perguntas: O quê? Quem? Quando? Onde? Por quê? Como?</p>
         <p><strong>Indique qual ângulo destacar:</strong></p>
-        <ul className="list-disc list-inside space-y-1 text-gray-300">
+        <ul className="list-disc list-inside space-y-1 text-medium-gray">
           <li>"Focar no impacto econômico para o cidadão"</li>
           <li>"Destacar a reação do mercado financeiro"</li>
           <li>"Priorizar as declarações do ministro"</li>
@@ -84,7 +64,7 @@ const tooltips = {
       <div className="space-y-2">
         <p>Citações diretas de especialistas, autoridades ou envolvidos dão credibilidade e humanizam a matéria.</p>
         <p><strong>Formato sugerido:</strong></p>
-        <p className="text-gray-300 italic">"Nome, cargo/função: 'Declaração entre aspas simples'"</p>
+        <p className="text-medium-gray italic">"Nome, cargo/função: 'Declaração entre aspas simples'"</p>
         <p className="text-tmc-orange mt-2"><strong>Exemplo:</strong> "João Silva, economista da FGV: 'As medidas terão efeito positivo em até 6 meses'"</p>
       </div>
     )
@@ -94,7 +74,7 @@ const tooltips = {
     content: (
       <div className="space-y-2">
         <p>Informações de background que a IA deve considerar mas que não estão no texto-base:</p>
-        <ul className="list-disc list-inside space-y-1 text-gray-300">
+        <ul className="list-disc list-inside space-y-1 text-medium-gray">
           <li>Histórico do tema ("Essa é a terceira tentativa...")</li>
           <li>Nuances políticas ("O partido X é contra...")</li>
           <li>Dados complementares ("Segundo o IBGE...")</li>
@@ -108,7 +88,7 @@ const tooltips = {
     content: (
       <div className="space-y-2">
         <p>Alguns conteúdos exigem atribuição obrigatória:</p>
-        <ul className="list-disc list-inside space-y-1 text-gray-300">
+        <ul className="list-disc list-inside space-y-1 text-medium-gray">
           <li>Material de agências (Agência Brasil, Reuters, AFP)</li>
           <li>Conteúdo de assessorias de imprensa</li>
           <li>Dados de institutos de pesquisa</li>
@@ -117,18 +97,19 @@ const tooltips = {
       </div>
     )
   },
-  persona: {
-    title: 'Persona da Matéria',
+  categoria: {
+    title: 'Categoria Editorial',
     content: (
       <div className="space-y-2">
-        <p>Define a "voz" e abordagem do texto:</p>
-        <ul className="list-disc list-inside space-y-1 text-gray-300">
-          <li><strong>Jornalista Imparcial:</strong> Objetivo, factual, sem opinião</li>
-          <li><strong>Especialista:</strong> Análise técnica aprofundada</li>
-          <li><strong>Colunista:</strong> Pode incluir opinião fundamentada</li>
-          <li><strong>Influencer:</strong> Linguagem próxima e engajadora</li>
+        <p>Define a voz e regras editoriais específicas do TMC:</p>
+        <ul className="list-disc list-inside space-y-1 text-medium-gray">
+          <li><strong>Esportes:</strong> Tom CazéTV, gírias moderadas, paixão</li>
+          <li><strong>Entretenimento:</strong> Leve, pop, trocadilhos</li>
+          <li><strong>Política:</strong> Sóbrio, didático, sem piadas</li>
+          <li><strong>Economia:</strong> Traduzir para cotidiano</li>
+          <li><strong>Geral:</strong> Conversacional, próximo</li>
         </ul>
-        <p className="text-tmc-orange">Para hard news, prefira "Jornalista Imparcial".</p>
+        <p className="text-tmc-orange">Cada categoria tem tons específicos disponíveis.</p>
       </div>
     )
   },
@@ -136,15 +117,9 @@ const tooltips = {
     title: 'Tom da Escrita',
     content: (
       <div className="space-y-2">
-        <p>O tom afeta a escolha de palavras e construção das frases:</p>
-        <ul className="list-disc list-inside space-y-1 text-gray-300">
-          <li><strong>Formal:</strong> Linguagem séria, vocabulário culto</li>
-          <li><strong>Informal:</strong> Mais leve, próximo do leitor</li>
-          <li><strong>Técnico:</strong> Termos especializados, para público expert</li>
-          <li><strong>Persuasivo:</strong> Argumentativo, para editoriais</li>
-          <li><strong>Neutro:</strong> Equilibrado, sem emoção</li>
-        </ul>
-        <p className="text-tmc-orange">Para notícias do dia, "Formal" ou "Neutro" funcionam melhor.</p>
+        <p>O tom varia de acordo com a categoria selecionada.</p>
+        <p>Cada categoria tem tons específicos que fazem sentido para aquele tipo de conteúdo.</p>
+        <p className="text-tmc-orange">Selecione a categoria primeiro para ver os tons disponíveis.</p>
       </div>
     )
   },
@@ -154,12 +129,11 @@ const tooltips = {
       <div className="space-y-2">
         <p>Comandos específicos para a IA seguir:</p>
         <p><strong>Exemplos úteis:</strong></p>
-        <ul className="list-disc list-inside space-y-1 text-gray-300">
+        <ul className="list-disc list-inside space-y-1 text-medium-gray">
           <li>"Evitar termos muito técnicos"</li>
           <li>"Explicar siglas na primeira menção"</li>
           <li>"Manter parágrafos curtos (3-4 linhas)"</li>
           <li>"Incluir dados numéricos quando disponíveis"</li>
-          <li>"Não usar adjetivos valorativos"</li>
         </ul>
       </div>
     )
@@ -169,62 +143,13 @@ const tooltips = {
     content: (
       <div className="space-y-2">
         <p>Define a posição e formato da matéria no site:</p>
-        <ul className="list-disc list-inside space-y-1 text-gray-300">
+        <ul className="list-disc list-inside space-y-1 text-medium-gray">
           <li><strong>Destaque Principal:</strong> Manchete da home</li>
           <li><strong>Principal da Seção:</strong> Destaque em editoria</li>
-          <li><strong>Secundária:</strong> Matéria de apoio</li>
-          <li><strong>Coluna:</strong> Texto opinativo</li>
-          <li><strong>Mais Lidas:</strong> Para seção popular</li>
-          <li><strong>Original:</strong> Reportagem exclusiva</li>
-          <li><strong>Serviço:</strong> Informação útil</li>
+          <li><strong>Coluna:</strong> Texto opinativo (ativa modo opinião)</li>
+          <li><strong>Serviço:</strong> Informação útil ao leitor</li>
         </ul>
         <p className="text-tmc-orange">O tipo influencia o tamanho e estrutura sugeridos.</p>
-      </div>
-    )
-  },
-  linkWeb: {
-    title: 'Link Complementar (Web)',
-    content: (
-      <div className="space-y-2">
-        <p>Adicione links de páginas que complementam a matéria. O conteúdo será extraído automaticamente.</p>
-        <p><strong>Útil para:</strong></p>
-        <ul className="list-disc list-inside space-y-1 text-gray-300">
-          <li>Matérias relacionadas de outros veículos</li>
-          <li>Páginas oficiais com dados adicionais</li>
-          <li>Comunicados de imprensa</li>
-        </ul>
-        <p>Você poderá revisar e selecionar o que usar.</p>
-      </div>
-    )
-  },
-  videoYoutube: {
-    title: 'Vídeo do YouTube',
-    content: (
-      <div className="space-y-2">
-        <p>Adicione um vídeo complementar ao texto-base. A transcrição será extraída automaticamente.</p>
-        <p><strong>Útil para:</strong></p>
-        <ul className="list-disc list-inside space-y-1 text-gray-300">
-          <li>Entrevistas relacionadas ao tema</li>
-          <li>Coletivas de imprensa</li>
-          <li>Pronunciamentos oficiais</li>
-        </ul>
-        <p>Você poderá revisar e selecionar trechos específicos.</p>
-      </div>
-    )
-  },
-  pdf: {
-    title: 'Arquivo PDF',
-    content: (
-      <div className="space-y-2">
-        <p>Anexe documentos PDF como fonte adicional. O texto será extraído para referência.</p>
-        <p><strong>Útil para:</strong></p>
-        <ul className="list-disc list-inside space-y-1 text-gray-300">
-          <li>Relatórios oficiais e estudos</li>
-          <li>Documentos de governo</li>
-          <li>Papers e pesquisas acadêmicas</li>
-          <li>Notas técnicas e comunicados</li>
-        </ul>
-        <p className="text-tmc-orange">Máximo: 50 páginas ou 10MB por arquivo.</p>
       </div>
     )
   }
@@ -236,10 +161,10 @@ const ConfigurarPage = () => {
   // Context - dados e funções do fluxo de criação
   const {
     configuracoes,
-    materiaisComplementares,
+    fonte,
+    getTextoBaseParaGeracao,
+    getTotalPalavras,
     setConfiguracoes,
-    adicionarMaterial,
-    removerMaterial,
     confirmarConfiguracoes,
   } = useCriar();
 
@@ -251,17 +176,85 @@ const ConfigurarPage = () => {
   const [contextoAdicional, setContextoAdicional] = useState(configuracoes.contexto || '');
   const [precisaCredito, setPrecisaCredito] = useState(!!configuracoes.creditos);
   const [creditoSelecionado, setCreditoSelecionado] = useState(configuracoes.creditos || '');
-  const [persona, setPersona] = useState(configuracoes.persona || 'jornalista');
-  const [tom, setTom] = useState(configuracoes.tom || 'formal');
   const [instrucoes, setInstrucoes] = useState(configuracoes.instrucoes || '');
   const [tipoMateria, setTipoMateria] = useState(configuracoes.tipoMateria || '');
 
-  // Complementary materials state - inicializado com valores do context
-  const [links, setLinks] = useState(materiaisComplementares.links || []);
-  const [novoLink, setNovoLink] = useState('');
-  const [videos, setVideos] = useState(materiaisComplementares.videos || []);
-  const [novoVideo, setNovoVideo] = useState('');
-  const [pdfs, setPdfs] = useState(materiaisComplementares.pdfs || []);
+  // NEW: Category-based state
+  const [categoria, setCategoria] = useState(configuracoes.categoria || 'geral');
+  const [tom, setTom] = useState(configuracoes.tom || getDefaultToneForCategory('geral'));
+  const [modoOpinativo, setModoOpinativo] = useState(configuracoes.modoOpinativo || false);
+
+  // Advanced mode toggle state
+  const [showAdvanced, setShowAdvanced] = useState(false);
+
+  // Get available tones for selected category
+  const availableTones = useMemo(() => getTonesForCategory(categoria), [categoria]);
+
+  // Get texto base from context
+  const textoBase = useMemo(() => getTextoBaseParaGeracao(), [getTextoBaseParaGeracao]);
+  const totalPalavras = useMemo(() => getTotalPalavras(), [getTotalPalavras]);
+
+  // Handle category change - update tone to category default
+  const handleCategoryChange = useCallback((newCategoria) => {
+    setCategoria(newCategoria);
+    setTom(getDefaultToneForCategory(newCategoria));
+    // Reset opinion mode if new category doesn't allow it
+    if (!categoryAllowsOpinion(newCategoria)) {
+      setModoOpinativo(false);
+    }
+  }, []);
+
+  // Build current config for prompt preview
+  const currentPromptConfig = useMemo(() => ({
+    categoria,
+    tom,
+    tipoMateria,
+    modoOpinativo,
+    orientacaoLide,
+    citacoes,
+    contexto: contextoAdicional,
+    creditos: precisaCredito ? creditoSelecionado : '',
+    instrucoes,
+  }), [categoria, tom, tipoMateria, modoOpinativo, orientacaoLide, citacoes, contextoAdicional, precisaCredito, creditoSelecionado, instrucoes]);
+
+  // Get source info
+  const fonteInfo = useMemo(() => {
+    if (!fonte?.tipo) return null;
+
+    switch (fonte.tipo) {
+      case 'feed':
+        const articles = fonte.dados || [];
+        return {
+          tipo: 'Feed RSS',
+          descricao: `${articles.length} matéria${articles.length !== 1 ? 's' : ''} selecionada${articles.length !== 1 ? 's' : ''}`,
+          titulos: articles.map(a => a.title).slice(0, 3)
+        };
+      case 'tema':
+        return {
+          tipo: 'Tema',
+          descricao: fonte.dados?.tema || 'Tema personalizado',
+          titulos: []
+        };
+      case 'link':
+        return {
+          tipo: 'Link',
+          descricao: fonte.dados?.url || 'URL externa',
+          titulos: []
+        };
+      case 'transcription':
+        return {
+          tipo: 'Transcrição',
+          descricao: 'Áudio/Vídeo transcrito',
+          titulos: []
+        };
+      default:
+        return {
+          tipo: 'Fonte',
+          descricao: 'Conteúdo selecionado',
+          titulos: []
+        };
+    }
+  }, [fonte]);
 
   // Sincronizar estados locais com o context
   useEffect(() => {
@@ -271,49 +264,13 @@ const ConfigurarPage = () => {
       citacoes,
       contexto: contextoAdicional,
       creditos: precisaCredito ? creditoSelecionado : '',
-      persona,
+      categoria,
       tom,
+      modoOpinativo,
       instrucoes,
       tipoMateria,
     });
-  }, [dataPublicacao, orientacaoLide, citacoes, contextoAdicional, precisaCredito, creditoSelecionado, persona, tom, instrucoes, tipoMateria, setConfiguracoes]);
-
-  // Sincronizar materiais complementares com o context
-  useEffect(() => {
-    // Sincroniza links
-    const contextLinks = materiaisComplementares.links || [];
-    if (JSON.stringify(links) !== JSON.stringify(contextLinks)) {
-      links.forEach((link, index) => {
-        if (!contextLinks.find(l => l.id === link.id)) {
-          adicionarMaterial('links', link);
-        }
-      });
-    }
-  }, [links, materiaisComplementares.links, adicionarMaterial]);
-
-  useEffect(() => {
-    // Sincroniza videos
-    const contextVideos = materiaisComplementares.videos || [];
-    if (JSON.stringify(videos) !== JSON.stringify(contextVideos)) {
-      videos.forEach((video) => {
-        if (!contextVideos.find(v => v.id === video.id)) {
-          adicionarMaterial('videos', video);
-        }
-      });
-    }
-  }, [videos, materiaisComplementares.videos, adicionarMaterial]);
-
-  useEffect(() => {
-    // Sincroniza pdfs
-    const contextPdfs = materiaisComplementares.pdfs || [];
-    if (JSON.stringify(pdfs) !== JSON.stringify(contextPdfs)) {
-      pdfs.forEach((pdf) => {
-        if (!contextPdfs.find(p => p.id === pdf.id)) {
-          adicionarMaterial('pdfs', pdf);
-        }
-      });
-    }
-  }, [pdfs, materiaisComplementares.pdfs, adicionarMaterial]);
+  }, [dataPublicacao, orientacaoLide, citacoes, contextoAdicional, precisaCredito, creditoSelecionado, categoria, tom, modoOpinativo, instrucoes, tipoMateria, setConfiguracoes]);
 
   // Handlers
   const handleAddCitacao = useCallback(() => {
@@ -327,43 +284,6 @@ const ConfigurarPage = () => {
     setCitacoes(prev => prev.filter(c => c.id !== id));
   }, []);
 
-  const handleAddLink = useCallback(() => {
-    if (novoLink.trim()) {
-      setLinks(prev => [...prev, { id: Date.now(), url: novoLink.trim(), status: 'pending' }]);
-      setNovoLink('');
-    }
-  }, [novoLink]);
-
-  const handleRemoveLink = useCallback((id) => {
-    setLinks(prev => prev.filter(l => l.id !== id));
-  }, []);
-
-  const handleAddVideo = useCallback(() => {
-    if (novoVideo.trim()) {
-      setVideos(prev => [...prev, { id: Date.now(), url: novoVideo.trim(), status: 'pending' }]);
-      setNovoVideo('');
-    }
-  }, [novoVideo]);
-
-  const handleRemoveVideo = useCallback((id) => {
-    setVideos(prev => prev.filter(v => v.id !== id));
-  }, []);
-
-  const handleFileUpload = useCallback((e) => {
-    const files = Array.from(e.target.files || []);
-    const newPdfs = files.map(file => ({
-      id: Date.now() + Math.random(),
-      name: file.name,
-      size: file.size,
-      status: 'uploaded'
-    }));
-    setPdfs(prev => [...prev, ...newPdfs]);
-  }, []);
-
-  const handleRemovePdf = useCallback((id) => {
-    setPdfs(prev => prev.filter(p => p.id !== id));
-  }, []);
-
   const handleStepClick = useCallback((stepIndex) => {
     const routes = ['/criar', '/criar/texto-base', '/criar/configurar', '/criar/editor'];
     if (stepIndex < 2) {
@@ -371,10 +291,8 @@ const ConfigurarPage = () => {
     }
   }, [navigate]);
 
-  const materialsCount = links.length + videos.length + pdfs.length;
-
   return (
-    <div className="min-h-screen bg-off-white">
+    <div className="min-h-screen bg-off-white pt-20">
       <div className="max-w-6xl mx-auto px-4 py-6">
         {/* Header */}
         <div className="flex items-center justify-between mb-6">
@@ -390,13 +308,29 @@ const ConfigurarPage = () => {
             Criar Nova Matéria
           </h1>
 
-          <button
-            className="flex items-center gap-2 text-medium-gray hover:text-tmc-orange transition-colors"
-            aria-label="Ajuda"
-          >
-            <HelpCircle size={20} />
-            <span className="text-sm font-medium hidden sm:inline">Help</span>
-          </button>
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => setShowAdvanced(!showAdvanced)}
+              className={`flex items-center gap-2 px-3 py-1.5 rounded-lg transition-colors ${
+                showAdvanced
+                  ? 'bg-gray-800 text-white'
+                  : 'text-medium-gray hover:text-tmc-orange hover:bg-off-white'
+              }`}
+              aria-label="Modo Avancado"
+            >
+              {showAdvanced ? <EyeOff size={18} /> : <Code size={18} />}
+              <span className="text-sm font-medium hidden sm:inline">
+                {showAdvanced ? 'Ocultar Prompt' : 'Modo Avancado'}
+              </span>
+            </button>
+            <button
+              className="flex items-center gap-2 text-medium-gray hover:text-tmc-orange transition-colors"
+              aria-label="Ajuda"
+            >
+              <HelpCircle size={20} />
+              <span className="text-sm font-medium hidden sm:inline">Help</span>
+            </button>
+          </div>
         </div>
 
         {/* Stepper */}
@@ -405,6 +339,37 @@ const ConfigurarPage = () => {
           currentStep={2}
           onStepClick={handleStepClick}
         />
+
+        {/* Category Selector - Full Width */}
+        <div className="bg-white border border-light-gray rounded-xl p-6 mb-6">
+          <ConfigField
+            label="Categoria Editorial"
+            icon={<Layers size={18} />}
+            tooltip={tooltips.categoria}
+          >
+            <CategorySelector
+              selectedCategory={categoria}
+              onCategoryChange={handleCategoryChange}
+            />
+          </ConfigField>
+        </div>
+
+        {/* Category Guidelines */}
+        <CategoryGuidelines
+          categoryId={categoria}
+          className="mb-6"
+        />
+
+        {/* Opinion Toggle (only for categories that allow it) */}
+        {categoryAllowsOpinion(categoria) && (
+          <OpinionToggle
+            categoryId={categoria}
+            isEnabled={modoOpinativo}
+            onToggle={setModoOpinativo}
+            tipoMateria={tipoMateria}
+            className="mb-6"
+          />
+        )}
 
         {/* Two Column Layout */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
@@ -416,6 +381,72 @@ const ConfigurarPage = () => {
             </h2>
 
             <div className="space-y-6">
+              {/* Tom da Escrita - Dynamic based on category */}
+              <ConfigField
+                label="Tom da Escrita"
+                icon={<Palette size={18} />}
+                tooltip={tooltips.tom}
+              >
+                <div className="space-y-2">
+                  {availableTones.map(tone => (
+                    <label
+                      key={tone.id}
+                      className={`flex items-start gap-3 p-3 rounded-lg cursor-pointer transition-colors ${
+                        tom === tone.id
+                          ? 'bg-orange-50 border border-tmc-orange'
+                          : 'bg-off-white hover:bg-gray-100'
+                      }`}
+                    >
+                      <input
+                        type="radio"
+                        name="tom"
+                        value={tone.id}
+                        checked={tom === tone.id}
+                        onChange={(e) => setTom(e.target.value)}
+                        className="w-4 h-4 mt-0.5 text-tmc-orange focus:ring-tmc-orange"
+                      />
+                      <div>
+                        <span className="text-sm font-medium text-dark-gray">{tone.label}</span>
+                        <p className="text-xs text-medium-gray">{tone.description}</p>
+                      </div>
+                    </label>
+                  ))}
+                </div>
+              </ConfigField>
+
+              {/* Tipo de Matéria */}
+              <ConfigField
+                label="Tipo de Matéria"
+                icon={<Newspaper size={18} />}
+                tooltip={tooltips.tipoMateria}
+              >
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  {TIPO_MATERIA_OPTIONS.map(opt => (
+                    <label
+                      key={opt.id}
+                      className={`flex items-start gap-3 p-3 rounded-lg cursor-pointer transition-colors ${
+                        tipoMateria === opt.id
+                          ? 'bg-blue-50 border border-blue-500'
+                          : 'bg-off-white hover:bg-gray-100'
+                      }`}
+                    >
+                      <input
+                        type="radio"
+                        name="tipoMateria"
+                        value={opt.id}
+                        checked={tipoMateria === opt.id}
+                        onChange={(e) => setTipoMateria(e.target.value)}
+                        className="w-4 h-4 mt-0.5 text-blue-600 focus:ring-blue-500"
+                      />
+                      <div>
+                        <span className="text-sm font-medium text-dark-gray">{opt.label}</span>
+                        <p className="text-xs text-medium-gray">{opt.description}</p>
+                      </div>
+                    </label>
+                  ))}
+                </div>
+              </ConfigField>
+
               {/* Data de Publicação */}
               <ConfigField
                 label="Data de Publicação"
@@ -539,62 +570,12 @@ const ConfigurarPage = () => {
                       className="w-full px-4 py-2.5 border border-light-gray rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-tmc-orange/50 focus:border-tmc-orange"
                     >
                       <option value="">Selecione a instituição...</option>
-                      {creditoOptions.map(opt => (
+                      {CREDITO_OPTIONS.map(opt => (
                         <option key={opt.id} value={opt.id}>{opt.label}</option>
                       ))}
                     </select>
                   )}
                 </div>
-              </ConfigField>
-
-              {/* Persona */}
-              <ConfigField
-                label="Persona da Matéria"
-                icon={<User size={18} />}
-                tooltip={tooltips.persona}
-              >
-                <div className="space-y-2">
-                  {personaOptions.map(opt => (
-                    <label
-                      key={opt.id}
-                      className={`flex items-start gap-3 p-3 rounded-lg cursor-pointer transition-colors ${
-                        persona === opt.id
-                          ? 'bg-orange-50 border border-tmc-orange'
-                          : 'bg-off-white hover:bg-gray-100'
-                      }`}
-                    >
-                      <input
-                        type="radio"
-                        name="persona"
-                        value={opt.id}
-                        checked={persona === opt.id}
-                        onChange={(e) => setPersona(e.target.value)}
-                        className="w-4 h-4 mt-0.5 text-tmc-orange focus:ring-tmc-orange"
-                      />
-                      <div>
-                        <span className="text-sm font-medium text-dark-gray">{opt.label}</span>
-                        <p className="text-xs text-medium-gray">{opt.description}</p>
-                      </div>
-                    </label>
-                  ))}
-                </div>
-              </ConfigField>
-
-              {/* Tom */}
-              <ConfigField
-                label="Tom da Escrita"
-                icon={<Palette size={18} />}
-                tooltip={tooltips.tom}
-              >
-                <select
-                  value={tom}
-                  onChange={(e) => setTom(e.target.value)}
-                  className="w-full px-4 py-2.5 border border-light-gray rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-tmc-orange/50 focus:border-tmc-orange"
-                >
-                  {tomOptions.map(opt => (
-                    <option key={opt.id} value={opt.id}>{opt.label}</option>
-                  ))}
-                </select>
               </ConfigField>
 
               {/* Instruções para IA */}
@@ -611,196 +592,88 @@ const ConfigurarPage = () => {
                   className="w-full px-4 py-2.5 border border-light-gray rounded-lg text-sm resize-none focus:outline-none focus:ring-2 focus:ring-tmc-orange/50 focus:border-tmc-orange"
                 />
               </ConfigField>
-
-              {/* Tipo de Matéria */}
-              <ConfigField
-                label="Tipo de Matéria"
-                icon={<Newspaper size={18} />}
-                tooltip={tooltips.tipoMateria}
-              >
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                  {tipoMateriaOptions.map(opt => (
-                    <label
-                      key={opt.id}
-                      className={`flex items-start gap-3 p-3 rounded-lg cursor-pointer transition-colors ${
-                        tipoMateria === opt.id
-                          ? 'bg-blue-50 border border-blue-500'
-                          : 'bg-off-white hover:bg-gray-100'
-                      }`}
-                    >
-                      <input
-                        type="radio"
-                        name="tipoMateria"
-                        value={opt.id}
-                        checked={tipoMateria === opt.id}
-                        onChange={(e) => setTipoMateria(e.target.value)}
-                        className="w-4 h-4 mt-0.5 text-blue-600 focus:ring-blue-500"
-                      />
-                      <div>
-                        <span className="text-sm font-medium text-dark-gray">{opt.label}</span>
-                        <p className="text-xs text-medium-gray">{opt.description}</p>
-                      </div>
-                    </label>
-                  ))}
-                </div>
-              </ConfigField>
             </div>
           </div>
 
-          {/* Right Column - Complementary Materials */}
+          {/* Right Column - Texto Base Preview */}
           <div className="bg-white border border-light-gray rounded-xl p-6">
-            <h2 className="text-lg font-semibold text-dark-gray mb-2 flex items-center gap-2">
-              <Plus size={20} className="text-tmc-orange" />
-              Materiais Complementares
-            </h2>
-            <p className="text-sm text-medium-gray mb-6">
-              Adicione fontes extras para enriquecer a matéria
-            </p>
-
-            <div className="space-y-6">
-              {/* Link da Web */}
-              <ConfigField
-                label="Link da Web"
-                icon={<Link size={18} />}
-                tooltip={tooltips.linkWeb}
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-lg font-semibold text-dark-gray flex items-center gap-2">
+                <Eye size={20} className="text-tmc-orange" />
+                Texto Base
+              </h2>
+              <button
+                onClick={() => navigate('/criar/texto-base')}
+                className="flex items-center gap-1 text-sm text-tmc-orange hover:text-tmc-orange/80 transition-colors"
               >
-                <div className="space-y-2">
-                  <div className="flex gap-2">
-                    <input
-                      type="url"
-                      value={novoLink}
-                      onChange={(e) => setNovoLink(e.target.value)}
-                      onKeyDown={(e) => e.key === 'Enter' && handleAddLink()}
-                      placeholder="https://exemplo.com/noticia..."
-                      className="flex-1 px-4 py-2.5 border border-light-gray rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-tmc-orange/50 focus:border-tmc-orange"
-                    />
-                    <button
-                      onClick={handleAddLink}
-                      disabled={!novoLink.trim()}
-                      className="px-4 py-2.5 bg-tmc-orange text-white rounded-lg hover:bg-tmc-orange/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                    >
-                      <Plus size={18} />
-                    </button>
-                  </div>
-                  {links.length > 0 && (
-                    <div className="space-y-2">
-                      {links.map(link => (
-                        <div key={link.id} className="flex items-center gap-2 p-3 bg-off-white rounded-lg">
-                          <Link size={14} className="text-tmc-orange flex-shrink-0" />
-                          <span className="flex-1 text-sm text-dark-gray truncate">{link.url}</span>
-                          <span className="text-xs text-green-600 flex items-center gap-1">
-                            <Check size={12} /> Adicionado
-                          </span>
-                          <button
-                            onClick={() => handleRemoveLink(link.id)}
-                            className="text-medium-gray hover:text-red-500 transition-colors"
-                          >
-                            <X size={16} />
-                          </button>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              </ConfigField>
+                <Edit3 size={14} />
+                Editar
+              </button>
+            </div>
 
-              {/* Vídeo YouTube */}
-              <ConfigField
-                label="Vídeo do YouTube"
-                icon={<Youtube size={18} />}
-                tooltip={tooltips.videoYoutube}
-              >
-                <div className="space-y-2">
-                  <div className="flex gap-2">
-                    <input
-                      type="url"
-                      value={novoVideo}
-                      onChange={(e) => setNovoVideo(e.target.value)}
-                      onKeyDown={(e) => e.key === 'Enter' && handleAddVideo()}
-                      placeholder="https://youtube.com/watch?v=..."
-                      className="flex-1 px-4 py-2.5 border border-light-gray rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-tmc-orange/50 focus:border-tmc-orange"
-                    />
-                    <button
-                      onClick={handleAddVideo}
-                      disabled={!novoVideo.trim()}
-                      className="px-4 py-2.5 bg-tmc-orange text-white rounded-lg hover:bg-tmc-orange/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                    >
-                      <Plus size={18} />
-                    </button>
-                  </div>
-                  {videos.length > 0 && (
-                    <div className="space-y-2">
-                      {videos.map(video => (
-                        <div key={video.id} className="flex items-center gap-2 p-3 bg-off-white rounded-lg">
-                          <Youtube size={14} className="text-red-500 flex-shrink-0" />
-                          <span className="flex-1 text-sm text-dark-gray truncate">{video.url}</span>
-                          <span className="text-xs text-green-600 flex items-center gap-1">
-                            <Check size={12} /> Adicionado
-                          </span>
-                          <button
-                            onClick={() => handleRemoveVideo(video.id)}
-                            className="text-medium-gray hover:text-red-500 transition-colors"
-                          >
-                            <X size={16} />
-                          </button>
-                        </div>
-                      ))}
-                    </div>
-                  )}
+            {/* Source Info */}
+            {fonteInfo && (
+              <div className="mb-4 p-3 bg-off-white rounded-lg">
+                <div className="flex items-center gap-2 mb-1">
+                  <span className="text-xs font-medium text-tmc-orange uppercase tracking-wide">
+                    {fonteInfo.tipo}
+                  </span>
                 </div>
-              </ConfigField>
+                <p className="text-sm text-dark-gray font-medium">{fonteInfo.descricao}</p>
+                {fonteInfo.titulos.length > 0 && (
+                  <ul className="mt-2 space-y-1">
+                    {fonteInfo.titulos.map((titulo, i) => (
+                      <li key={i} className="text-xs text-medium-gray truncate">
+                        • {titulo}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            )}
 
-              {/* Arquivo PDF */}
-              <ConfigField
-                label="Arquivo PDF"
-                icon={<FileUp size={18} />}
-                tooltip={tooltips.pdf}
-              >
-                <div className="space-y-2">
-                  <label className="flex items-center justify-center gap-2 px-4 py-4 border-2 border-dashed border-light-gray rounded-lg cursor-pointer hover:border-tmc-orange hover:bg-orange-50/30 transition-colors">
-                    <FileUp size={20} className="text-medium-gray" />
-                    <span className="text-sm text-medium-gray">Clique para anexar PDF</span>
-                    <input
-                      type="file"
-                      accept=".pdf"
-                      multiple
-                      onChange={handleFileUpload}
-                      className="hidden"
-                    />
-                  </label>
-                  {pdfs.length > 0 && (
-                    <div className="space-y-2">
-                      {pdfs.map(pdf => (
-                        <div key={pdf.id} className="flex items-center gap-2 p-3 bg-off-white rounded-lg">
-                          <FileText size={14} className="text-red-600 flex-shrink-0" />
-                          <span className="flex-1 text-sm text-dark-gray truncate">{pdf.name}</span>
-                          <span className="text-xs text-medium-gray">
-                            {(pdf.size / 1024).toFixed(0)} KB
-                          </span>
-                          <button
-                            onClick={() => handleRemovePdf(pdf.id)}
-                            className="text-medium-gray hover:text-red-500 transition-colors"
-                          >
-                            <X size={16} />
-                          </button>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              </ConfigField>
+            {/* Stats */}
+            <div className="flex items-center gap-4 mb-4 text-sm">
+              <div className="flex items-center gap-1.5">
+                <FileText size={14} className="text-medium-gray" />
+                <span className="text-dark-gray font-medium">{totalPalavras}</span>
+                <span className="text-medium-gray">palavras</span>
+              </div>
+            </div>
 
-              {/* Summary */}
-              {materialsCount > 0 && (
-                <div className="pt-4 border-t border-light-gray">
+            {/* Texto Preview */}
+            <div className="border border-light-gray rounded-lg p-4 max-h-[500px] overflow-y-auto bg-off-white/50">
+              {textoBase ? (
+                <p className="text-sm text-dark-gray whitespace-pre-wrap leading-relaxed">
+                  {textoBase}
+                </p>
+              ) : (
+                <div className="text-center py-8">
+                  <FileText size={32} className="text-light-gray mx-auto mb-2" />
                   <p className="text-sm text-medium-gray">
-                    <strong className="text-dark-gray">{materialsCount}</strong> {materialsCount === 1 ? 'material adicionado' : 'materiais adicionados'}
+                    Nenhum texto base selecionado
                   </p>
+                  <button
+                    onClick={() => navigate('/criar/texto-base')}
+                    className="mt-3 text-sm text-tmc-orange hover:underline"
+                  >
+                    Voltar e selecionar conteúdo
+                  </button>
                 </div>
               )}
             </div>
           </div>
         </div>
+
+        {/* Advanced Mode - Prompt Preview */}
+        {showAdvanced && (
+          <div className="mb-6">
+            <PromptPreview
+              config={currentPromptConfig}
+              textoBase={textoBase || ''}
+            />
+          </div>
+        )}
 
         {/* Navigation Buttons */}
         <div className="flex justify-between">

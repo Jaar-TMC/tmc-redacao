@@ -1,5 +1,5 @@
-import { useState, useEffect, useMemo } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useNavigate, useSearchParams, useParams } from 'react-router-dom';
 import {
   ArrowLeft,
   Bold,
@@ -29,12 +29,19 @@ import {
   Plus,
   Loader2,
   Copy,
-  Check
+  Check,
+  Eye,
+  Edit3,
+  FileText,
+  Save
 } from 'lucide-react';
+import { markdownToHtml, countWords } from '../utils/markdownRenderer';
 import { mockTones, mockPersonas } from '../data/mockData';
 import Tooltip from '../components/ui/Tooltip';
 import { SEOAnalyzerPanel, calculateSEOScore } from '../components/editor';
 import { useCriar } from '../context';
+import { useVersionHistory, useChatEditor } from '../hooks';
+import { createUserArticle, updateUserArticle, getUserArticle } from '../services/api';
 
 // Tipos de matéria disponíveis
 const articleTypes = [
@@ -50,7 +57,12 @@ const articleTypes = [
 const CriarPostPage = () => {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
+  const { articleId: editArticleId } = useParams(); // For editing existing articles
   const { resultado } = useCriar();
+
+  // State for loading existing article
+  const [isLoadingArticle, setIsLoadingArticle] = useState(false);
+  const [loadedArticle, setLoadedArticle] = useState(null);
 
   // Extrair parâmetros da URL (vindos da tela de seleção de tema)
   const themeContext = useMemo(() => {
@@ -91,15 +103,80 @@ Com esse desempenho, o Brasil reafirma sua posição estratégica no cenário gl
     tags: ['Agronegócio', 'Exportações', 'Soja', 'Economia', 'Brasil']
   };
 
-  // Use resultado from context if available, otherwise fall back to mock data
-  const initialTitle = resultado?.titulo || mockArticle.title;
-  const initialLinhaFina = resultado?.linhaFina || mockArticle.linhaFina;
-  const initialContent = resultado?.conteudo || mockArticle.content;
-  const initialTags = resultado?.tagsSugeridas || mockArticle.tags;
+  // Load article data when editing
+  useEffect(() => {
+    const loadArticle = async () => {
+      if (!editArticleId) return;
 
-  const [title, setTitle] = useState(initialTitle);
-  const [linhaFina, setLinhaFina] = useState(initialLinhaFina);
-  const [content, setContent] = useState(initialContent);
+      setIsLoadingArticle(true);
+      try {
+        const article = await getUserArticle(editArticleId);
+        setLoadedArticle(article);
+        setArticleId(editArticleId); // Set the articleId for saving
+      } catch (err) {
+        console.error('Error loading article:', err);
+        setSaveError('Erro ao carregar matéria para edição');
+      } finally {
+        setIsLoadingArticle(false);
+      }
+    };
+
+    loadArticle();
+  }, [editArticleId]);
+
+  // Use loaded article, resultado from context, or fall back to mock data
+  const initialTitle = loadedArticle?.title || resultado?.titulo || mockArticle.title;
+  const initialLinhaFina = loadedArticle?.linhaFina || resultado?.linhaFina || mockArticle.linhaFina;
+  const initialContent = loadedArticle?.content || resultado?.conteudo || mockArticle.content;
+  const initialTags = loadedArticle?.tags || resultado?.tagsSugeridas || mockArticle.tags;
+
+  // Update state when loaded article changes
+  useEffect(() => {
+    if (loadedArticle) {
+      setTitle(loadedArticle.title || '');
+      setLinhaFina(loadedArticle.linhaFina || '');
+      setContent(loadedArticle.content || '');
+      setTags(loadedArticle.tags || []);
+    }
+  }, [loadedArticle]);
+
+  // Version history for undo/redo support
+  const {
+    currentContent,
+    canUndo,
+    canRedo,
+    undo,
+    redo,
+    pushVersion,
+    updateCurrentContent,
+    resetHistory,
+    versionCount,
+    versions,
+    currentIndex,
+    goToVersion
+  } = useVersionHistory({
+    title: initialTitle,
+    linhaFina: initialLinhaFina,
+    body: initialContent,
+    tags: initialTags
+  });
+
+  // Local state synced with version history
+  const [title, setTitle] = useState(currentContent?.title || '');
+  const [linhaFina, setLinhaFina] = useState(currentContent?.linhaFina || '');
+  const [content, setContent] = useState(currentContent?.body || '');
+  const [tags, setTags] = useState(currentContent?.tags || []);
+
+  // Sync local state when version changes (undo/redo)
+  useEffect(() => {
+    if (currentContent) {
+      setTitle(currentContent.title || '');
+      setLinhaFina(currentContent.linhaFina || '');
+      setContent(currentContent.body || '');
+      setTags(currentContent.tags || []);
+    }
+  }, [currentContent]);
+
   const [selectedTone, setSelectedTone] = useState(null);
   const [selectedPersona, setSelectedPersona] = useState(null);
   const [selectedArticleType, setSelectedArticleType] = useState(null);
@@ -108,21 +185,27 @@ Com esse desempenho, o Brasil reafirma sua posição estratégica no cenário gl
   const [isSavingDraft, setIsSavingDraft] = useState(false);
   const [isPublishing, setIsPublishing] = useState(false);
   const [isCopied, setIsCopied] = useState(false);
+  const [isPreviewMode, setIsPreviewMode] = useState(false);
+  const [showVersionDropdown, setShowVersionDropdown] = useState(false);
 
-  // Estado para tópicos/tags
-  const [tags, setTags] = useState(initialTags);
+  // Persistence state
+  const [articleId, setArticleId] = useState(null);
+  const [saveError, setSaveError] = useState(null);
+  const [lastSavedAt, setLastSavedAt] = useState(null);
 
   // Update state when resultado changes (e.g., when navigating from RevisarPage)
   useEffect(() => {
     if (resultado?.geradoEm) {
-      setTitle(resultado.titulo || '');
-      setLinhaFina(resultado.linhaFina || '');
-      setContent(resultado.conteudo || '');
-      if (resultado.tagsSugeridas?.length > 0) {
-        setTags(resultado.tagsSugeridas);
-      }
+      const newTags = resultado.tagsSugeridas?.length > 0 ? resultado.tagsSugeridas : tags;
+      // Reset version history with new content
+      resetHistory({
+        title: resultado.titulo || '',
+        linhaFina: resultado.linhaFina || '',
+        body: resultado.conteudo || '',
+        tags: newTags
+      });
     }
-  }, [resultado?.geradoEm]);
+  }, [resultado?.geradoEm, resetHistory]);
   const [newTagInput, setNewTagInput] = useState('');
   const [isGeneratingTags, setIsGeneratingTags] = useState(false);
 
@@ -174,55 +257,67 @@ Com esse desempenho, o Brasil reafirma sua posição estratégica no cenário gl
     ];
   };
 
-  const [chatMessages, setChatMessages] = useState(getInitialMessages);
+  // Chat editor hook - connects chat to article editing with AI
+  const {
+    messages: chatMessages,
+    sendMessage: sendEditMessage,
+    isProcessing: isChatProcessing,
+    clearMessages: clearChatMessages,
+    setWelcomeMessages
+  } = useChatEditor({
+    articleState: { title, linhaFina, content, tags },
+    onEdit: (newContent, summary, messageId) => {
+      // Push new version when AI edits are applied
+      pushVersion(newContent, 'ai', summary, messageId);
+    },
+    categoria: selectedPersona?.id || 'geral',
+    tom: selectedTone?.id || 'conversacional'
+  });
+
+  // Set initial welcome messages
+  useEffect(() => {
+    const initialMessages = getInitialMessages();
+    setWelcomeMessages(initialMessages);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
   const [chatInput, setChatInput] = useState('');
 
-  // Sugestões rápidas contextualizadas
+  // Sugestões rápidas contextualizadas para edição
   const quickSuggestions = useMemo(() => {
     if (themeContext.tema) {
       return [
-        `Pesquise sobre ${themeContext.tema}`,
-        'Crie uma introdução impactante',
-        'Sugira um título chamativo',
-        'Monte a estrutura da matéria'
+        'Melhore o SEO do título',
+        'Torne o texto mais conciso',
+        'Adicione mais contexto',
+        'Corrija erros gramaticais'
       ];
     }
     return [
-      'Pesquise sobre o tema',
-      'Sugira uma introdução',
-      'Melhore este parágrafo',
-      'Crie um resumo'
+      'Melhore o SEO do título',
+      'Torne o texto mais formal',
+      'Resuma o conteúdo',
+      'Expanda o último parágrafo'
     ];
   }, [themeContext.tema]);
 
-  const handleSendMessage = () => {
-    if (!chatInput.trim()) return;
+  const handleSendMessage = async () => {
+    if (!chatInput.trim() || isChatProcessing) return;
 
-    const userMessage = {
-      id: chatMessages.length + 1,
-      type: 'user',
-      content: chatInput
-    };
-
-    setChatMessages([...chatMessages, userMessage]);
+    const instruction = chatInput;
     setChatInput('');
 
-    // Simulate AI response
-    setTimeout(() => {
-      const aiResponse = {
-        id: chatMessages.length + 2,
-        type: 'ai',
-        content: 'Analisando sua solicitação... Aqui está uma sugestão baseada no contexto do seu texto: Considere adicionar dados estatísticos para fortalecer seu argumento e incluir citações de especialistas para maior credibilidade.'
-      };
-      setChatMessages((prev) => [...prev, aiResponse]);
-    }, 1000);
+    // Send edit instruction to AI
+    await sendEditMessage(instruction);
   };
 
   const handleQuickSuggestion = (suggestion) => {
     setChatInput(suggestion);
   };
 
-  const wordCount = content.split(/\s+/).filter(Boolean).length;
+  const wordCount = useMemo(() => countWords(content), [content]);
+
+  // Render content as HTML for preview
+  const renderedContent = useMemo(() => markdownToHtml(content), [content]);
 
   // Score SEO sincronizado com o painel SEO
   const seoScore = useMemo(() => {
@@ -325,17 +420,191 @@ Com esse desempenho, o Brasil reafirma sua posição estratégica no cenário gl
     }
   };
 
+  // Build article data for API
+  const buildArticleData = useCallback((status) => {
+    return {
+      title: title,
+      linhaFina: linhaFina,
+      content: content,
+      status: status,
+      category: selectedPersona?.name || selectedArticleType?.name || null,
+      tags: tags,
+      authorName: null, // Could be set from user context
+      sourceArticleIds: themeContext.links?.map(link => link.id).filter(Boolean) || [],
+      generationConfig: {
+        tom: selectedTone?.id || null,
+        persona: selectedPersona?.id || null,
+        tipoMateria: selectedArticleType?.id || null,
+        tema: themeContext.tema || null,
+        geradoEm: resultado?.geradoEm || null
+      }
+    };
+  }, [title, linhaFina, content, tags, selectedTone, selectedPersona, selectedArticleType, themeContext, resultado]);
+
+  // Save as draft handler
+  const handleSaveDraft = useCallback(async () => {
+    if (!title.trim() && !content.trim()) {
+      setSaveError('Adicione pelo menos um título ou conteúdo para salvar');
+      return;
+    }
+
+    setIsSavingDraft(true);
+    setSaveError(null);
+
+    try {
+      const articleData = buildArticleData('draft');
+
+      let savedArticle;
+      if (articleId) {
+        // Update existing article
+        savedArticle = await updateUserArticle(articleId, articleData);
+      } else {
+        // Create new article
+        savedArticle = await createUserArticle(articleData);
+        setArticleId(savedArticle.id);
+      }
+
+      setLastSavedAt(new Date());
+      console.log('Draft saved:', savedArticle.id);
+    } catch (err) {
+      console.error('Error saving draft:', err);
+      setSaveError(err.message || 'Erro ao salvar rascunho');
+    } finally {
+      setIsSavingDraft(false);
+    }
+  }, [title, content, articleId, buildArticleData]);
+
+  // Publish handler
+  const handlePublish = useCallback(async () => {
+    if (!title.trim()) {
+      setSaveError('Título é obrigatório para publicar');
+      return;
+    }
+    if (!content.trim()) {
+      setSaveError('Conteúdo é obrigatório para publicar');
+      return;
+    }
+
+    setIsPublishing(true);
+    setSaveError(null);
+
+    try {
+      const articleData = buildArticleData('published');
+
+      let savedArticle;
+      if (articleId) {
+        // Update existing article
+        savedArticle = await updateUserArticle(articleId, articleData);
+      } else {
+        // Create new article
+        savedArticle = await createUserArticle(articleData);
+      }
+
+      console.log('Article published:', savedArticle.id);
+
+      // Navigate to Minhas Matérias on success
+      navigate('/minhas-materias');
+    } catch (err) {
+      console.error('Error publishing:', err);
+      setSaveError(err.message || 'Erro ao publicar matéria');
+    } finally {
+      setIsPublishing(false);
+    }
+  }, [title, content, articleId, buildArticleData, navigate]);
+
+  // Inline Version Dropdown component
+  const VersionDropdown = ({ versions: versionsList, currentIdx, onSelect, onClose }) => {
+    // Format relative time
+    const formatTime = (timestamp) => {
+      const diff = Date.now() - timestamp;
+      const mins = Math.floor(diff / 60000);
+      if (mins < 1) return 'agora';
+      if (mins < 60) return `há ${mins} min`;
+      const hours = Math.floor(mins / 60);
+      if (hours < 24) return `há ${hours}h`;
+      return `há ${Math.floor(hours / 24)}d`;
+    };
+
+    // Source icon
+    const getSourceIcon = (source) => {
+      if (source === 'ai') return <Bot size={12} className="text-tmc-orange" />;
+      if (source === 'user') return <Edit3 size={12} className="text-blue-500" />;
+      return <FileText size={12} className="text-medium-gray" />;
+    };
+
+    return (
+      <>
+        {/* Backdrop to close dropdown */}
+        <div
+          className="fixed inset-0 z-40"
+          onClick={onClose}
+        />
+        <div className="absolute top-full left-0 mt-1 w-56 bg-white rounded-lg shadow-lg
+                        border border-light-gray py-1 z-50 max-h-64 overflow-y-auto">
+          <div className="px-3 py-2 border-b border-light-gray">
+            <span className="text-xs font-semibold text-medium-gray">
+              Histórico de Versões
+            </span>
+          </div>
+          {versionsList.map((version, index) => {
+            const isCurrent = index === currentIdx;
+            const versionNum = index + 1;
+
+            return (
+              <button
+                key={version.id}
+                onClick={() => onSelect(version.id)}
+                className={`w-full px-3 py-2 text-left hover:bg-off-white transition-colors ${
+                  isCurrent ? 'bg-tmc-orange/5 border-l-2 border-tmc-orange' : ''
+                }`}
+              >
+                <div className="flex items-center gap-2">
+                  {getSourceIcon(version.source)}
+                  <span className={`text-sm ${isCurrent ? 'font-semibold text-dark-gray' : 'text-medium-gray'}`}>
+                    v{versionNum}
+                  </span>
+                  <span className="flex-1 text-xs text-medium-gray truncate">
+                    {version.label}
+                  </span>
+                </div>
+                <span className="text-[10px] text-light-gray ml-5">
+                  {formatTime(version.timestamp)}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      </>
+    );
+  };
+
+  // Show loading state when loading article for editing
+  if (isLoadingArticle) {
+    return (
+      <div className="min-h-screen pt-16 bg-off-white flex items-center justify-center">
+        <div className="flex flex-col items-center gap-4">
+          <Loader2 size={40} className="animate-spin text-tmc-orange" />
+          <p className="text-medium-gray">Carregando matéria...</p>
+        </div>
+      </div>
+    );
+  }
+
+  const isEditing = !!editArticleId;
+
   return (
     <div className="min-h-screen pt-16 bg-off-white">
       {/* Header */}
       <div className="bg-white border-b border-light-gray sticky top-16 z-40">
         <div className="flex items-center justify-between px-4 md:px-6 py-3">
           <button
-            onClick={() => navigate('/criar')}
+            onClick={() => navigate(isEditing ? '/minhas-materias' : '/criar')}
             className="flex items-center gap-2 text-medium-gray hover:text-dark-gray transition-colors"
           >
             <ArrowLeft size={20} />
-            <span className="text-sm font-medium hidden sm:inline">Voltar</span>
+            <span className="text-sm font-medium hidden sm:inline">
+              {isEditing ? 'Voltar para Minhas Matérias' : 'Voltar'}
+            </span>
           </button>
 
           <div className="flex-1 max-w-4xl mx-4 md:mx-6">
@@ -401,28 +670,55 @@ Com esse desempenho, o Brasil reafirma sua posição estratégica no cenário gl
               </button>
             </Tooltip>
 
+            <Tooltip content={lastSavedAt ? `Último salvamento: ${lastSavedAt.toLocaleTimeString()}` : 'Salvar rascunho'} position="bottom">
+              <button
+                onClick={handleSaveDraft}
+                disabled={isSavingDraft || (!title.trim() && !content.trim())}
+                className="hidden sm:flex items-center gap-2 px-3 md:px-4 py-2 text-sm font-medium text-medium-gray hover:text-dark-gray border border-light-gray rounded-lg hover:bg-off-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {isSavingDraft ? (
+                  <>
+                    <Loader2 size={16} className="animate-spin" />
+                    <span>Salvando...</span>
+                  </>
+                ) : (
+                  <>
+                    <Save size={16} />
+                    <span>{articleId ? 'Salvar' : 'Salvar rascunho'}</span>
+                  </>
+                )}
+              </button>
+            </Tooltip>
             <button
-              onClick={() => {
-                setIsSavingDraft(true);
-                setTimeout(() => setIsSavingDraft(false), 1000);
-              }}
-              disabled={isSavingDraft}
-              className="hidden sm:block px-3 md:px-4 py-2 text-sm font-medium text-medium-gray hover:text-dark-gray border border-light-gray rounded-lg hover:bg-off-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              onClick={handlePublish}
+              disabled={!title.trim() || !content.trim() || isPublishing}
+              className="flex items-center gap-2 px-3 md:px-4 py-2 text-sm font-semibold text-white bg-tmc-orange rounded-lg hover:bg-tmc-orange/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              {isSavingDraft ? 'Salvando...' : 'Salvar como rascunho'}
-            </button>
-            <button
-              onClick={() => {
-                setIsPublishing(true);
-                setTimeout(() => setIsPublishing(false), 1500);
-              }}
-              disabled={!title || !content || isPublishing}
-              className="px-3 md:px-4 py-2 text-sm font-semibold text-white bg-tmc-orange rounded-lg hover:bg-tmc-orange/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              {isPublishing ? 'Publicando...' : 'Publicar'}
+              {isPublishing ? (
+                <>
+                  <Loader2 size={16} className="animate-spin" />
+                  <span>Publicando...</span>
+                </>
+              ) : (
+                <span>Publicar</span>
+              )}
             </button>
           </div>
         </div>
+
+        {/* Error banner */}
+        {saveError && (
+          <div className="bg-red-50 border-t border-red-200 px-4 py-2 flex items-center justify-between">
+            <span className="text-sm text-red-700">{saveError}</span>
+            <button
+              onClick={() => setSaveError(null)}
+              className="text-red-500 hover:text-red-700"
+              aria-label="Fechar erro"
+            >
+              <X size={16} />
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Banner de Contexto do Tema */}
@@ -504,14 +800,76 @@ Com esse desempenho, o Brasil reafirma sua posição estratégica no cenário gl
                 </button>
               </Tooltip>
               <div className="w-px h-6 bg-light-gray mx-2" />
-              <Tooltip content="Desfazer" shortcut="Ctrl+Z">
-                <button className="p-2 hover:bg-off-white rounded transition-colors" aria-label="Desfazer">
-                  <Undo size={18} className="text-medium-gray" />
+              <Tooltip content={canUndo ? `Desfazer (${versionCount - 1} versões)` : 'Nada para desfazer'} shortcut="Ctrl+Z">
+                <button
+                  onClick={undo}
+                  disabled={!canUndo}
+                  className={`p-2 rounded transition-colors ${
+                    canUndo
+                      ? 'hover:bg-off-white text-medium-gray'
+                      : 'text-light-gray cursor-not-allowed'
+                  }`}
+                  aria-label="Desfazer"
+                >
+                  <Undo size={18} />
                 </button>
               </Tooltip>
-              <Tooltip content="Refazer" shortcut="Ctrl+Y">
-                <button className="p-2 hover:bg-off-white rounded transition-colors" aria-label="Refazer">
-                  <Redo size={18} className="text-medium-gray" />
+              <Tooltip content={canRedo ? 'Refazer' : 'Nada para refazer'} shortcut="Ctrl+Y">
+                <button
+                  onClick={redo}
+                  disabled={!canRedo}
+                  className={`p-2 rounded transition-colors ${
+                    canRedo
+                      ? 'hover:bg-off-white text-medium-gray'
+                      : 'text-light-gray cursor-not-allowed'
+                  }`}
+                  aria-label="Refazer"
+                >
+                  <Redo size={18} />
+                </button>
+              </Tooltip>
+              {/* Version Dropdown - only shows when there are multiple versions */}
+              {versionCount > 1 && (
+                <div className="relative">
+                  <Tooltip content="Ver histórico de versões" position="bottom">
+                    <button
+                      onClick={() => setShowVersionDropdown(!showVersionDropdown)}
+                      className="flex items-center gap-1 px-2 py-1.5 text-xs text-medium-gray
+                                 hover:bg-off-white rounded transition-colors"
+                    >
+                      <span className="font-medium">v{currentIndex + 1}</span>
+                      <span className="text-light-gray">/{versionCount}</span>
+                      <ChevronDown size={12} />
+                    </button>
+                  </Tooltip>
+
+                  {showVersionDropdown && (
+                    <VersionDropdown
+                      versions={versions}
+                      currentIdx={currentIndex}
+                      onSelect={(id) => {
+                        goToVersion(id);
+                        setShowVersionDropdown(false);
+                      }}
+                      onClose={() => setShowVersionDropdown(false)}
+                    />
+                  )}
+                </div>
+              )}
+              <div className="w-px h-6 bg-light-gray mx-2" />
+              {/* Preview/Edit Toggle */}
+              <Tooltip content={isPreviewMode ? "Editar texto" : "Visualizar formatação"}>
+                <button
+                  onClick={() => setIsPreviewMode(!isPreviewMode)}
+                  className={`p-2 rounded transition-colors ${
+                    isPreviewMode
+                      ? 'bg-tmc-orange text-white'
+                      : 'hover:bg-off-white text-medium-gray'
+                  }`}
+                  aria-label={isPreviewMode ? "Editar texto" : "Visualizar formatação"}
+                  aria-pressed={isPreviewMode}
+                >
+                  {isPreviewMode ? <Edit3 size={18} /> : <Eye size={18} />}
                 </button>
               </Tooltip>
             </div>
@@ -670,12 +1028,21 @@ Com esse desempenho, o Brasil reafirma sua posição estratégica no cenário gl
 
           {/* Editor */}
           <div className="flex-1 p-4 md:p-8 overflow-y-auto">
-            <textarea
-              placeholder="Comece a escrever seu texto aqui ou use o assistente de IA para obter sugestões..."
-              value={content}
-              onChange={(e) => setContent(e.target.value)}
-              className="w-full h-full resize-none text-dark-gray text-base leading-relaxed focus:outline-none placeholder:text-light-gray"
-            />
+            {isPreviewMode ? (
+              /* Preview Mode - Rendered HTML */
+              <div
+                className="prose prose-sm max-w-none text-dark-gray"
+                dangerouslySetInnerHTML={{ __html: renderedContent || '<p class="text-light-gray">Nenhum conteúdo para visualizar...</p>' }}
+              />
+            ) : (
+              /* Edit Mode - Textarea */
+              <textarea
+                placeholder="Comece a escrever seu texto aqui ou use o assistente de IA para obter sugestões..."
+                value={content}
+                onChange={(e) => setContent(e.target.value)}
+                className="w-full h-full resize-none text-dark-gray text-base leading-relaxed focus:outline-none placeholder:text-light-gray"
+              />
+            )}
           </div>
 
           {/* Seção de Tópicos/Tags */}
@@ -822,7 +1189,11 @@ Com esse desempenho, o Brasil reafirma sua posição estratégica no cenário gl
                   <span className="font-semibold text-dark-gray">Assistente de redação</span>
                 </div>
                 <Tooltip content="Limpar histórico do chat" position="left">
-                  <button className="p-2 hover:bg-off-white rounded-lg transition-colors" aria-label="Limpar histórico do chat">
+                  <button
+                    onClick={clearChatMessages}
+                    className="p-2 hover:bg-off-white rounded-lg transition-colors"
+                    aria-label="Limpar histórico do chat"
+                  >
                     <Trash2 size={16} className="text-medium-gray" />
                   </button>
                 </Tooltip>
@@ -839,18 +1210,42 @@ Com esse desempenho, o Brasil reafirma sua posição estratégica no cenário gl
                       className={`max-w-[85%] rounded-xl px-4 py-2.5 ${
                         message.type === 'user'
                           ? 'bg-tmc-orange text-white rounded-br-none'
+                          : message.type === 'error'
+                          ? 'bg-red-50 text-red-700 border border-red-200 rounded-bl-none'
+                          : message.type === 'system'
+                          ? 'bg-blue-50 text-blue-700 border border-blue-200 rounded-bl-none'
                           : 'bg-off-white text-dark-gray rounded-bl-none'
                       }`}
                     >
-                      <p className="text-sm">{message.content}</p>
-                      {message.type === 'ai' && (
-                        <button className="mt-2 text-xs text-tmc-orange hover:underline">
-                          Inserir no texto
-                        </button>
+                      {message.isLoading ? (
+                        <div className="flex items-center gap-2">
+                          <Loader2 size={14} className="animate-spin" />
+                          <p className="text-sm">{message.content}</p>
+                        </div>
+                      ) : (
+                        <p className="text-sm whitespace-pre-wrap">{message.content}</p>
+                      )}
+                      {message.isEdit && message.type === 'ai' && (
+                        <div className="mt-2 pt-2 border-t border-light-gray flex items-center gap-2">
+                          <Check size={12} className="text-success" />
+                          <span className="text-xs text-success font-medium">
+                            Alterações aplicadas
+                          </span>
+                        </div>
                       )}
                     </div>
                   </div>
                 ))}
+                {isChatProcessing && chatMessages.length === 0 && (
+                  <div className="flex justify-start">
+                    <div className="bg-off-white rounded-xl px-4 py-2.5 rounded-bl-none">
+                      <div className="flex items-center gap-2">
+                        <Loader2 size={14} className="animate-spin text-tmc-orange" />
+                        <p className="text-sm text-medium-gray">Processando...</p>
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
 
               {/* Quick Suggestions */}
@@ -871,29 +1266,37 @@ Com esse desempenho, o Brasil reafirma sua posição estratégica no cenário gl
               {/* Chat Input */}
               <div className="p-4 border-t border-light-gray">
                 <div className="flex items-center gap-2">
-                  <label htmlFor="chat-input" className="sr-only">Mensagem para o assistente de IA</label>
+                  <label htmlFor="chat-input" className="sr-only">Instrução de edição para a IA</label>
                   <input
                     id="chat-input"
                     type="text"
-                    placeholder="Ex: como melhorar a introdução?"
+                    placeholder="Ex: melhore o SEO do título"
                     value={chatInput}
                     onChange={(e) => setChatInput(e.target.value)}
-                    onKeyDown={(e) => e.key === 'Enter' && handleSendMessage()}
-                    className="flex-1 px-4 py-2.5 bg-off-white border border-light-gray rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-tmc-orange/50 focus:border-tmc-orange"
+                    onKeyDown={(e) => e.key === 'Enter' && !isChatProcessing && handleSendMessage()}
+                    disabled={isChatProcessing}
+                    className="flex-1 px-4 py-2.5 bg-off-white border border-light-gray rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-tmc-orange/50 focus:border-tmc-orange disabled:opacity-50"
                   />
-                  <Tooltip content="Enviar mensagem" shortcut="Enter" position="top">
+                  <Tooltip content="Enviar instrução de edição" shortcut="Enter" position="top">
                     <button
                       onClick={handleSendMessage}
-                      disabled={!chatInput.trim()}
+                      disabled={!chatInput.trim() || isChatProcessing}
                       className="p-2.5 bg-tmc-orange text-white rounded-lg hover:bg-tmc-orange/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                      aria-label="Enviar mensagem"
+                      aria-label="Enviar instrução de edição"
                     >
-                      <Send size={18} />
+                      {isChatProcessing ? (
+                        <Loader2 size={18} className="animate-spin" />
+                      ) : (
+                        <Send size={18} />
+                      )}
                     </button>
                   </Tooltip>
                 </div>
                 <p className="text-xs text-medium-gray mt-2 text-center">
-                  Pressione Enter para enviar
+                  {isChatProcessing
+                    ? 'Editando o artigo...'
+                    : 'Descreva como quer editar o artigo'
+                  }
                 </p>
               </div>
             </>

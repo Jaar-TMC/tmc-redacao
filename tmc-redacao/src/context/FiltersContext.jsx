@@ -14,6 +14,7 @@ export const useFilters = () => {
 export const FiltersProvider = ({ children }) => {
   const [filters, setFilters] = useState({
     searchQuery: '',
+    tag: null,
     category: null,
     source: null,
     period: 'today',
@@ -36,6 +37,7 @@ export const FiltersProvider = ({ children }) => {
   const resetFilters = useCallback(() => {
     setFilters({
       searchQuery: '',
+      tag: null,
       category: null,
       source: null,
       period: 'today',

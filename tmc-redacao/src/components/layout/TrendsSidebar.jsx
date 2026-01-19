@@ -1,11 +1,15 @@
-import { useState, useCallback } from 'react';
-import { TrendingUp, Twitter, RefreshCw, Pause, Play, Flame, Info, Filter } from 'lucide-react';
-import { mockGoogleTrends, mockTwitterTrends, mockFeedThemes } from '../../data/mockData';
+import { useState, useCallback, useEffect } from 'react';
+import { TrendingUp, Twitter, RefreshCw, Pause, Play, Flame, Info, Filter, AlertCircle } from 'lucide-react';
+import { getTrendingTags } from '../../services/api';
 import { useFilters } from '../../context';
 import Skeleton from '../ui/Skeleton';
 import EmptyState from '../ui/EmptyState';
 import PropTypes from 'prop-types';
 import { FEATURES } from '../../config/featureFlags';
+
+// Static mock data for Google and Twitter trends (disabled via feature flags)
+const mockGoogleTrends = [];
+const mockTwitterTrends = [];
 
 /**
  * TrendsSidebar Component
@@ -16,33 +20,66 @@ import { FEATURES } from '../../config/featureFlags';
  * - No Keyboard Trap (2.1.2): All interactive elements can be navigated with keyboard
  */
 const TrendsSidebar = ({ isOpen, onClose }) => {
-  const [isLoading, setIsLoading] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
   const [isPaused, setIsPaused] = useState(false);
+  const [error, setError] = useState(null);
   const [googleTrends] = useState(mockGoogleTrends);
   const [twitterTrends] = useState(mockTwitterTrends);
-  const [feedThemes] = useState(mockFeedThemes);
+  const [feedThemes, setFeedThemes] = useState([]);
+  const [lastUpdated, setLastUpdated] = useState(null);
   const { filters, updateFilter } = useFilters();
 
-  const handleRefresh = useCallback(() => {
+  // Fetch trending tags directly from backend API
+  // This queries ALL articles in the database for accurate tag counts
+  const fetchThemes = useCallback(async () => {
     setIsLoading(true);
-    // Simulate API call
-    setTimeout(() => {
+    setError(null);
+    try {
+      const response = await getTrendingTags({ limit: 20 });
+      setFeedThemes(response?.items || []);
+      setLastUpdated(new Date());
+    } catch (err) {
+      console.error('Error fetching themes:', err);
+      setError(err.message || 'Erro ao carregar temas');
+    } finally {
       setIsLoading(false);
-    }, 1000);
+    }
   }, []);
 
+  // Fetch on mount
+  useEffect(() => {
+    fetchThemes();
+  }, [fetchThemes]);
+
+  const handleRefresh = useCallback(() => {
+    if (!isPaused) {
+      fetchThemes();
+    }
+  }, [fetchThemes, isPaused]);
+
+  // Format last updated time
+  const formatLastUpdated = () => {
+    if (!lastUpdated) return 'Nunca atualizado';
+    const now = new Date();
+    const diffInSeconds = Math.floor((now - lastUpdated) / 1000);
+    if (diffInSeconds < 60) return 'Atualizado agora';
+    if (diffInSeconds < 3600) return `Atualizado há ${Math.floor(diffInSeconds / 60)} min`;
+    return `Atualizado há ${Math.floor(diffInSeconds / 3600)}h`;
+  };
+
   // Filtra o feed RSS pelo tema selecionado
-  const handleThemeClick = useCallback((theme) => {
-    updateFilter('searchQuery', theme);
+  // Use dedicated tag filter instead of searchQuery
+  const handleThemeClick = useCallback((tag) => {
+    updateFilter('tag', tag);
   }, [updateFilter]);
 
   // Limpa o filtro de tema
   const handleClearThemeFilter = useCallback(() => {
-    updateFilter('searchQuery', '');
+    updateFilter('tag', null);
   }, [updateFilter]);
 
   // Verifica se algum tema está ativo no filtro
-  const activeTheme = feedThemes.find(t => t.theme === filters.searchQuery);
+  const activeTheme = feedThemes.find(t => t.tag === filters.tag);
   return (
     <>
       {/* Mobile Overlay */}
@@ -163,6 +200,18 @@ const TrendsSidebar = ({ isOpen, onClose }) => {
                   </div>
                 ))}
               </div>
+            ) : error ? (
+              <div className="flex flex-col items-center py-6 text-center">
+                <AlertCircle size={24} className="text-red-500 mb-2" />
+                <p className="text-xs text-medium-gray mb-3">{error}</p>
+                <button
+                  onClick={handleRefresh}
+                  className="text-xs text-tmc-orange hover:underline flex items-center gap-1"
+                >
+                  <RefreshCw size={12} />
+                  Tentar novamente
+                </button>
+              </div>
             ) : feedThemes.length === 0 ? (
               <EmptyState
                 icon={Flame}
@@ -173,14 +222,15 @@ const TrendsSidebar = ({ isOpen, onClose }) => {
             ) : (
               <ul className="space-y-1">
                 {feedThemes.map((item, index) => {
-                  const isActive = filters.searchQuery === item.theme;
+                  // Use item.tag for filtering, item.theme for display
+                  const isActive = filters.tag === item.tag;
                   return (
                     <li
                       key={item.id}
                       role="button"
                       tabIndex={0}
-                      onClick={() => handleThemeClick(item.theme)}
-                      onKeyDown={(e) => e.key === 'Enter' && handleThemeClick(item.theme)}
+                      onClick={() => handleThemeClick(item.tag)}
+                      onKeyDown={(e) => e.key === 'Enter' && handleThemeClick(item.tag)}
                       aria-pressed={isActive}
                       aria-label={`Filtrar por ${item.theme}. ${item.count} matérias`}
                       className={`flex items-center justify-between p-2 rounded-lg cursor-pointer transition-all group ${
@@ -345,7 +395,7 @@ const TrendsSidebar = ({ isOpen, onClose }) => {
         {/* Footer */}
         <div className="px-4 py-3 bg-off-white border-t border-light-gray absolute bottom-0 left-0 right-0">
           <p className="text-xs text-medium-gray text-center" role="status" aria-live="polite">
-            {isPaused ? 'Atualização pausada' : 'Atualizado há 5 minutos'}
+            {isPaused ? 'Atualização pausada' : formatLastUpdated()}
           </p>
         </div>
       </aside>

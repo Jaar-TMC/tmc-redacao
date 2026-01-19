@@ -1,5 +1,8 @@
 @import "tailwindcss";
 
+/* Tailwind v4: Explicitly tell where to scan for class usage */
+@source "./**/*.{js,jsx,ts,tsx}";
+
 @theme {
   /* TMC Brand Colors */
   --color-tmc-orange: #E87722;
