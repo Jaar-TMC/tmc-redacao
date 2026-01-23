@@ -51,7 +51,9 @@ async function fetchApi(endpoint, options = {}) {
     },
   };
 
-  const config = { ...defaultOptions, ...options };
+  // Extract signal separately to ensure it's passed through
+  const { signal, ...restOptions } = options;
+  const config = { ...defaultOptions, ...restOptions, signal };
 
   try {
     const response = await fetch(url, config);
@@ -73,6 +75,11 @@ async function fetchApi(endpoint, options = {}) {
 
     return null;
   } catch (error) {
+    // Re-throw AbortError without wrapping
+    if (error.name === 'AbortError') {
+      throw error;
+    }
+
     if (error instanceof ApiError) {
       throw error;
     }
@@ -107,26 +114,28 @@ export async function checkHealth() {
  * @param {Object} params - Query parameters
  * @param {string} [params.source] - Filter by source name
  * @param {string} [params.category] - Filter by category
- * @param {number} [params.limit=50] - Max articles to return
- * @param {number} [params.offset=0] - Pagination offset
+ * @param {number} [params.limit=20] - Max articles to return (max: 100)
+ * @param {number} [params.page=1] - Page number for pagination
  * @param {string} [params.search] - Search query
  * @param {string} [params.tag] - Filter by exact tag match
- * @returns {Promise<{articles: Array, total: number}>}
+ * @param {Object} [options] - Fetch options
+ * @param {AbortSignal} [options.signal] - AbortController signal for cancellation
+ * @returns {Promise<{items: Array, total: number, page: number, pages: number}>}
  */
-export async function getArticles(params = {}) {
+export async function getArticles(params = {}, options = {}) {
   const queryParams = new URLSearchParams();
 
   if (params.source) queryParams.append('source', params.source);
   if (params.category) queryParams.append('category', params.category);
   if (params.limit) queryParams.append('limit', params.limit.toString());
-  if (params.offset) queryParams.append('offset', params.offset.toString());
+  if (params.page) queryParams.append('page', params.page.toString());
   if (params.search) queryParams.append('search', params.search);
   if (params.tag) queryParams.append('tag', params.tag);
 
   const queryString = queryParams.toString();
   const endpoint = `/articles${queryString ? `?${queryString}` : ''}`;
 
-  return fetchApi(endpoint);
+  return fetchApi(endpoint, options);
 }
 
 /**
