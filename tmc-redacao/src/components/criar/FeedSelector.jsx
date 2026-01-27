@@ -3,6 +3,7 @@ import PropTypes from 'prop-types';
 import { X, Search, FileText, Check, RefreshCw, AlertCircle, Tag } from 'lucide-react';
 import { getArticles, getSources } from '../../services/api';
 import { formatRelativeTime } from '../../data/mockData';
+import SearchableSelect from '../ui/SearchableSelect';
 
 /**
  * FeedSelector - Seletor inline de matérias do feed
@@ -16,6 +17,7 @@ const FeedSelector = ({ onClose, onSelect }) => {
   const [selectedTags, setSelectedTags] = useState(new Set());
   const [filterCategory, setFilterCategory] = useState('all');
   const [filterSource, setFilterSource] = useState('all');
+  const [filterTag, setFilterTag] = useState('all');
 
   // API State
   const [articles, setArticles] = useState([]);
@@ -37,7 +39,7 @@ const FeedSelector = ({ onClose, onSelect }) => {
         ]);
 
         // Transform API response to match expected format
-        const transformedArticles = (articlesResponse?.articles || []).map(article => ({
+        const transformedArticles = (articlesResponse?.items || []).map(article => ({
           id: article.id,
           title: article.title,
           preview: article.summary || article.content?.substring(0, 200) || '',
@@ -78,7 +80,7 @@ const FeedSelector = ({ onClose, onSelect }) => {
           getSources()
         ]);
 
-        const transformedArticles = (articlesResponse?.articles || []).map(article => ({
+        const transformedArticles = (articlesResponse?.items || []).map(article => ({
           id: article.id,
           title: article.title,
           preview: article.summary || article.content?.substring(0, 200) || '',
@@ -117,6 +119,11 @@ const FeedSelector = ({ onClose, onSelect }) => {
       filtered = filtered.filter(a => a.source === filterSource);
     }
 
+    // Filtro por tag
+    if (filterTag !== 'all') {
+      filtered = filtered.filter(a => a.tags && a.tags.includes(filterTag));
+    }
+
     // Filtro por busca
     if (searchQuery.trim()) {
       const query = searchQuery.toLowerCase();
@@ -127,18 +134,27 @@ const FeedSelector = ({ onClose, onSelect }) => {
     }
 
     return filtered;
-  }, [articles, searchQuery, filterCategory, filterSource]);
+  }, [articles, searchQuery, filterCategory, filterSource, filterTag]);
 
-  // Categorias únicas dos artigos carregados
-  const categories = useMemo(() => {
+  // Categorias únicas dos artigos carregados (formato para SearchableSelect)
+  const categoryOptions = useMemo(() => {
     const uniqueCategories = [...new Set(articles.map(a => a.category))].filter(Boolean);
-    return uniqueCategories.sort();
+    return uniqueCategories.sort().map(cat => ({ value: cat, label: cat }));
   }, [articles]);
 
-  // Fontes únicas dos artigos carregados
-  const sourceNames = useMemo(() => {
+  // Fontes únicas dos artigos carregados (formato para SearchableSelect)
+  const sourceOptions = useMemo(() => {
     const uniqueSources = [...new Set(articles.map(a => a.source))].filter(Boolean);
-    return uniqueSources.sort();
+    return uniqueSources.sort().map(source => ({ value: source, label: source }));
+  }, [articles]);
+
+  // Tags únicas dos artigos carregados (formato para SearchableSelect)
+  const tagOptions = useMemo(() => {
+    const tagsSet = new Set();
+    articles.forEach(a => {
+      (a.tags || []).forEach(tag => tagsSet.add(tag));
+    });
+    return Array.from(tagsSet).sort().map(tag => ({ value: tag, label: `#${tag}` }));
   }, [articles]);
 
   const handleToggleArticle = (article) => {
@@ -249,40 +265,30 @@ const FeedSelector = ({ onClose, onSelect }) => {
 
           {/* Filtros */}
           <div className="flex gap-3 mb-4">
-            <div className="flex-1 relative">
-              <select
-                value={filterCategory}
-                onChange={(e) => setFilterCategory(e.target.value)}
-                className="w-full px-3 py-2 pr-8 border border-light-gray rounded-lg text-sm bg-white appearance-none cursor-pointer focus:outline-none focus:border-tmc-orange transition-colors"
-              >
-                <option value="all">Todas as categorias</option>
-                {categories.map(cat => (
-                  <option key={cat} value={cat}>{cat}</option>
-                ))}
-              </select>
-              <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none">
-                <svg className="w-4 h-4 text-medium-gray" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                </svg>
-              </div>
-            </div>
-            <div className="flex-1 relative">
-              <select
-                value={filterSource}
-                onChange={(e) => setFilterSource(e.target.value)}
-                className="w-full px-3 py-2 pr-8 border border-light-gray rounded-lg text-sm bg-white appearance-none cursor-pointer focus:outline-none focus:border-tmc-orange transition-colors"
-              >
-                <option value="all">Todas as fontes</option>
-                {sourceNames.map(source => (
-                  <option key={source} value={source}>{source}</option>
-                ))}
-              </select>
-              <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none">
-                <svg className="w-4 h-4 text-medium-gray" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                </svg>
-              </div>
-            </div>
+            <SearchableSelect
+              value={filterCategory}
+              onChange={setFilterCategory}
+              options={categoryOptions}
+              placeholder="Buscar categoria..."
+              allLabel="Todas as categorias"
+              className="flex-1"
+            />
+            <SearchableSelect
+              value={filterSource}
+              onChange={setFilterSource}
+              options={sourceOptions}
+              placeholder="Buscar fonte..."
+              allLabel="Todas as fontes"
+              className="flex-1"
+            />
+            <SearchableSelect
+              value={filterTag}
+              onChange={setFilterTag}
+              options={tagOptions}
+              placeholder="Buscar tag..."
+              allLabel="Todas as tags"
+              className="flex-1"
+            />
           </div>
 
           {/* Lista de Matérias */}

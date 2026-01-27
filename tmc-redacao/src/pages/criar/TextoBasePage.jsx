@@ -7,7 +7,8 @@ import {
   TextoBaseVideo,
   TextoBaseTema,
   TextoBaseFeed,
-  TextoBaseLink
+  TextoBaseLink,
+  TextoBaseZero
 } from './variantes';
 
 /**
@@ -264,6 +265,14 @@ const TextoBasePage = () => {
       case 'link':
         return (
           <TextoBaseLink
+            fonte={fonte}
+            onChangeSource={handleChangeSource}
+            onDataChange={handleDataChange}
+          />
+        );
+      case 'zero':
+        return (
+          <TextoBaseZero
             fonte={fonte}
             onChangeSource={handleChangeSource}
             onDataChange={handleDataChange}

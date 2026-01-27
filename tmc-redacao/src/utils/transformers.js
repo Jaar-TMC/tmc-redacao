@@ -11,17 +11,15 @@
  * @returns {Object} Transformed article for frontend use
  */
 export const transformArticle = (article) => {
-  // Get favicon URL - use provided one or generate from domain
-  // API returns 'favicon', legacy format uses 'favicon_url'
-  let favicon = article.favicon || article.favicon_url;
-  if (!favicon) {
-    try {
-      const url = article.link || article.url || 'https://example.com';
-      const hostname = new URL(url).hostname;
-      favicon = `https://www.google.com/s2/favicons?domain=${hostname}&sz=32`;
-    } catch {
-      favicon = 'https://www.google.com/s2/favicons?domain=example.com&sz=32';
-    }
+  // Always use Google's favicon API for reliability (handles 404s, caching, etc.)
+  // API-provided favicons are often broken or inaccessible
+  let favicon;
+  try {
+    const url = article.link || article.url || 'https://example.com';
+    const hostname = new URL(url).hostname;
+    favicon = `https://www.google.com/s2/favicons?domain=${hostname}&sz=32`;
+  } catch {
+    favicon = 'https://www.google.com/s2/favicons?domain=example.com&sz=32';
   }
 
   // API returns 'publishedAt', legacy format uses 'published_at'

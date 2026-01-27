@@ -1,5 +1,5 @@
 import { Search, ChevronDown, Building2, Tag } from 'lucide-react';
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import { getSources, getCategories } from '../../services/api';
 import { transformSources, transformCategories } from '../../utils/transformers';
 import { useFilters } from '../../context';
@@ -17,7 +17,10 @@ const FilterBar = () => {
   const { filters, updateFilter } = useFilters();
   const [searchTerm, setSearchTerm] = useState(filters.searchQuery || '');
   const [openDropdown, setOpenDropdown] = useState(null);
-  const [isExternalUpdate, setIsExternalUpdate] = useState(false);
+
+  // Refs to prevent race conditions between user typing and external updates
+  const isUserTypingRef = useRef(false);
+  const debounceTimerRef = useRef(null);
 
   // API State for filters
   const [categories, setCategories] = useState([]);
@@ -39,28 +42,39 @@ const FilterBar = () => {
   }, []);
 
   // Sync local state when filters.searchQuery changes externally (e.g., from TrendsSidebar)
+  // Only update if user is not currently typing to prevent race conditions
   useEffect(() => {
-    if (filters.searchQuery !== searchTerm) {
-      setIsExternalUpdate(true);
-      setSearchTerm(filters.searchQuery);
+    if (!isUserTypingRef.current && filters.searchQuery !== searchTerm) {
+      setSearchTerm(filters.searchQuery || '');
     }
   }, [filters.searchQuery]);
 
-  // Debounce search term updates (only for user input, not external updates)
+  // Cleanup debounce timer on unmount
   useEffect(() => {
-    if (isExternalUpdate) {
-      setIsExternalUpdate(false);
-      return;
+    return () => {
+      if (debounceTimerRef.current) {
+        clearTimeout(debounceTimerRef.current);
+      }
+    };
+  }, []);
+
+  // Handle search input change with debounce
+  const handleSearchChange = useCallback((e) => {
+    const value = e.target.value;
+    isUserTypingRef.current = true;
+    setSearchTerm(value);
+
+    // Clear existing timer
+    if (debounceTimerRef.current) {
+      clearTimeout(debounceTimerRef.current);
     }
 
-    const timeoutId = setTimeout(() => {
-      if (searchTerm !== filters.searchQuery) {
-        updateFilter('searchQuery', searchTerm);
-      }
+    // Set new debounce timer
+    debounceTimerRef.current = setTimeout(() => {
+      updateFilter('searchQuery', value);
+      isUserTypingRef.current = false;
     }, 300);
-
-    return () => clearTimeout(timeoutId);
-  }, [searchTerm, filters.searchQuery, updateFilter, isExternalUpdate]);
+  }, [updateFilter]);
 
   const handleFilterClick = useCallback((type) => {
     setOpenDropdown(prev => prev === type ? null : type);
@@ -99,7 +113,7 @@ const FilterBar = () => {
             type="search"
             placeholder="Ex: inteligência artificial, eleições, mercado financeiro..."
             value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
+            onChange={handleSearchChange}
             className="w-full pl-10 pr-4 py-2.5 border border-light-gray rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-tmc-orange/50 focus:border-tmc-orange"
             aria-label="Buscar matérias por título ou conteúdo"
           />

@@ -69,7 +69,9 @@ const TrendsSidebar = ({ isOpen, onClose }) => {
 
   // Filtra o feed RSS pelo tema selecionado
   // Use dedicated tag filter instead of searchQuery
+  // Clear searchQuery when selecting a tag to avoid conflicting filters
   const handleThemeClick = useCallback((tag) => {
+    updateFilter('searchQuery', '');  // Clear search when selecting a tag
     updateFilter('tag', tag);
   }, [updateFilter]);
 

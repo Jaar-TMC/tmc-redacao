@@ -73,7 +73,7 @@ const Header = () => {
         {/* Left: Logo + Desktop Navigation */}
         <div className="flex items-center gap-4 md:gap-8">
           <Link to="/" className="flex items-center gap-2 min-h-[44px]" aria-label="Página inicial TMC">
-            <LogoTMC className="h-7 md:h-8" aria-label="TMC - The Media Company" />
+            <LogoTMC className="h-12 w-auto" aria-label="TMC - The Media Company" />
           </Link>
 
           {/* Desktop Navigation */}

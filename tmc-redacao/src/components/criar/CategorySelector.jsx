@@ -47,14 +47,9 @@ const CategorySelector = ({
                   className={isSelected ? colorClasses.icon : 'text-medium-gray'}
                 />
               </div>
-              <div>
-                <h3 className={`font-semibold ${isSelected ? colorClasses.text : 'text-dark-gray'}`}>
-                  {categoria.name}
-                </h3>
-                <p className="text-xs text-medium-gray">
-                  Ref: {categoria.reference}
-                </p>
-              </div>
+              <h3 className={`font-semibold ${isSelected ? colorClasses.text : 'text-dark-gray'}`}>
+                {categoria.name}
+              </h3>
             </div>
 
             {/* Description */}

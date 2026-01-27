@@ -1,6 +1,6 @@
 import { useState, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowLeft, HelpCircle, Video, Flame, Newspaper, Globe } from 'lucide-react';
+import { ArrowLeft, HelpCircle, Video, Flame, Newspaper, PenLine } from 'lucide-react';
 import { Stepper } from '../../components/criar';
 import SourceCard from '../../components/criar/SourceCard';
 import UrlInputModal from '../../components/criar/UrlInputModal';
@@ -49,6 +49,9 @@ const CriarMateria = () => {
     } else if (sourceType === 'feed') {
       setExpandedSelector('feed');
       setSelectedSource('feed');
+    } else if (sourceType === 'zero') {
+      setFonte('zero', {});
+      navigate('/criar/texto-base');
     }
   };
 
@@ -175,14 +178,6 @@ const CriarMateria = () => {
                 onClick={() => handleSourceClick('feed')}
               />
 
-              {/* MVP: Link da Web - Manual paste */}
-              <SourceCard
-                icon={<Globe size={28} strokeWidth={1.5} />}
-                title="LINK DA WEB"
-                description="Cole qualquer link para extrair"
-                selected={selectedSource === 'web'}
-                onClick={() => handleSourceClick('web')}
-              />
 
               {/* Post-MVP: Video Transcription */}
               {FEATURES.VIDEO_TRANSCRIPTION && (
@@ -205,6 +200,15 @@ const CriarMateria = () => {
                   onClick={() => handleSourceClick('tema')}
                 />
               )}
+
+              {/* Criar do Zero - texto livre */}
+              <SourceCard
+                icon={<PenLine size={28} strokeWidth={1.5} />}
+                title="CRIAR DO ZERO"
+                description="Cole qualquer texto como ponto de partida"
+                selected={selectedSource === 'zero'}
+                onClick={() => handleSourceClick('zero')}
+              />
             </div>
 
             {/* Dica */}

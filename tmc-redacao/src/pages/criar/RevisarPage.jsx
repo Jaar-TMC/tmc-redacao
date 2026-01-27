@@ -65,7 +65,7 @@ const TOM_NAMES = {
 
 const RevisarPage = () => {
   const navigate = useNavigate();
-  const { fonte, textoBase, configuracoes, materiaisComplementares, setResultado, selectedTags, toggleTag, getSelectedTagsArray } = useCriar();
+  const { fonte, textoBase, configuracoes, materiaisComplementares, setResultado, selectedTags, toggleTag, getSelectedTagsArray, getTextoBaseParaGeracao } = useCriar();
 
   // State
   const [expandedSections, setExpandedSections] = useState({
@@ -92,6 +92,56 @@ const RevisarPage = () => {
 
   // Build review data from context or use mock
   const reviewData = useMemo(() => {
+    // Handle "Criar do Zero" - text from textoBase.blocos
+    if (fonte?.tipo === 'zero') {
+      const textoBaseContent = getTextoBaseParaGeracao() || '';
+      const wordCount = textoBaseContent.split(/\s+/).filter(Boolean).length;
+
+      return {
+        textoBase: {
+          type: 'Criar do Zero',
+          title: 'Texto Livre',
+          blocks: textoBase?.blocos?.length || 1,
+          words: wordCount,
+          content: textoBaseContent.substring(0, 500) + (textoBaseContent.length > 500 ? '...' : '')
+        },
+        materiais: [
+          ...materiaisComplementares.links.map((l, i) => ({
+            id: `link-${i}`, type: 'link', title: l.url || l.title, words: l.words || 0, status: 'extracted'
+          })),
+          ...materiaisComplementares.pdfs.map((p, i) => ({
+            id: `pdf-${i}`, type: 'pdf', title: p.name || p.title, pages: p.pages, words: p.words || 0, status: 'extracted'
+          })),
+          ...materiaisComplementares.videos.map((v, i) => ({
+            id: `video-${i}`, type: 'video', title: v.title || v.url, words: v.words || 0, status: 'extracted'
+          }))
+        ],
+        configuracoes: {
+          categoria: CATEGORIA_NAMES[configuracoes.categoria] || configuracoes.categoria || 'Geral/Variedades',
+          tom: TOM_NAMES[configuracoes.tom] || configuracoes.tom,
+          modoOpinativo: configuracoes.modoOpinativo,
+          creditos: configuracoes.creditos || 'Não informado',
+          dataBase: configuracoes.data || new Date().toLocaleDateString('pt-BR'),
+          orientacaoLide: configuracoes.orientacaoLide || '',
+          citacoes: configuracoes.citacoes?.length || 0,
+          instrucoes: configuracoes.instrucoes || '',
+          tipoMateria: configuracoes.tipoMateria || ''
+        },
+        _raw: {
+          textoBaseContent,
+          categoria: configuracoes.categoria,
+          tom: configuracoes.tom,
+          modoOpinativo: configuracoes.modoOpinativo,
+          tipoMateria: configuracoes.tipoMateria,
+          citacoes: configuracoes.citacoes,
+          contexto: configuracoes.contexto,
+          creditos: configuracoes.creditos,
+          orientacaoLide: configuracoes.orientacaoLide,
+          tags: getSelectedTagsArray()
+        }
+      };
+    }
+
     // If we have real data from context, use it
     if (fonte?.dados && fonte.dados.length > 0) {
       const articles = fonte.dados;
@@ -169,7 +219,7 @@ const RevisarPage = () => {
         tags: getSelectedTagsArray()
       }
     };
-  }, [fonte, textoBase, configuracoes, materiaisComplementares, getSelectedTagsArray]);
+  }, [fonte, textoBase, configuracoes, materiaisComplementares, getSelectedTagsArray, getTextoBaseParaGeracao]);
 
   const toggleSection = useCallback((section, id = null) => {
     if (id) {

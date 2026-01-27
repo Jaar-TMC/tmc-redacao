@@ -1,5 +1,5 @@
 import PropTypes from 'prop-types';
-import { Video, Flame, Newspaper, Globe, RefreshCw, Youtube } from 'lucide-react';
+import { Video, Flame, Newspaper, Globe, RefreshCw, Youtube, PenLine } from 'lucide-react';
 
 /**
  * SourceBadge - Badge indicando a fonte selecionada
@@ -38,6 +38,11 @@ const SourceBadge = ({
       icon: <Globe size={20} />,
       label: 'Link da Web',
       color: 'text-green-500 bg-green-50'
+    },
+    zero: {
+      icon: <PenLine size={20} />,
+      label: 'Criar do Zero',
+      color: 'text-purple-600 bg-purple-50'
     }
   };
 
@@ -79,7 +84,7 @@ const SourceBadge = ({
 };
 
 SourceBadge.propTypes = {
-  type: PropTypes.oneOf(['video', 'tema', 'feed', 'link', 'transcription']).isRequired,
+  type: PropTypes.oneOf(['video', 'tema', 'feed', 'link', 'transcription', 'zero']).isRequired,
   title: PropTypes.string.isRequired,
   subtitle: PropTypes.string,
   onChangeSource: PropTypes.func

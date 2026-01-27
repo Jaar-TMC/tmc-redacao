@@ -25,6 +25,53 @@ def repair_json(json_str: str) -> str:
     Returns:
         Repaired JSON string
     """
+    # First, try to fix unescaped newlines within string values
+    # This is a common issue when LLM generates markdown content
+
+    # Process character by character to properly escape newlines inside strings
+    result = []
+    in_string = False
+    escape_next = False
+    i = 0
+
+    while i < len(json_str):
+        char = json_str[i]
+
+        if escape_next:
+            result.append(char)
+            escape_next = False
+            i += 1
+            continue
+
+        if char == '\\':
+            escape_next = True
+            result.append(char)
+            i += 1
+            continue
+
+        if char == '"':
+            in_string = not in_string
+            result.append(char)
+            i += 1
+            continue
+
+        if in_string:
+            # Inside a string, escape literal newlines and tabs
+            if char == '\n':
+                result.append('\\n')
+            elif char == '\r':
+                result.append('\\r')
+            elif char == '\t':
+                result.append('\\t')
+            else:
+                result.append(char)
+        else:
+            result.append(char)
+
+        i += 1
+
+    json_str = ''.join(result)
+
     # Remove any trailing content after the main JSON object
     # Find matching braces
     brace_count = 0
@@ -64,9 +111,6 @@ def repair_json(json_str: str) -> str:
     json_str = re.sub(r'}\s*"', '}, "', json_str)
     json_str = re.sub(r'}\s*{', '}, {', json_str)
     json_str = re.sub(r']\s*"', '], "', json_str)
-
-    # Fix unescaped newlines in strings (replace with \n)
-    # This is tricky - we need to be careful not to break valid JSON
 
     return json_str
 
@@ -1082,6 +1126,37 @@ Responda em JSON:
                         "exclusiveCount": len(result.get("exclusives", []))
                     }
 
+                # Validar e corrigir grupos com apenas 1 versão
+                # Regra: grupos devem ter 2+ versões, senão vão para exclusives
+                valid_groups = []
+                moved_count = 0
+                for group in result.get('groups', []):
+                    versions = group.get('versions', [])
+                    if len(versions) >= 2:
+                        # Grupo válido - manter
+                        valid_groups.append(group)
+                    elif len(versions) == 1:
+                        # Grupo inválido - converter para exclusive
+                        version = versions[0]
+                        exclusive = {
+                            "id": f"exc-from-{group.get('id', 'unknown')}",
+                            "type": group.get('type', 'fato'),
+                            "content": version.get('content', ''),
+                            "source": version.get('source', ''),
+                            "articleId": version.get('articleId', ''),
+                            "wordCount": version.get('wordCount', 0)
+                        }
+                        result['exclusives'].append(exclusive)
+                        moved_count += 1
+                        logger.info(f"Grupo '{group.get('id')}' movido para exclusives (apenas 1 versão)")
+
+                if moved_count > 0:
+                    result['groups'] = valid_groups
+                    # Atualizar summary
+                    result['summary']['commonElements'] = len(valid_groups)
+                    result['summary']['exclusiveCount'] = len(result['exclusives'])
+                    logger.info(f"Post-processing: {moved_count} grupos com 1 versão movidos para exclusives")
+
                 logger.info(f"Merged {len(result['groups'])} groups, {len(result['exclusives'])} exclusives, {len(result['quotes'])} quotes")
                 return result
             else:
@@ -1377,5 +1452,8 @@ IMPORTANTE:
 - Use os IDs originais dos artigos em articleId
 - Mantenha a integridade das citações originais
 - Agrupe APENAS conteúdo que trata do MESMO fato/elemento
-- Conteúdo exclusivo é aquele que aparece em APENAS UMA fonte
+- REGRA DE NÃO-DUPLICAÇÃO: Cada elemento vai para "groups" OU "exclusives", NUNCA ambos:
+  * Se um elemento tem versões de 2+ fontes diferentes → vai para "groups" (para escolher entre versões)
+  * Se um elemento aparece em apenas 1 fonte → vai para "exclusives" (NÃO crie grupo com 1 versão)
+- Se as matérias tratam de assuntos DIFERENTES sem elementos em comum, coloque tudo em "exclusives"
 - Recomende a versão mais completa e bem escrita de cada grupo"""

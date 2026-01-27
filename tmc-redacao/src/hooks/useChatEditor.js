@@ -30,6 +30,63 @@ function generateMessageId() {
 }
 
 /**
+ * Validate SEO compliance for AI-generated content
+ * Checks if title and linha fina are within ideal character ranges
+ * @param {Object} result - AI edit result with titulo and linha_fina
+ * @returns {Object} Object with warnings array and compliance status
+ */
+function validateSEOCompliance(result) {
+  const warnings = [];
+  let isCompliant = true;
+
+  // Title validation: 50-60 characters is ideal for SEO
+  if (result.titulo) {
+    const titleLen = result.titulo.length;
+    if (titleLen < 50) {
+      warnings.push({
+        field: 'titulo',
+        message: `Título com ${titleLen} caracteres (ideal: 50-60)`,
+        severity: 'warning',
+        suggestion: 'Título curto demais. Considere expandir para melhor SEO.'
+      });
+      isCompliant = false;
+    } else if (titleLen > 60) {
+      warnings.push({
+        field: 'titulo',
+        message: `Título com ${titleLen} caracteres (ideal: 50-60)`,
+        severity: titleLen > 70 ? 'error' : 'warning',
+        suggestion: 'Título pode ser truncado nos resultados de busca. Considere encurtar.'
+      });
+      isCompliant = false;
+    }
+  }
+
+  // Linha fina validation: 120-155 characters is ideal for SEO
+  if (result.linha_fina) {
+    const linhaFinaLen = result.linha_fina.length;
+    if (linhaFinaLen < 120) {
+      warnings.push({
+        field: 'linha_fina',
+        message: `Linha fina com ${linhaFinaLen} caracteres (ideal: 120-155)`,
+        severity: 'warning',
+        suggestion: 'Linha fina curta. Adicione mais contexto para melhor SEO.'
+      });
+      isCompliant = false;
+    } else if (linhaFinaLen > 155) {
+      warnings.push({
+        field: 'linha_fina',
+        message: `Linha fina com ${linhaFinaLen} caracteres (ideal: 120-155)`,
+        severity: linhaFinaLen > 170 ? 'error' : 'warning',
+        suggestion: 'Linha fina pode ser truncada. Considere encurtar.'
+      });
+      isCompliant = false;
+    }
+  }
+
+  return { warnings, isCompliant };
+}
+
+/**
  * Chat editor hook for AI-powered article editing
  *
  * @param {Object} options - Hook options
@@ -115,6 +172,9 @@ export function useChatEditor({
       // Remove loading message
       setMessages((prev) => prev.filter((m) => m.id !== loadingMessageId));
 
+      // Validate SEO compliance for character counts
+      const { warnings, isCompliant } = validateSEOCompliance(result);
+
       // Add pending approval message with changes summary
       // Changes are NOT applied until user approves
       const aiMessageId = addMessage('ai', result.changes_summary || 'Proposta de edição:', {
@@ -125,7 +185,9 @@ export function useChatEditor({
           tags: result.tags
         },
         isPendingApproval: true,
-        originalInstruction: instruction
+        originalInstruction: instruction,
+        seoWarnings: warnings,
+        isSEOCompliant: isCompliant
       });
 
       setIsProcessing(false);
@@ -273,6 +335,9 @@ export function useChatEditor({
       // Remove loading, add new pending message
       setMessages((prev) => prev.filter((m) => m.id !== loadingMessageId));
 
+      // Validate SEO compliance for character counts
+      const { warnings, isCompliant } = validateSEOCompliance(result);
+
       addMessage('ai', result.changes_summary || 'Proposta ajustada:', {
         editResult: {
           titulo: result.titulo,
@@ -281,7 +346,9 @@ export function useChatEditor({
           tags: result.tags
         },
         isPendingApproval: true,
-        originalInstruction: modificationRequest
+        originalInstruction: modificationRequest,
+        seoWarnings: warnings,
+        isSEOCompliant: isCompliant
       });
 
       setIsProcessing(false);

@@ -25,7 +25,8 @@ import {
   Edit3,
   FileText,
   Save,
-  Code
+  Code,
+  AlertTriangle
 } from 'lucide-react';
 import { countWords, markdownToHtml } from '../utils/markdownRenderer';
 import { mockTones, mockPersonas } from '../data/mockData';
@@ -34,6 +35,7 @@ import { SEOAnalyzerPanel, calculateSEOScore, RichTextEditor, EditorToolbar } fr
 import { useCriar } from '../context';
 import { useVersionHistory, useChatEditor } from '../hooks';
 import { createUserArticle, updateUserArticle, getUserArticle, generateTags, editArticle } from '../services/api';
+import { generateSEOOptimizationPrompt } from '../utils/seoPromptGenerator';
 
 // Tipos de matéria disponíveis
 const articleTypes = [
@@ -120,7 +122,9 @@ Com esse desempenho, o Brasil reafirma sua posição estratégica no cenário gl
   const initialTitle = loadedArticle?.title || resultado?.titulo || mockArticle.title;
   const initialLinhaFina = loadedArticle?.linhaFina || resultado?.linhaFina || mockArticle.linhaFina;
   const initialContent = loadedArticle?.content || resultado?.conteudo || mockArticle.content;
-  const initialTags = loadedArticle?.tags || resultado?.tagsSugeridas || mockArticle.tags;
+  // Ensure initialTags is always an array
+  const rawTags = loadedArticle?.tags || resultado?.tagsSugeridas || mockArticle.tags;
+  const initialTags = Array.isArray(rawTags) ? rawTags : [];
 
   // Update state when loaded article changes
   useEffect(() => {
@@ -128,7 +132,7 @@ Com esse desempenho, o Brasil reafirma sua posição estratégica no cenário gl
       setTitle(loadedArticle.title || '');
       setLinhaFina(loadedArticle.linhaFina || '');
       setContent(loadedArticle.content || '');
-      setTags(loadedArticle.tags || []);
+      setTags(Array.isArray(loadedArticle.tags) ? loadedArticle.tags : []);
     }
   }, [loadedArticle]);
 
@@ -157,7 +161,7 @@ Com esse desempenho, o Brasil reafirma sua posição estratégica no cenário gl
   const [title, setTitle] = useState(currentContent?.title || '');
   const [linhaFina, setLinhaFina] = useState(currentContent?.linhaFina || '');
   const [content, setContent] = useState(currentContent?.body || '');
-  const [tags, setTags] = useState(currentContent?.tags || []);
+  const [tags, setTags] = useState(Array.isArray(currentContent?.tags) ? currentContent.tags : []);
 
   // Sync local state when version changes (undo/redo)
   useEffect(() => {
@@ -165,7 +169,7 @@ Com esse desempenho, o Brasil reafirma sua posição estratégica no cenário gl
       setTitle(currentContent.title || '');
       setLinhaFina(currentContent.linhaFina || '');
       setContent(currentContent.body || '');
-      setTags(currentContent.tags || []);
+      setTags(Array.isArray(currentContent.tags) ? currentContent.tags : []);
     }
   }, [currentContent]);
 
@@ -193,7 +197,9 @@ Com esse desempenho, o Brasil reafirma sua posição estratégica no cenário gl
   // Update state when resultado changes (e.g., when navigating from RevisarPage)
   useEffect(() => {
     if (resultado?.geradoEm) {
-      const newTags = resultado.tagsSugeridas?.length > 0 ? resultado.tagsSugeridas : tags;
+      // Ensure tags is always an array
+      const resultTags = Array.isArray(resultado.tagsSugeridas) ? resultado.tagsSugeridas : [];
+      const newTags = resultTags.length > 0 ? resultTags : tags;
       // Convert markdown content to HTML for TipTap editor
       const htmlContent = markdownToHtml(resultado.conteudo || '');
       // Reset version history with new content
@@ -201,7 +207,7 @@ Com esse desempenho, o Brasil reafirma sua posição estratégica no cenário gl
         title: resultado.titulo || '',
         linhaFina: resultado.linhaFina || '',
         body: htmlContent,
-        tags: newTags
+        tags: Array.isArray(newTags) ? newTags : []
       });
     }
   }, [resultado?.geradoEm, resetHistory]);
@@ -269,14 +275,14 @@ Com esse desempenho, o Brasil reafirma sua posição estratégica no cenário gl
   } = useChatEditor({
     articleState: { title, linhaFina, content, tags },
     onEdit: (newContent, summary, messageId) => {
-      // Check if content is already HTML (contains HTML tags)
+      // Always convert markdown to HTML
+      // Even if content has some HTML, it may have markdown links/formatting that need conversion
       const bodyContent = newContent.body || '';
-      const isAlreadyHtml = bodyContent.trim().startsWith('<') || /<[a-z][\s\S]*>/i.test(bodyContent);
+      const convertedBody = markdownToHtml(bodyContent);
 
-      // Only convert markdown to HTML if content is not already HTML
       const contentWithHtmlBody = {
         ...newContent,
-        body: isAlreadyHtml ? bodyContent : markdownToHtml(bodyContent)
+        body: convertedBody
       };
       // Push new version when AI edits are applied
       pushVersion(contentWithHtmlBody, 'ai', summary, messageId);
@@ -1238,6 +1244,34 @@ Com esse desempenho, o Brasil reafirma sua posição estratégica no cenário gl
                         <p className="text-sm whitespace-pre-wrap">{message.content}</p>
                       )}
 
+                      {/* SEO Compliance Warnings */}
+                      {message.seoWarnings && message.seoWarnings.length > 0 && message.type === 'ai' && (
+                        <div className="mt-3 pt-3 border-t border-light-gray">
+                          <div className="flex items-center gap-1.5 mb-2">
+                            <AlertTriangle size={12} className="text-warning" />
+                            <span className="text-xs font-medium text-warning">Avisos SEO:</span>
+                          </div>
+                          <div className="space-y-1.5">
+                            {message.seoWarnings.map((warning, idx) => (
+                              <div
+                                key={idx}
+                                className={`text-xs px-2 py-1.5 rounded ${
+                                  warning.severity === 'error'
+                                    ? 'bg-red-50 text-red-700 border border-red-200'
+                                    : 'bg-amber-50 text-amber-700 border border-amber-200'
+                                }`}
+                              >
+                                <p className="font-medium">{warning.message}</p>
+                                <p className="text-[10px] opacity-80 mt-0.5">{warning.suggestion}</p>
+                              </div>
+                            ))}
+                          </div>
+                          <p className="text-[10px] text-medium-gray mt-2">
+                            Use "Modificar" para pedir ajustes nos caracteres.
+                          </p>
+                        </div>
+                      )}
+
                       {/* Pending Approval - Show action buttons */}
                       {message.isPendingApproval && message.type === 'ai' && (
                         <div className="mt-3 pt-3 border-t border-light-gray">
@@ -1422,10 +1456,23 @@ Com esse desempenho, o Brasil reafirma sua posição estratégica no cenário gl
                 linhaFina={linhaFina}
                 content={content}
                 tags={tags}
-                onOptimizeWithAI={() => {
-                  // Mudar para aba do assistente e enviar sugestão
+                articleType={selectedArticleType?.id || 'default'}
+                onOptimizeWithAI={(seoAnalysis) => {
+                  // Generate intelligent, data-driven prompt based on SEO analysis
+                  // Now includes exact scoring rules and keyword extraction
+                  const prompt = generateSEOOptimizationPrompt(
+                    seoAnalysis,
+                    selectedArticleType?.id || 'default',
+                    'quick', // Use quick mode by default
+                    [], // No specific focus areas
+                    { title, content, tags } // Article data for keyword extraction
+                  );
+
+                  // Switch to assistant tab
                   setActiveSidebarTab('assistente');
-                  setChatInput('Analise meu texto e sugira melhorias para SEO');
+
+                  // Auto-send the generated prompt
+                  sendEditMessage(prompt);
                 }}
               />
             </div>
