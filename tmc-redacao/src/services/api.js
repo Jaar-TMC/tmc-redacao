@@ -44,16 +44,16 @@ class ApiError extends Error {
 async function fetchApi(endpoint, options = {}) {
   const url = `${getApiBaseUrl()}${endpoint}`;
 
-  const defaultOptions = {
-    headers: {
-      'Content-Type': 'application/json',
-      ...options.headers,
-    },
-  };
-
   // Extract signal separately to ensure it's passed through
-  const { signal, ...restOptions } = options;
-  const config = { ...defaultOptions, ...restOptions, signal };
+  const { signal, headers: customHeaders, ...restOptions } = options;
+
+  // Only add Content-Type for requests with body (POST, PUT, etc.)
+  const headers = { ...customHeaders };
+  if (restOptions.body) {
+    headers['Content-Type'] = 'application/json';
+  }
+
+  const config = { ...restOptions, headers, signal };
 
   try {
     const response = await fetch(url, config);
