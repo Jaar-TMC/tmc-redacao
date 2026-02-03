@@ -287,9 +287,13 @@ async def merge_topics_handler(req: func.HttpRequest) -> func.HttpResponse:
                 return create_error_response(f"Article {i+1} missing 'source' field", 400)
             if not article.get('title'):
                 return create_error_response(f"Article {i+1} missing 'title' field", 400)
-            # Use content or preview - one must exist
-            if not article.get('content') and not article.get('preview'):
-                return create_error_response(f"Article {i+1} must have 'content' or 'preview'", 400)
+            # Use content or preview - one must exist with minimum length
+            content_text = article.get('content') or article.get('preview') or ''
+            if not content_text or len(content_text.strip()) < 50:
+                return create_error_response(
+                    f"Article {i+1} ('{article.get('title', 'Unknown')[:50]}...') must have 'content' or 'preview' with at least 50 characters. Current length: {len(content_text.strip())} chars",
+                    400
+                )
 
         # Prepare articles for LLM
         prepared_articles = []
@@ -320,13 +324,21 @@ async def merge_topics_handler(req: func.HttpRequest) -> func.HttpResponse:
 
     except ValueError as e:
         logger.error(f"Validation error in merge_topics: {e}")
-        return create_error_response(str(e), 400)
+        return create_error_response(f"Erro de validação: {str(e)}", 400)
     except RuntimeError as e:
         logger.error(f"AI service error: {e}")
-        return create_error_response(f"AI service error: {str(e)}", 503)
+        error_msg = str(e)
+        if "API error" in error_msg or "timeout" in error_msg.lower():
+            return create_error_response("Serviço de IA temporariamente indisponível. Tente novamente.", 503)
+        return create_error_response(f"Erro no serviço de IA: {error_msg}", 503)
+    except json.JSONDecodeError as e:
+        logger.error(f"JSON parse error in merge_topics: {e}")
+        return create_error_response("Erro ao processar resposta da IA. Tente novamente.", 500)
     except Exception as e:
         logger.exception(f"Unexpected error in merge_topics: {e}")
-        return create_error_response("Internal server error", 500)
+        # Provide more context in error message
+        error_type = type(e).__name__
+        return create_error_response(f"Erro inesperado ({error_type}): {str(e)[:200]}", 500)
 
 
 def merge_topics_sync(req: func.HttpRequest) -> func.HttpResponse:

@@ -42,7 +42,7 @@ const SourceBadge = ({
     zero: {
       icon: <PenLine size={20} />,
       label: 'Criar do Zero',
-      color: 'text-purple-600 bg-purple-50'
+      color: 'text-tmc-orange bg-orange-50'
     }
   };
 

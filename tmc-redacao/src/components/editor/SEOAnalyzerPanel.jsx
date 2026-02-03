@@ -766,11 +766,13 @@ const SEOAnalyzerPanel = ({
             </div>
           )}
           <button
-            onClick={() => onOptimizeWithAI(analysis)}
-            className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-tmc-orange text-white text-sm font-medium rounded-lg hover:bg-tmc-orange/90 transition-colors"
+            disabled
+            title="Em breve"
+            className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-gray-300 text-gray-500 text-sm font-medium rounded-lg cursor-not-allowed"
           >
             <Sparkles size={16} />
             Otimizar com IA
+            <span className="text-xs bg-gray-400 text-white px-1.5 py-0.5 rounded ml-1">Em breve</span>
           </button>
         </div>
       )}

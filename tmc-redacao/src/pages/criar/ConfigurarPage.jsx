@@ -103,7 +103,7 @@ const tooltips = {
       <div className="space-y-2">
         <p>Define a voz e regras editoriais específicas do TMC:</p>
         <ul className="list-disc list-inside space-y-1 text-medium-gray">
-          <li><strong>Esportes:</strong> Tom CazéTV, gírias moderadas, paixão</li>
+          <li><strong>Esportes:</strong> Gírias moderadas, paixão, proximidade com torcedor</li>
           <li><strong>Entretenimento:</strong> Leve, pop, trocadilhos</li>
           <li><strong>Política:</strong> Sóbrio, didático, sem piadas</li>
           <li><strong>Economia:</strong> Traduzir para cotidiano</li>

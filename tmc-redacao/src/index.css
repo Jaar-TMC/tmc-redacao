@@ -108,6 +108,32 @@ select:focus-visible {
   }
 }
 
+/* ============================================
+ * Onboarding Beacon Animation
+ * ============================================
+ */
+@keyframes beacon-pulse {
+  0%, 100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  50% {
+    transform: scale(1.8);
+    opacity: 0;
+  }
+}
+
+.animate-beacon-pulse {
+  animation: beacon-pulse 1.5s ease-in-out infinite;
+}
+
+/* Disable beacon animation for reduced motion */
+@media (prefers-reduced-motion: reduce) {
+  .animate-beacon-pulse {
+    animation: none;
+  }
+}
+
 /*
  * WCAG 2.1 Audio Control (1.4.2)
  * If audio is added to the application in the future:

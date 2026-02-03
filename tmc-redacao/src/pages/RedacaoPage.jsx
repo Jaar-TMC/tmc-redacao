@@ -1,5 +1,5 @@
 import { useState, useMemo, useCallback, useEffect, useRef } from 'react';
-import { TrendingUp, Sparkles, FileText, RefreshCw, AlertCircle } from 'lucide-react';
+import { TrendingUp, Sparkles, FileText, RefreshCw, AlertCircle, Loader2 } from 'lucide-react';
 import TrendsSidebar from '../components/layout/TrendsSidebar';
 import ActionPanel from '../components/layout/ActionPanel';
 import FilterBar from '../components/ui/FilterBar';
@@ -10,6 +10,8 @@ import Pagination from '../components/ui/Pagination';
 import { getArticles } from '../services/api';
 import { transformArticles } from '../utils/transformers';
 import { useArticles, useFilters, useUI } from '../context';
+import { useArticlesCache } from '../context/ArticlesCacheContext';
+import { useOnboarding, TOUR_IDS } from '../components/onboarding';
 
 const RedacaoPage = () => {
   const { selectedArticles, addArticle, removeArticle, clearSelection, isArticleSelected } = useArticles();
@@ -22,11 +24,24 @@ const RedacaoPage = () => {
     openActionPanel,
     closeActionPanel,
   } = useUI();
+  const { shouldShowTour, startTour } = useOnboarding();
+  const { getCachedData, setCachedData } = useArticlesCache();
+
+  // Refs to store cache functions to avoid dependency issues in useEffect
+  const getCachedDataRef = useRef(getCachedData);
+  const setCachedDataRef = useRef(setCachedData);
+
+  // Keep refs updated
+  useEffect(() => {
+    getCachedDataRef.current = getCachedData;
+    setCachedDataRef.current = setCachedData;
+  }, [getCachedData, setCachedData]);
 
   // API State
   const [articles, setArticles] = useState([]);
-  const [isLoading, setIsLoading] = useState(true);
+  const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState(null);
+  const [isInitialized, setIsInitialized] = useState(false);
 
   // Pagination State
   const [currentPage, setCurrentPage] = useState(1);
@@ -101,6 +116,17 @@ const RedacaoPage = () => {
       // Continue with the fetch using effectivePage=1
     }
 
+    // Check cache first (use ref to avoid dependency issues)
+    const cachedData = getCachedDataRef.current(filters, effectivePage);
+    if (cachedData) {
+      setArticles(cachedData.articles);
+      setTotalItems(cachedData.totalItems);
+      setTotalPages(cachedData.totalPages);
+      setIsLoading(false);
+      setIsInitialized(true);
+      return;
+    }
+
     // Create new AbortController for this request
     const abortController = new AbortController();
     abortControllerRef.current = abortController;
@@ -123,14 +149,24 @@ const RedacaoPage = () => {
 
         // Only update state if request wasn't aborted
         if (!abortController.signal.aborted) {
-          const transformedArticles = transformArticles(response?.items);
+          const transformedArticles = transformArticles(response?.items || []);
           const uniqueArticles = deduplicateByTitle(transformedArticles);
+
           setArticles(uniqueArticles);
 
-          // Update pagination info from response
-          const total = response?.total || uniqueArticles.length;
+          // Update pagination info from response - use nullish coalescing to handle 0 correctly
+          const total = response?.total ?? uniqueArticles.length;
           setTotalItems(total);
           setTotalPages(Math.ceil(total / ITEMS_PER_PAGE) || 1);
+
+          // Save to cache (use ref to avoid dependency issues)
+          setCachedDataRef.current(filters, effectivePage, {
+            articles: uniqueArticles,
+            totalItems: total,
+            totalPages: Math.ceil(total / ITEMS_PER_PAGE) || 1
+          });
+
+          setIsInitialized(true);
         }
       } catch (err) {
         // Ignore AbortError - this is expected when request is cancelled
@@ -153,6 +189,8 @@ const RedacaoPage = () => {
     return () => {
       abortController.abort();
     };
+    // Note: getCachedData and setCachedData are accessed via refs to avoid
+    // triggering re-fetches when cache state changes
   }, [filters.searchQuery, filters.tag, filters.category, filters.source, currentPage]);
 
   // Retry fetch after error
@@ -177,13 +215,22 @@ const RedacaoPage = () => {
       const total = response?.total || uniqueArticles.length;
       setTotalItems(total);
       setTotalPages(Math.ceil(total / ITEMS_PER_PAGE) || 1);
+
+      // Save to cache
+      setCachedData(filters, currentPage, {
+        articles: uniqueArticles,
+        totalItems: total,
+        totalPages: Math.ceil(total / ITEMS_PER_PAGE) || 1
+      });
+
+      setIsInitialized(true);
     } catch (err) {
       console.error('Error fetching articles:', err);
       setError(err.message || 'Erro ao carregar matérias');
     } finally {
       setIsLoading(false);
     }
-  }, [filters, currentPage]);
+  }, [filters, currentPage, setCachedData]);
 
   const handleSelectArticle = useCallback((article) => {
     addArticle(article);
@@ -213,6 +260,17 @@ const RedacaoPage = () => {
     return articles;
   }, [articles]);
 
+  // Auto-trigger onboarding tour for first-time users
+  useEffect(() => {
+    if (shouldShowTour(TOUR_IDS.HOME) && !isLoading && articles.length > 0) {
+      // Delay to ensure page is fully loaded
+      const timeoutId = setTimeout(() => {
+        startTour(TOUR_IDS.HOME);
+      }, 800);
+      return () => clearTimeout(timeoutId);
+    }
+  }, [shouldShowTour, startTour, isLoading, articles.length]);
+
   return (
     <div className="min-h-screen pt-16 bg-off-white">
       {/* Mobile Toggle Buttons */}
@@ -241,7 +299,7 @@ const RedacaoPage = () => {
 
       <div className="flex">
         {/* Left Sidebar - Trends (Desktop sticky, Mobile slideover) */}
-        <div className="hidden lg:block w-72 sticky top-16 h-[calc(100vh-4rem)]">
+        <div className="hidden lg:block w-72 sticky top-16 h-[calc(100vh-4rem)]" data-tour="trends-sidebar">
           <TrendsSidebar isOpen={true} onClose={() => {}} />
         </div>
 
@@ -255,9 +313,11 @@ const RedacaoPage = () => {
 
         {/* Main Content - Articles Grid */}
         <div className="flex-1 p-4 md:p-6 mt-16 lg:mt-0">
-          <FilterBar />
+          <div data-tour="filter-bar">
+            <FilterBar />
+          </div>
 
-          {isLoading ? (
+          {isLoading && !isInitialized ? (
             <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-2 gap-4">
               {[...Array(6)].map((_, i) => (
                 <div key={i} className="bg-white rounded-xl border border-light-gray p-4 space-y-3">
@@ -271,6 +331,27 @@ const RedacaoPage = () => {
                   </div>
                 </div>
               ))}
+            </div>
+          ) : isLoading && isInitialized ? (
+            /* Loading overlay when changing pages/filters */
+            <div className="relative">
+              <div className="absolute inset-0 bg-white/70 backdrop-blur-sm z-10 flex items-center justify-center min-h-[400px] rounded-xl">
+                <div className="flex flex-col items-center gap-3">
+                  <Loader2 className="w-8 h-8 text-tmc-orange animate-spin" />
+                  <span className="text-sm text-medium-gray font-medium">Carregando matérias...</span>
+                </div>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-2 gap-4 opacity-30 pointer-events-none">
+                {filteredArticles.map((article) => (
+                  <div key={article.id}>
+                    <ArticleCard
+                      article={article}
+                      isSelected={isArticleSelected(article.id)}
+                      onSelect={handleSelectArticle}
+                    />
+                  </div>
+                ))}
+              </div>
             </div>
           ) : error ? (
             <div className="flex flex-col items-center justify-center py-16">
@@ -294,13 +375,14 @@ const RedacaoPage = () => {
           ) : (
             <>
               <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-2 gap-4">
-                {filteredArticles.map((article) => (
-                  <ArticleCard
-                    key={article.id}
-                    article={article}
-                    isSelected={isArticleSelected(article.id)}
-                    onSelect={handleSelectArticle}
-                  />
+                {filteredArticles.map((article, index) => (
+                  <div key={article.id} data-tour={index === 0 ? "article-card" : undefined}>
+                    <ArticleCard
+                      article={article}
+                      isSelected={isArticleSelected(article.id)}
+                      onSelect={handleSelectArticle}
+                    />
+                  </div>
                 ))}
               </div>
 

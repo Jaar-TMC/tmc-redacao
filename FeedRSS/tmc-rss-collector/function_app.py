@@ -115,6 +115,24 @@ async def get_trending_tags(req: func.HttpRequest) -> func.HttpResponse:
     return await get_trending_tags_handler(req)
 
 
+@app.route(route="tags", methods=["GET"])
+async def get_all_tags(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    GET /api/tags - Retorna TODAS as tags com contagem de artigos.
+
+    Query params:
+        search: str - Filtrar tags por nome (opcional)
+
+    Returns:
+        {
+            "items": [{"id": 1, "theme": "Tag Name", "tag": "tag-name", "count": 15}, ...],
+            "total": 150
+        }
+    """
+    from functions.articles_api import get_all_tags_handler
+    return await get_all_tags_handler(req)
+
+
 # ========================================
 # HTTP TRIGGERS - SOURCES API
 # ========================================

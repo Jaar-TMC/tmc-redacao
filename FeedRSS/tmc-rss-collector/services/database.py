@@ -243,7 +243,7 @@ class DatabaseService:
             page: Pagina atual (1-based)
             limit: Itens por pagina (max 100)
             category: Filtrar por categoria
-            source_id: Filtrar por fonte
+            source_id: Filtrar por fonte (nome da fonte, não UUID)
             period: 'today', 'week', 'month'
             search: Busca em titulo/conteudo
             tag: Filtrar por tag exata (match no array JSON de tags)
@@ -263,7 +263,8 @@ class DatabaseService:
             params.append(category)
 
         if source_id:
-            conditions.append("a.source_id = %s")
+            # Filter by source name (not UUID) - matches frontend filter behavior
+            conditions.append("s.name = %s")
             params.append(source_id)
 
         if period:
@@ -279,25 +280,27 @@ class DatabaseService:
             # Use COLLATE to make search accent-insensitive (AI) and case-insensitive (CI)
             # Also search with dashes replaced by spaces to match "sao-paulo" with "São Paulo"
             search_with_spaces = search.replace('-', ' ')
+            search_param = f"%{search}%"
+
+            logger.info(f"[get_articles] Building search condition for: '{search}' -> param: '{search_param}'")
+
             if search_with_spaces != search:
                 # If there were dashes, search for both formats
-                conditions.append("""(
-                    a.title COLLATE Latin1_General_CI_AI LIKE %s COLLATE Latin1_General_CI_AI
-                    OR a.title COLLATE Latin1_General_CI_AI LIKE %s COLLATE Latin1_General_CI_AI
-                    OR a.content COLLATE Latin1_General_CI_AI LIKE %s COLLATE Latin1_General_CI_AI
-                    OR a.content COLLATE Latin1_General_CI_AI LIKE %s COLLATE Latin1_General_CI_AI
-                    OR a.tags COLLATE Latin1_General_CI_AI LIKE %s COLLATE Latin1_General_CI_AI
-                )""")
-                search_param = f"%{search}%"
                 search_param_spaces = f"%{search_with_spaces}%"
+                conditions.append("""(
+                    a.title LIKE %s
+                    OR a.title LIKE %s
+                    OR a.content LIKE %s
+                    OR a.content LIKE %s
+                    OR a.tags LIKE %s
+                )""")
                 params.extend([search_param, search_param_spaces, search_param, search_param_spaces, search_param])
             else:
                 conditions.append("""(
-                    a.title COLLATE Latin1_General_CI_AI LIKE %s COLLATE Latin1_General_CI_AI
-                    OR a.content COLLATE Latin1_General_CI_AI LIKE %s COLLATE Latin1_General_CI_AI
-                    OR a.tags COLLATE Latin1_General_CI_AI LIKE %s COLLATE Latin1_General_CI_AI
+                    a.title LIKE %s
+                    OR a.content LIKE %s
+                    OR a.tags LIKE %s
                 )""")
-                search_param = f"%{search}%"
                 params.extend([search_param, search_param, search_param])
 
         if tag:
@@ -326,10 +329,17 @@ class DatabaseService:
             OFFSET %s ROWS FETCH NEXT %s ROWS ONLY
         """
 
-        # Query para total
+        # Query para total (needs JOIN for source name filter)
         count_query = f"""
-            SELECT COUNT(*) FROM collected_articles a {where_clause}
+            SELECT COUNT(*) FROM collected_articles a
+            JOIN sources s ON a.source_id = s.id
+            {where_clause}
         """
+
+        # Debug logging
+        logger.info(f"[get_articles] search={search}, where_clause={where_clause}")
+        logger.info(f"[get_articles] params={params}, offset={offset}, limit={limit}")
+        logger.info(f"[get_articles] count_query={count_query}")
 
         with self.get_connection() as conn:
             cursor = conn.cursor()
@@ -338,9 +348,13 @@ class DatabaseService:
             cursor.execute(count_query, params)
             total = cursor.fetchone()[0]
 
+            logger.info(f"[get_articles] total count={total}")
+
             # Executar query principal
             cursor.execute(query, params + [offset, limit])
             rows = cursor.fetchall()
+
+            logger.info(f"[get_articles] rows fetched={len(rows)}")
 
             articles = [self._row_to_article(row) for row in rows]
 
@@ -626,6 +640,73 @@ class DatabaseService:
             rows = cursor.fetchall()
 
             return [{"tag": row[0], "count": row[1]} for row in rows]
+
+    def get_all_tags(self, search: Optional[str] = None) -> List[dict]:
+        """
+        Get ALL unique tags with article counts.
+
+        Args:
+            search: Optional search term to filter tags
+
+        Returns:
+            List of dicts: [{"tag": "tagname", "theme": "Tag Name", "count": N}, ...]
+        """
+        # Build search filter if specified
+        search_filter = ""
+        params = []
+        if search:
+            search_filter = "AND tag LIKE %s"
+            params.append(f"%{search}%")
+
+        query = f"""
+            WITH ArticleTags AS (
+                SELECT
+                    a.id as article_id,
+                    LOWER(LTRIM(RTRIM(t.value))) as tag
+                FROM collected_articles a
+                CROSS APPLY OPENJSON(a.tags) t
+            ),
+            TagCounts AS (
+                SELECT
+                    tag,
+                    COUNT(DISTINCT article_id) as article_count
+                FROM ArticleTags
+                WHERE tag IS NOT NULL
+                    AND LEN(tag) > 2
+                    -- Exclude source names (media outlets)
+                    AND tag NOT IN ('g1', 'globo', 'folha', 'uol', 'estadao', 'cnn', 'bbc',
+                                    'r7', 'terra', 'ig', 'globoesporte', 'tecmundo', 'infomoney',
+                                    'noticias', 'noticia', 'news')
+                    -- Exclude domain-like tags
+                    AND tag NOT LIKE '%%.com'
+                    AND tag NOT LIKE '%%.com.br'
+                    AND tag NOT LIKE '%%.br'
+                    AND tag NOT LIKE '%%.net'
+                    AND tag NOT LIKE '%%.org'
+                    {search_filter}
+                GROUP BY tag
+            )
+            SELECT tag, article_count
+            FROM TagCounts
+            ORDER BY article_count DESC, tag ASC
+        """
+
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(query, params if params else None)
+            rows = cursor.fetchall()
+
+            # Format theme as Title Case
+            result = []
+            for row in rows:
+                tag = row[0]
+                theme = ' '.join(word.capitalize() for word in tag.replace('-', ' ').split())
+                result.append({
+                    "tag": tag,
+                    "theme": theme,
+                    "count": row[1]
+                })
+            return result
 
     def get_collection_stats(self) -> dict:
         """Retorna estatisticas de coleta."""

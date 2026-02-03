@@ -39,6 +39,9 @@ async def list_articles_handler(req: func.HttpRequest) -> func.HttpResponse:
         search = req.params.get('search')
         tag = req.params.get('tag')
 
+        # Debug logging
+        logger.info(f"[list_articles] Received params: page={page}, limit={limit}, category={category}, source={source}, search='{search}', tag={tag}")
+
         # Validar page
         if page < 1:
             page = 1
@@ -217,6 +220,47 @@ async def get_trending_tags_handler(req: func.HttpRequest) -> func.HttpResponse:
         )
     except Exception as e:
         logger.error(f"Error getting trending tags: {e}")
+        return func.HttpResponse(
+            json.dumps({"error": "Internal server error"}),
+            status_code=500,
+            mimetype="application/json"
+        )
+
+
+async def get_all_tags_handler(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    GET /api/tags
+
+    Returns ALL unique tags with article counts, ordered by popularity.
+    Use for tag filter dropdown.
+
+    Query Parameters:
+        search: str - Optional search term to filter tags
+    """
+    try:
+        search = req.params.get('search')
+
+        db = get_db()
+        tags = db.get_all_tags(search=search)
+
+        # Format response
+        items = []
+        for i, tag_data in enumerate(tags):
+            items.append({
+                "id": i + 1,
+                "theme": tag_data['theme'],
+                "tag": tag_data['tag'],
+                "count": tag_data['count']
+            })
+
+        return func.HttpResponse(
+            json.dumps({"items": items, "total": len(items)}),
+            status_code=200,
+            mimetype="application/json"
+        )
+
+    except Exception as e:
+        logger.error(f"Error getting all tags: {e}")
         return func.HttpResponse(
             json.dumps({"error": "Internal server error"}),
             status_code=500,

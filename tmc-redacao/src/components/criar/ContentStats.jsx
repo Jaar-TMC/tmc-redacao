@@ -11,7 +11,7 @@ const ContentStats = ({
   totalCount,
   wordCount,
   sourceCount,
-  variant = 'default' // 'default' | 'video' | 'tema' | 'feed' | 'link'
+  variant = 'default' // 'default' | 'video' | 'tema' | 'feed' | 'link' | 'zero'
 }) => {
   // Gerar texto de acordo com a variante
   const getStatsText = () => {
@@ -45,6 +45,12 @@ const ContentStats = ({
           <>
             <strong className="text-dark-gray">{selectedCount}</strong> de{' '}
             <strong className="text-dark-gray">{totalCount}</strong> tópicos selecionados
+          </>
+        );
+      case 'zero':
+        return (
+          <>
+            Texto-base inserido
           </>
         );
       default:
@@ -89,7 +95,7 @@ ContentStats.propTypes = {
   totalCount: PropTypes.number.isRequired,
   wordCount: PropTypes.number.isRequired,
   sourceCount: PropTypes.number,
-  variant: PropTypes.oneOf(['default', 'video', 'tema', 'feed', 'link'])
+  variant: PropTypes.oneOf(['default', 'video', 'tema', 'feed', 'link', 'zero'])
 };
 
 export default ContentStats;

@@ -1,8 +1,9 @@
 import { useState, useEffect, useRef } from 'react';
-import { Bell, Settings, User, PenLine, Menu, X, HelpCircle, ChevronDown, FileText, Youtube } from 'lucide-react';
-import { Link, useLocation } from 'react-router-dom';
+import { Settings, User, PenLine, Menu, X, HelpCircle, ChevronDown, FileText, Youtube } from 'lucide-react';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import LogoTMC from '../../assets/logo-tmc.svg?react';
 import { useWordPress } from '../../context';
+import { useOnboarding, TOUR_IDS } from '../onboarding';
 
 /**
  * Header Component
@@ -15,10 +16,14 @@ import { useWordPress } from '../../context';
  */
 const Header = () => {
   const location = useLocation();
+  const navigate = useNavigate();
   const { user, isWordPress } = useWordPress();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [createMenuOpen, setCreateMenuOpen] = useState(false);
+  const [helpMenuOpen, setHelpMenuOpen] = useState(false);
   const createMenuRef = useRef(null);
+  const helpMenuRef = useRef(null);
+  const { resetTour, startTour, resetAllTours } = useOnboarding();
 
   // Get user display name and role
   const displayName = user?.displayName || 'Usuário';
@@ -43,24 +48,62 @@ const Header = () => {
       if (e.key === 'Escape') {
         if (mobileMenuOpen) setMobileMenuOpen(false);
         if (createMenuOpen) setCreateMenuOpen(false);
+        if (helpMenuOpen) setHelpMenuOpen(false);
       }
     };
 
     document.addEventListener('keydown', handleEscapeKey);
     return () => document.removeEventListener('keydown', handleEscapeKey);
-  }, [mobileMenuOpen, createMenuOpen]);
+  }, [mobileMenuOpen, createMenuOpen, helpMenuOpen]);
 
-  // Handle click outside to close create menu
+  // Handle click outside to close menus
   useEffect(() => {
     const handleClickOutside = (e) => {
       if (createMenuRef.current && !createMenuRef.current.contains(e.target)) {
         setCreateMenuOpen(false);
+      }
+      if (helpMenuRef.current && !helpMenuRef.current.contains(e.target)) {
+        setHelpMenuOpen(false);
       }
     };
 
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
+
+  // Map tour IDs to their corresponding routes
+  const tourRoutes = {
+    [TOUR_IDS.HOME]: '/',
+    [TOUR_IDS.CRIAR]: '/criar',
+    [TOUR_IDS.EDITOR]: '/criar/editor'
+  };
+
+  // Handle starting a tour from help menu
+  const handleStartTour = (tourId) => {
+    setHelpMenuOpen(false);
+    resetTour(tourId);
+
+    const targetRoute = tourRoutes[tourId];
+    const isOnTargetPage = location.pathname === targetRoute;
+
+    if (isOnTargetPage) {
+      // Already on the correct page, just start the tour
+      setTimeout(() => startTour(tourId), 100);
+    } else {
+      // Navigate to the correct page first, then start the tour
+      navigate(targetRoute);
+      // Longer delay to allow page to load
+      setTimeout(() => startTour(tourId), 800);
+    }
+  };
+
+  // Get current page tour ID
+  const getCurrentTourId = () => {
+    if (location.pathname === '/') return TOUR_IDS.HOME;
+    if (location.pathname === '/criar') return TOUR_IDS.CRIAR;
+    if (location.pathname === '/criar/editor') return TOUR_IDS.EDITOR;
+    return null;
+  };
 
   // In WordPress, use sticky positioning instead of fixed to work with admin layout
   const headerClasses = isWordPress
@@ -98,7 +141,7 @@ const Header = () => {
         {/* Right: Actions + User */}
         <div className="flex items-center gap-2 md:gap-4">
           {/* Create Dropdown - Hidden on small mobile */}
-          <div className="relative hidden sm:block" ref={createMenuRef}>
+          <div className="relative hidden sm:block" ref={createMenuRef} data-tour="create-button">
             <button
               type="button"
               onClick={() => setCreateMenuOpen(!createMenuOpen)}
@@ -138,25 +181,82 @@ const Header = () => {
             )}
           </div>
 
-          {/* Help Link - Consistent location */}
-          <a
-            href="#ajuda"
-            className="hidden md:flex items-center justify-center p-2 hover:bg-tmc-light-green/50 rounded-lg transition-colors min-h-[44px] min-w-[44px]"
-            aria-label="Central de ajuda"
-            title="Ajuda"
-          >
-            <HelpCircle size={20} aria-hidden="true" />
-          </a>
+          {/* Help Menu - Tour Controls */}
+          <div className="relative hidden md:block" ref={helpMenuRef}>
+            <button
+              type="button"
+              onClick={() => setHelpMenuOpen(!helpMenuOpen)}
+              className="flex items-center justify-center p-2 hover:bg-tmc-light-green/50 rounded-lg transition-colors min-h-[44px] min-w-[44px]"
+              aria-label="Menu de ajuda"
+              aria-expanded={helpMenuOpen}
+              aria-haspopup="true"
+              title="Ajuda"
+            >
+              <HelpCircle size={20} aria-hidden="true" />
+            </button>
 
-          {/* Notifications - Hidden on mobile */}
-          <button
-            type="button"
-            className="hidden md:flex items-center justify-center p-2 hover:bg-tmc-light-green/50 rounded-lg transition-colors relative min-h-[44px] min-w-[44px]"
-            aria-label="Notificações - 1 nova notificação"
-          >
-            <Bell size={20} aria-hidden="true" />
-            <span className="absolute top-1 right-1 w-2 h-2 bg-live-red rounded-full" aria-hidden="true"></span>
-          </button>
+            {/* Help Dropdown Menu */}
+            {helpMenuOpen && (
+              <div className="absolute right-0 mt-2 w-56 bg-white rounded-xl shadow-xl border border-gray-100 py-2 z-50">
+                <div className="px-4 py-2 border-b border-gray-100">
+                  <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Tours Guiados</p>
+                </div>
+
+                {getCurrentTourId() && (
+                  <button
+                    onClick={() => handleStartTour(getCurrentTourId())}
+                    className="w-full flex items-start gap-3 px-4 py-3 hover:bg-gray-50 transition-colors text-left"
+                  >
+                    <div className="w-8 h-8 rounded-lg bg-tmc-orange/10 flex items-center justify-center flex-shrink-0 mt-0.5">
+                      <HelpCircle size={16} className="text-tmc-orange" aria-hidden="true" />
+                    </div>
+                    <div>
+                      <span className="block text-sm font-medium text-gray-900">Tour desta página</span>
+                      <span className="block text-xs text-gray-500">Aprenda a usar esta tela</span>
+                    </div>
+                  </button>
+                )}
+
+                <button
+                  onClick={() => handleStartTour(TOUR_IDS.HOME)}
+                  className="w-full flex items-start gap-3 px-4 py-3 hover:bg-gray-50 transition-colors text-left"
+                >
+                  <div className="w-8 h-8 rounded-lg bg-blue-100 flex items-center justify-center flex-shrink-0 mt-0.5">
+                    <FileText size={16} className="text-blue-600" aria-hidden="true" />
+                  </div>
+                  <div>
+                    <span className="block text-sm font-medium text-gray-900">Tour da Redação</span>
+                    <span className="block text-xs text-gray-500">Conheça a tela principal</span>
+                  </div>
+                </button>
+
+                <button
+                  onClick={() => handleStartTour(TOUR_IDS.CRIAR)}
+                  className="w-full flex items-start gap-3 px-4 py-3 hover:bg-gray-50 transition-colors text-left"
+                >
+                  <div className="w-8 h-8 rounded-lg bg-green-100 flex items-center justify-center flex-shrink-0 mt-0.5">
+                    <PenLine size={16} className="text-green-600" aria-hidden="true" />
+                  </div>
+                  <div>
+                    <span className="block text-sm font-medium text-gray-900">Tour de Criação</span>
+                    <span className="block text-xs text-gray-500">Como criar matérias</span>
+                  </div>
+                </button>
+
+                <div className="border-t border-gray-100 mt-2 pt-2">
+                  <button
+                    onClick={() => {
+                      resetAllTours();
+                      setHelpMenuOpen(false);
+                    }}
+                    className="w-full px-4 py-2 text-left text-sm text-gray-500 hover:text-gray-700 hover:bg-gray-50 transition-colors"
+                  >
+                    Reiniciar todos os tours
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
 
           {/* Settings - Hidden on mobile */}
           <button

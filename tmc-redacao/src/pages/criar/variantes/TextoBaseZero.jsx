@@ -84,14 +84,14 @@ const TextoBaseZero = ({
         {/* Header com acoes */}
         <div className="p-4 border-b border-light-gray flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <FileText size={20} className="text-purple-600" />
+            <FileText size={20} className="text-tmc-orange" />
             <h3 className="font-semibold text-dark-gray">Texto-Base</h3>
           </div>
 
           <div className="flex items-center gap-2">
             <button
               onClick={handlePaste}
-              className="flex items-center gap-2 px-3 py-1.5 text-sm border border-light-gray rounded-lg text-medium-gray hover:text-purple-600 hover:border-purple-300 transition-colors"
+              className="flex items-center gap-2 px-3 py-1.5 text-sm border border-light-gray rounded-lg text-medium-gray hover:text-tmc-orange hover:border-tmc-orange transition-colors"
             >
               <Clipboard size={16} />
               Colar
@@ -121,7 +121,7 @@ Pode ser:
 • Qualquer texto que você queira transformar em matéria
 
 Dica: Quanto mais detalhado o texto-base, melhor será o resultado da geração com IA."
-            className="w-full h-96 p-4 border border-light-gray rounded-lg resize-none text-sm text-dark-gray leading-relaxed focus:outline-none focus:ring-2 focus:ring-purple-500/50 focus:border-purple-500 placeholder:text-medium-gray/60"
+            className="w-full h-96 p-4 border border-light-gray rounded-lg resize-none text-sm text-dark-gray leading-relaxed focus:outline-none focus:ring-2 focus:ring-tmc-orange/50 focus:border-tmc-orange placeholder:text-medium-gray/60"
           />
 
           {/* Info */}
@@ -145,8 +145,8 @@ Dica: Quanto mais detalhado o texto-base, melhor será o resultado da geração 
 
       {/* Dica */}
       {!textoBase && (
-        <div className="bg-purple-50 border border-purple-200 rounded-lg p-4">
-          <p className="text-sm text-purple-800">
+        <div className="bg-orange-50 border border-orange-100 rounded-lg p-4">
+          <p className="text-sm text-dark-gray">
             <strong>Dica:</strong> Você pode colar qualquer texto aqui - artigos,
             comunicados, notas de imprensa, ou até mesmo rascunhos.
             A IA usará esse conteúdo como base para gerar sua matéria.

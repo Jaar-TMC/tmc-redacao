@@ -1,6 +1,6 @@
-import { Search, ChevronDown, Building2, Tag } from 'lucide-react';
+import { Search, ChevronDown, Building2, Tag, Hash } from 'lucide-react';
 import { useState, useCallback, useEffect, useRef } from 'react';
-import { getSources, getCategories } from '../../services/api';
+import { getSources, getCategories, getAllTags } from '../../services/api';
 import { transformSources, transformCategories } from '../../utils/transformers';
 import { useFilters } from '../../context';
 
@@ -18,24 +18,46 @@ const FilterBar = () => {
   const [searchTerm, setSearchTerm] = useState(filters.searchQuery || '');
   const [openDropdown, setOpenDropdown] = useState(null);
 
+  // Search terms for dropdowns
+  const [categorySearch, setCategorySearch] = useState('');
+  const [sourceSearch, setSourceSearch] = useState('');
+  const [tagSearch, setTagSearch] = useState('');
+
   // Refs to prevent race conditions between user typing and external updates
   const isUserTypingRef = useRef(false);
   const debounceTimerRef = useRef(null);
+  const categorySearchRef = useRef(null);
+  const sourceSearchRef = useRef(null);
+  const tagSearchRef = useRef(null);
 
   // API State for filters
   const [categories, setCategories] = useState([]);
   const [sources, setSources] = useState([]);
+  const [tags, setTags] = useState([]);
 
   // Fetch filter data from API on mount
   useEffect(() => {
     const fetchFilters = async () => {
+      // Fetch each filter independently to avoid one failure breaking all
       try {
-        const [catRes, srcRes] = await Promise.all([getCategories(), getSources()]);
+        const catRes = await getCategories();
         setCategories(transformCategories(catRes?.categories));
-        // API returns 'items' not 'sources'
+      } catch (err) {
+        console.error('Error fetching categories:', err);
+      }
+
+      try {
+        const srcRes = await getSources();
         setSources(transformSources(srcRes?.items || srcRes?.sources));
       } catch (err) {
-        console.error('Error fetching filters:', err);
+        console.error('Error fetching sources:', err);
+      }
+
+      try {
+        const tagsRes = await getAllTags();
+        setTags(tagsRes?.items || []);
+      } catch (err) {
+        console.error('Error fetching tags:', err);
       }
     };
     fetchFilters();
@@ -77,7 +99,28 @@ const FilterBar = () => {
   }, [updateFilter]);
 
   const handleFilterClick = useCallback((type) => {
-    setOpenDropdown(prev => prev === type ? null : type);
+    setOpenDropdown(prev => {
+      if (prev === type) {
+        // Closing dropdown - clear search
+        if (type === 'category') setCategorySearch('');
+        if (type === 'source') setSourceSearch('');
+        if (type === 'tag') setTagSearch('');
+        return null;
+      }
+      // Opening dropdown - focus search after render
+      setTimeout(() => {
+        if (type === 'category' && categorySearchRef.current) {
+          categorySearchRef.current.focus();
+        }
+        if (type === 'source' && sourceSearchRef.current) {
+          sourceSearchRef.current.focus();
+        }
+        if (type === 'tag' && tagSearchRef.current) {
+          tagSearchRef.current.focus();
+        }
+      }, 0);
+      return type;
+    });
   }, []);
 
   const handleSelectFilter = useCallback((type, value) => {
@@ -87,6 +130,9 @@ const FilterBar = () => {
 
   const handleCloseDropdown = useCallback(() => {
     setOpenDropdown(null);
+    setCategorySearch('');
+    setSourceSearch('');
+    setTagSearch('');
   }, []);
 
   // Handle Escape key to close dropdowns (WCAG 2.1.2 - No Keyboard Trap)
@@ -100,6 +146,22 @@ const FilterBar = () => {
     document.addEventListener('keydown', handleEscapeKey);
     return () => document.removeEventListener('keydown', handleEscapeKey);
   }, [openDropdown, handleCloseDropdown]);
+
+  // Filtered categories based on search term
+  const filteredCategories = categories.filter(cat =>
+    cat.name.toLowerCase().includes(categorySearch.toLowerCase())
+  );
+
+  // Filtered sources based on search term
+  const filteredSources = sources.filter(s =>
+    s.active && s.name.toLowerCase().includes(sourceSearch.toLowerCase())
+  );
+
+  // Filtered tags based on search term
+  const filteredTags = tags.filter(t =>
+    t.theme.toLowerCase().includes(tagSearch.toLowerCase()) ||
+    t.tag.toLowerCase().includes(tagSearch.toLowerCase())
+  );
 
   return (
     <div className={`bg-white rounded-xl border border-light-gray p-4 mb-6 ${!searchTerm ? 'lg:pb-8' : ''}`} role="search" aria-label="Filtros de matérias">
@@ -125,7 +187,7 @@ const FilterBar = () => {
         </div>
 
         {/* Filter Buttons */}
-        <div className="flex items-center gap-4" role="group" aria-label="Filtros de categoria e origem">
+        <div className="flex items-center gap-2 md:gap-4" role="group" aria-label="Filtros de categoria, tag e origem">
           {/* Category Filter */}
           <div className="relative">
             <button
@@ -147,30 +209,128 @@ const FilterBar = () => {
 
             {openDropdown === 'category' && (
               <div className="absolute top-full left-0 mt-2 w-56 bg-white rounded-lg border border-light-gray py-2 z-20" role="listbox" aria-label="Temas disponíveis">
-                <button
-                  type="button"
-                  onClick={() => handleSelectFilter('category', null)}
-                  className="w-full px-4 py-2 text-left text-sm hover:bg-off-white text-medium-gray"
-                  role="option"
-                  aria-selected={!filters.category}
-                >
-                  Todos os temas
-                </button>
-                {categories.map((cat) => (
-                  <button
-                    type="button"
-                    key={cat.id}
-                    onClick={() => handleSelectFilter('category', cat.name)}
-                    className="w-full px-4 py-2 text-left text-sm hover:bg-off-white flex items-center justify-between"
-                    role="option"
-                    aria-selected={filters.category === cat.name}
-                  >
-                    <span>{cat.name}</span>
-                    <span className="text-xs text-medium-gray bg-off-white px-2 py-0.5 rounded" aria-label={`${cat.count} matérias`}>
-                      {cat.count}
-                    </span>
-                  </button>
-                ))}
+                {/* Search input */}
+                <div className="px-2 pb-2 border-b border-light-gray mb-2">
+                  <input
+                    ref={categorySearchRef}
+                    type="text"
+                    placeholder="Pesquisar tema..."
+                    value={categorySearch}
+                    onChange={(e) => setCategorySearch(e.target.value)}
+                    onClick={(e) => e.stopPropagation()}
+                    className="w-full px-3 py-2 text-sm border border-light-gray rounded-lg focus:outline-none focus:ring-2 focus:ring-tmc-orange/50 focus:border-tmc-orange"
+                    aria-label="Pesquisar temas"
+                  />
+                </div>
+                <div className="max-h-64 overflow-y-auto">
+                  {!categorySearch && (
+                    <button
+                      type="button"
+                      onClick={() => handleSelectFilter('category', null)}
+                      className="w-full px-4 py-2 text-left text-sm hover:bg-off-white text-medium-gray"
+                      role="option"
+                      aria-selected={!filters.category}
+                    >
+                      Todos os temas
+                    </button>
+                  )}
+                  {filteredCategories.length === 0 ? (
+                    <div className="px-4 py-3 text-sm text-medium-gray text-center">
+                      Nenhum tema encontrado
+                    </div>
+                  ) : (
+                    filteredCategories.map((cat) => (
+                      <button
+                        type="button"
+                        key={cat.id}
+                        onClick={() => handleSelectFilter('category', cat.name)}
+                        className="w-full px-4 py-2 text-left text-sm hover:bg-off-white flex items-center justify-between"
+                        role="option"
+                        aria-selected={filters.category === cat.name}
+                      >
+                        <span>{cat.name}</span>
+                        <span className="text-xs text-medium-gray bg-off-white px-2 py-0.5 rounded" aria-label={`${cat.count} matérias`}>
+                          {cat.count}
+                        </span>
+                      </button>
+                    ))
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Tag Filter */}
+          <div className="relative">
+            <button
+              type="button"
+              onClick={() => handleFilterClick('tag')}
+              aria-expanded={openDropdown === 'tag'}
+              aria-haspopup="listbox"
+              aria-label={`Filtrar por tag: ${filters.tag || 'Todas as tags'}`}
+              className={`flex items-center gap-2 px-4 py-2.5 rounded-lg font-medium transition-colors ${
+                filters.tag
+                  ? 'bg-tmc-orange text-white'
+                  : 'text-dark-gray border border-light-gray hover:bg-light-gray'
+              }`}
+            >
+              <Hash style={{ width: '18px', height: '18px' }} aria-hidden="true" />
+              <span className="hidden sm:inline">{filters.tag || 'Tag'}</span>
+              <ChevronDown style={{ width: '14px', height: '14px' }} aria-hidden="true" />
+            </button>
+
+            {openDropdown === 'tag' && (
+              <div className="absolute top-full right-0 sm:left-0 sm:right-auto mt-2 w-64 bg-white rounded-lg border border-light-gray py-2 z-20" role="listbox" aria-label="Tags disponíveis">
+                {/* Search input */}
+                <div className="px-2 pb-2 border-b border-light-gray mb-2">
+                  <input
+                    ref={tagSearchRef}
+                    type="text"
+                    placeholder="Pesquisar tag..."
+                    value={tagSearch}
+                    onChange={(e) => setTagSearch(e.target.value)}
+                    onClick={(e) => e.stopPropagation()}
+                    className="w-full px-3 py-2 text-sm border border-light-gray rounded-lg focus:outline-none focus:ring-2 focus:ring-tmc-orange/50 focus:border-tmc-orange"
+                    aria-label="Pesquisar tags"
+                  />
+                </div>
+                <div className="max-h-64 overflow-y-auto">
+                  {!tagSearch && (
+                    <button
+                      type="button"
+                      onClick={() => handleSelectFilter('tag', null)}
+                      className="w-full px-4 py-2 text-left text-sm hover:bg-off-white text-medium-gray"
+                      role="option"
+                      aria-selected={!filters.tag}
+                    >
+                      Todas as tags
+                    </button>
+                  )}
+                  {filteredTags.length === 0 ? (
+                    <div className="px-4 py-3 text-sm text-medium-gray text-center">
+                      Nenhuma tag encontrada
+                    </div>
+                  ) : (
+                    filteredTags.map((tagItem) => (
+                      <button
+                        type="button"
+                        key={tagItem.id}
+                        onClick={() => handleSelectFilter('tag', tagItem.tag)}
+                        className="w-full px-4 py-2 text-left text-sm hover:bg-off-white flex items-center justify-between"
+                        role="option"
+                        aria-selected={filters.tag === tagItem.tag}
+                      >
+                        <span className="flex items-center gap-2">
+                          <Hash style={{ width: '14px', height: '14px' }} className="text-medium-gray" />
+                          {tagItem.theme}
+                        </span>
+                        <span className="text-xs text-medium-gray bg-off-white px-2 py-0.5 rounded" aria-label={`${tagItem.count} matérias`}>
+                          {tagItem.count}
+                        </span>
+                      </button>
+                    ))
+                  )}
+                </div>
               </div>
             )}
           </div>
@@ -196,28 +356,51 @@ const FilterBar = () => {
 
             {openDropdown === 'source' && (
               <div className="absolute top-full left-0 mt-2 w-56 bg-white rounded-lg border border-light-gray py-2 z-20" role="listbox" aria-label="Origens disponíveis">
-                <button
-                  type="button"
-                  onClick={() => handleSelectFilter('source', null)}
-                  className="w-full px-4 py-2 text-left text-sm hover:bg-off-white text-medium-gray"
-                  role="option"
-                  aria-selected={!filters.source}
-                >
-                  Todas as origens
-                </button>
-                {sources.filter(s => s.active).map((source) => (
-                  <button
-                    type="button"
-                    key={source.id}
-                    onClick={() => handleSelectFilter('source', source.name)}
-                    className="w-full px-4 py-2 text-left text-sm hover:bg-off-white flex items-center gap-2"
-                    role="option"
-                    aria-selected={filters.source === source.name}
-                  >
-                    <img src={source.favicon} alt="" className="w-4 h-4 rounded" aria-hidden="true" />
-                    <span>{source.name}</span>
-                  </button>
-                ))}
+                {/* Search input */}
+                <div className="px-2 pb-2 border-b border-light-gray mb-2">
+                  <input
+                    ref={sourceSearchRef}
+                    type="text"
+                    placeholder="Pesquisar origem..."
+                    value={sourceSearch}
+                    onChange={(e) => setSourceSearch(e.target.value)}
+                    onClick={(e) => e.stopPropagation()}
+                    className="w-full px-3 py-2 text-sm border border-light-gray rounded-lg focus:outline-none focus:ring-2 focus:ring-tmc-orange/50 focus:border-tmc-orange"
+                    aria-label="Pesquisar origens"
+                  />
+                </div>
+                <div className="max-h-64 overflow-y-auto">
+                  {!sourceSearch && (
+                    <button
+                      type="button"
+                      onClick={() => handleSelectFilter('source', null)}
+                      className="w-full px-4 py-2 text-left text-sm hover:bg-off-white text-medium-gray"
+                      role="option"
+                      aria-selected={!filters.source}
+                    >
+                      Todas as origens
+                    </button>
+                  )}
+                  {filteredSources.length === 0 ? (
+                    <div className="px-4 py-3 text-sm text-medium-gray text-center">
+                      Nenhuma origem encontrada
+                    </div>
+                  ) : (
+                    filteredSources.map((source) => (
+                      <button
+                        type="button"
+                        key={source.id}
+                        onClick={() => handleSelectFilter('source', source.name)}
+                        className="w-full px-4 py-2 text-left text-sm hover:bg-off-white flex items-center gap-2"
+                        role="option"
+                        aria-selected={filters.source === source.name}
+                      >
+                        <img src={source.favicon} alt="" className="w-4 h-4 rounded" aria-hidden="true" />
+                        <span>{source.name}</span>
+                      </button>
+                    ))
+                  )}
+                </div>
               </div>
             )}
           </div>

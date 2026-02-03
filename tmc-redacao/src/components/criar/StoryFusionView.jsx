@@ -85,12 +85,26 @@ const StoryFusionView = ({
     }, 500);
 
     try {
-      const articlesForApi = articles.map(article => ({
-        id: String(article.id),
-        title: article.title,
-        content: article.content || article.preview || '',
-        source: article.source
-      }));
+      // Prepare articles for API - ensure we have content
+      const articlesForApi = articles.map(article => {
+        const content = article.content || article.preview || '';
+        return {
+          id: String(article.id),
+          title: article.title,
+          content: content,
+          preview: article.preview || content.substring(0, 500),
+          source: article.source
+        };
+      });
+
+      // Validate that articles have enough content
+      const invalidArticles = articlesForApi.filter(a => (a.content?.length || 0) < 50);
+      if (invalidArticles.length > 0) {
+        throw new Error(
+          `${invalidArticles.length} matéria(s) não possuem conteúdo suficiente para análise. ` +
+          `Selecione matérias com mais texto.`
+        );
+      }
 
       const result = await mergeTopics(articlesForApi);
 
@@ -127,7 +141,22 @@ const StoryFusionView = ({
     } catch (err) {
       clearInterval(progressInterval);
       console.error('Error merging topics:', err);
-      setError(err.message || 'Erro ao agrupar conteúdo. Tente novamente.');
+
+      // Parse error message for better UX
+      let errorMessage = 'Erro ao agrupar conteúdo. Tente novamente.';
+      if (err.message) {
+        if (err.message.includes('conteúdo suficiente') || err.message.includes('50 characters')) {
+          errorMessage = 'Uma ou mais matérias não possuem conteúdo suficiente. Selecione matérias com mais texto.';
+        } else if (err.message.includes('503') || err.message.includes('indisponível')) {
+          errorMessage = 'O serviço de IA está temporariamente indisponível. Tente novamente em alguns segundos.';
+        } else if (err.message.includes('timeout') || err.message.includes('Timeout')) {
+          errorMessage = 'A análise demorou muito. Tente com menos matérias ou textos menores.';
+        } else {
+          errorMessage = err.message;
+        }
+      }
+
+      setError(errorMessage);
     } finally {
       setIsLoading(false);
     }

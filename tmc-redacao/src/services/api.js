@@ -239,6 +239,24 @@ export async function getTrendingTags(params = {}) {
   return fetchApi(endpoint);
 }
 
+/**
+ * Get ALL unique tags with article counts
+ * Use for tag filter dropdown
+ * @param {Object} params - Query parameters
+ * @param {string} [params.search] - Optional search term to filter tags
+ * @returns {Promise<{items: Array<{id: number, theme: string, tag: string, count: number}>, total: number}>}
+ */
+export async function getAllTags(params = {}) {
+  const queryParams = new URLSearchParams();
+
+  if (params.search) queryParams.append('search', params.search);
+
+  const queryString = queryParams.toString();
+  const endpoint = `/tags${queryString ? `?${queryString}` : ''}`;
+
+  return fetchApi(endpoint);
+}
+
 // ============================================
 // AI Generation API
 // ============================================

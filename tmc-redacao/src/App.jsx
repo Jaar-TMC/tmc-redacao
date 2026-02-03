@@ -4,6 +4,8 @@ import Header from './components/layout/Header';
 import ErrorBoundary from './components/ui/ErrorBoundary';
 import Spinner from './components/ui/Spinner';
 import { ArticlesProvider, FiltersProvider, UIProvider, CriarProvider, WordPressProvider } from './context';
+import { ArticlesCacheProvider } from './context/ArticlesCacheContext';
+import { OnboardingProvider, OnboardingTour } from './components/onboarding';
 import PropTypes from 'prop-types';
 
 // Use HashRouter in WordPress (detected via window.tmcRedacaoConfig)
@@ -105,10 +107,13 @@ function App() {
         <Router>
           <ArticlesProvider>
             <FiltersProvider>
+              <ArticlesCacheProvider>
               <UIProvider>
                 <CriarProvider>
-                  <DocumentTitleUpdater />
-                  <div className="min-h-screen bg-off-white">
+                  <OnboardingProvider>
+                    <DocumentTitleUpdater />
+                    <OnboardingTour />
+                    <div className="min-h-screen bg-off-white">
                     {/* Skip Navigation Links - Multiple ways to navigate content */}
                     <a
                       href="#main-content"
@@ -168,8 +173,10 @@ function App() {
                       </Suspense>
                     </main>
                   </div>
+                  </OnboardingProvider>
                 </CriarProvider>
               </UIProvider>
+              </ArticlesCacheProvider>
             </FiltersProvider>
           </ArticlesProvider>
         </Router>

@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useMemo } from 'react';
 import { ExternalLink, Check } from 'lucide-react';
 import { formatRelativeTime } from '../../data/mockData';
 import PropTypes from 'prop-types';
@@ -23,13 +23,10 @@ const categoryColors = {
 };
 
 const ArticleCard = ({ article, isSelected, onSelect, selectedTags = new Set(), onTagSelect }) => {
-  const [isExpanded, setIsExpanded] = useState(false);
   const categoryColor = useMemo(
     () => categoryColors[article.category] || 'bg-gray-500',
     [article.category]
   );
-
-  const shouldShowExpand = article.preview.length > 150;
 
   const handleKeyPress = useCallback((e) => {
     if (e.key === 'Enter' || e.key === ' ') {
@@ -44,7 +41,7 @@ const ArticleCard = ({ article, isSelected, onSelect, selectedTags = new Set(), 
 
   return (
     <div
-      className={`bg-white rounded-xl border transition-all cursor-pointer group ${
+      className={`bg-white rounded-xl border transition-all cursor-pointer group h-[280px] flex flex-col ${
         isSelected
           ? 'border-tmc-orange'
           : 'border-light-gray hover:border-tmc-orange/50'
@@ -80,32 +77,21 @@ const ArticleCard = ({ article, isSelected, onSelect, selectedTags = new Set(), 
       </div>
 
       {/* Content */}
-      <div className="p-4 pt-12">
-        {/* Title */}
-        <h3 className="font-bold text-dark-gray text-base leading-snug line-clamp-2 mb-3 group-hover:text-tmc-dark-green transition-colors">
+      <div className="p-4 pt-12 flex flex-col flex-1 min-h-0">
+        {/* Title - altura fixa para 2 linhas */}
+        <h3 className="font-bold text-dark-gray text-base leading-snug line-clamp-2 mb-3 group-hover:text-tmc-dark-green transition-colors h-[2.75rem]">
           {article.title}
         </h3>
 
-        {/* Preview */}
-        <div className="mb-4">
-          <p className={`text-sm text-medium-gray ${!isExpanded && shouldShowExpand ? 'line-clamp-3' : ''}`}>
+        {/* Preview - altura fixa para 3 linhas */}
+        <div className="mb-4 flex-1">
+          <p className="text-sm text-medium-gray line-clamp-3">
             {article.preview}
           </p>
-          {shouldShowExpand && (
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                setIsExpanded(!isExpanded);
-              }}
-              className="text-xs text-tmc-orange hover:underline mt-1 font-medium"
-            >
-              {isExpanded ? 'Ver menos' : 'Ver mais'}
-            </button>
-          )}
         </div>
 
-        {/* Footer */}
-        <div className="flex items-center justify-between pt-3 border-t border-light-gray">
+        {/* Footer - sempre no bottom */}
+        <div className="flex items-center justify-between pt-3 border-t border-light-gray mt-auto">
           <div className="flex items-center gap-4">
             <img
               src={article.favicon}
@@ -134,10 +120,10 @@ const ArticleCard = ({ article, isSelected, onSelect, selectedTags = new Set(), 
           </a>
         </div>
 
-        {/* Tags - Selectable */}
+        {/* Tags - Selectable - linha única com overflow */}
         {article.tags && article.tags.length > 0 && (
-          <div className="flex flex-wrap gap-1.5 mt-3">
-            {article.tags.map((tag) => {
+          <div className="flex gap-1.5 mt-3 overflow-hidden">
+            {article.tags.slice(0, 4).map((tag) => {
               const isTagSelected = selectedTags.has(tag);
               return (
                 <button
@@ -148,7 +134,7 @@ const ArticleCard = ({ article, isSelected, onSelect, selectedTags = new Set(), 
                       onTagSelect(tag);
                     }
                   }}
-                  className={`text-xs px-2 py-1 rounded-full flex items-center gap-1 transition-all ${
+                  className={`text-xs px-2 py-1 rounded-full flex items-center gap-1 transition-all whitespace-nowrap ${
                     isTagSelected
                       ? 'bg-tmc-orange text-white'
                       : 'bg-off-white text-medium-gray hover:bg-tmc-orange/10 hover:text-tmc-orange'
@@ -161,6 +147,9 @@ const ArticleCard = ({ article, isSelected, onSelect, selectedTags = new Set(), 
                 </button>
               );
             })}
+            {article.tags.length > 4 && (
+              <span className="text-xs text-medium-gray py-1">+{article.tags.length - 4}</span>
+            )}
           </div>
         )}
       </div>

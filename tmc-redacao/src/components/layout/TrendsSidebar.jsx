@@ -2,6 +2,7 @@ import { useState, useCallback, useEffect } from 'react';
 import { TrendingUp, Twitter, RefreshCw, Pause, Play, Flame, Info, Filter, AlertCircle } from 'lucide-react';
 import { getTrendingTags } from '../../services/api';
 import { useFilters } from '../../context';
+import { useArticlesCache } from '../../context/ArticlesCacheContext';
 import Skeleton from '../ui/Skeleton';
 import EmptyState from '../ui/EmptyState';
 import PropTypes from 'prop-types';
@@ -20,7 +21,7 @@ const mockTwitterTrends = [];
  * - No Keyboard Trap (2.1.2): All interactive elements can be navigated with keyboard
  */
 const TrendsSidebar = ({ isOpen, onClose }) => {
-  const [isLoading, setIsLoading] = useState(true);
+  const [isLoading, setIsLoading] = useState(false);
   const [isPaused, setIsPaused] = useState(false);
   const [error, setError] = useState(null);
   const [googleTrends] = useState(mockGoogleTrends);
@@ -28,32 +29,47 @@ const TrendsSidebar = ({ isOpen, onClose }) => {
   const [feedThemes, setFeedThemes] = useState([]);
   const [lastUpdated, setLastUpdated] = useState(null);
   const { filters, updateFilter } = useFilters();
+  const { getCachedTrending, setCachedTrending } = useArticlesCache();
 
   // Fetch trending tags directly from backend API
   // This queries ALL articles in the database for accurate tag counts
-  const fetchThemes = useCallback(async () => {
+  const fetchThemes = useCallback(async (forceRefresh = false) => {
+    // Check cache first (unless forcing refresh)
+    if (!forceRefresh) {
+      const cached = getCachedTrending();
+      if (cached) {
+        setFeedThemes(cached.items);
+        setLastUpdated(new Date(cached.timestamp));
+        setIsLoading(false);
+        return;
+      }
+    }
+
     setIsLoading(true);
     setError(null);
     try {
       const response = await getTrendingTags({ limit: 20 });
-      setFeedThemes(response?.items || []);
+      const items = response?.items || [];
+      setFeedThemes(items);
       setLastUpdated(new Date());
+      // Save to cache
+      setCachedTrending({ items, timestamp: Date.now() });
     } catch (err) {
       console.error('Error fetching themes:', err);
       setError(err.message || 'Erro ao carregar temas');
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  }, [getCachedTrending, setCachedTrending]);
 
   // Fetch on mount
   useEffect(() => {
     fetchThemes();
-  }, [fetchThemes]);
+  }, []);
 
   const handleRefresh = useCallback(() => {
     if (!isPaused) {
-      fetchThemes();
+      fetchThemes(true); // Force refresh, bypass cache
     }
   }, [fetchThemes, isPaused]);
 

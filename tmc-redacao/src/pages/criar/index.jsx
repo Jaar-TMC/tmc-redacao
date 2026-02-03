@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ArrowLeft, HelpCircle, Video, Flame, Newspaper, PenLine } from 'lucide-react';
 import { Stepper } from '../../components/criar';
@@ -9,6 +9,7 @@ import FeedSelector from '../../components/criar/FeedSelector';
 import TipBox from '../../components/ui/TipBox';
 import { useCriar } from '../../context';
 import { FEATURES } from '../../config/featureFlags';
+import { useOnboarding, TOUR_IDS } from '../../components/onboarding';
 
 /**
  * Página de Seleção de Fonte (Etapa 1)
@@ -27,6 +28,18 @@ const CriarMateria = () => {
   const [showUrlModal, setShowUrlModal] = useState(false);
   const [urlModalType, setUrlModalType] = useState('youtube');
   const [expandedSelector, setExpandedSelector] = useState(null); // 'tema' | 'feed' | null
+  const { shouldShowTour, startTour } = useOnboarding();
+
+  // Auto-trigger onboarding tour for first-time users
+  useEffect(() => {
+    if (shouldShowTour(TOUR_IDS.CRIAR) && !expandedSelector) {
+      // Delay to ensure page is fully loaded
+      const timeoutId = setTimeout(() => {
+        startTour(TOUR_IDS.CRIAR);
+      }, 800);
+      return () => clearTimeout(timeoutId);
+    }
+  }, [shouldShowTour, startTour, expandedSelector]);
 
   const handleSourceClick = (sourceType) => {
     // Resetar estados anteriores
@@ -119,8 +132,9 @@ const CriarMateria = () => {
             </h1>
 
             <button
+              onClick={() => startTour(TOUR_IDS.CRIAR)}
               className="flex items-center gap-2 text-medium-gray hover:text-dark-gray transition-colors"
-              aria-label="Ajuda"
+              aria-label="Iniciar tour guiado desta página"
             >
               <HelpCircle size={20} />
               <span className="text-sm font-medium hidden sm:inline">Help</span>
@@ -130,7 +144,7 @@ const CriarMateria = () => {
       </header>
 
       {/* Stepper */}
-      <div className="bg-white border-b border-light-gray">
+      <div className="bg-white border-b border-light-gray" data-tour="stepper">
         <div className="max-w-7xl mx-auto px-4 md:px-6">
           <Stepper
             steps={['Fonte', 'Texto-Base', 'Configurar', 'Editor']}
@@ -170,52 +184,60 @@ const CriarMateria = () => {
             {/* Grid de Source Cards */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6 max-w-3xl mx-auto mb-8">
               {/* MVP: RSS Feed - Primary source */}
-              <SourceCard
-                icon={<Newspaper size={28} strokeWidth={1.5} />}
-                title="MATÉRIAS DO FEED"
-                description="Use matérias dos seus concorrentes"
-                selected={selectedSource === 'feed'}
-                onClick={() => handleSourceClick('feed')}
-              />
+              <div data-tour="source-feed">
+                <SourceCard
+                  icon={<Newspaper size={28} strokeWidth={1.5} />}
+                  title="MATÉRIAS DO FEED"
+                  description="Use matérias dos seus concorrentes"
+                  selected={selectedSource === 'feed'}
+                  onClick={() => handleSourceClick('feed')}
+                />
+              </div>
 
 
               {/* Post-MVP: Video Transcription */}
               {FEATURES.VIDEO_TRANSCRIPTION && (
-                <SourceCard
-                  icon={<Video size={28} strokeWidth={1.5} />}
-                  title="TRANSCRIÇÃO DE VÍDEO"
-                  description="Extraia de um vídeo do YouTube"
-                  selected={selectedSource === 'video'}
-                  onClick={() => handleSourceClick('video')}
-                />
+                <div data-tour="source-video">
+                  <SourceCard
+                    icon={<Video size={28} strokeWidth={1.5} />}
+                    title="TRANSCRIÇÃO DE VÍDEO"
+                    description="Extraia de um vídeo do YouTube"
+                    selected={selectedSource === 'video'}
+                    onClick={() => handleSourceClick('video')}
+                  />
+                </div>
               )}
 
               {/* Post-MVP: Trending Themes (requires Google Trends) */}
               {FEATURES.GOOGLE_TRENDS && (
-                <SourceCard
-                  icon={<Flame size={28} strokeWidth={1.5} />}
-                  title="TEMA EM ALTA"
-                  description="Escolha entre os assuntos do momento"
-                  selected={selectedSource === 'tema'}
-                  onClick={() => handleSourceClick('tema')}
-                />
+                <div data-tour="source-tema">
+                  <SourceCard
+                    icon={<Flame size={28} strokeWidth={1.5} />}
+                    title="TEMA EM ALTA"
+                    description="Escolha entre os assuntos do momento"
+                    selected={selectedSource === 'tema'}
+                    onClick={() => handleSourceClick('tema')}
+                  />
+                </div>
               )}
 
               {/* Criar do Zero - texto livre */}
-              <SourceCard
-                icon={<PenLine size={28} strokeWidth={1.5} />}
-                title="CRIAR DO ZERO"
-                description="Cole qualquer texto como ponto de partida"
-                selected={selectedSource === 'zero'}
-                onClick={() => handleSourceClick('zero')}
-              />
+              <div data-tour="source-zero">
+                <SourceCard
+                  icon={<PenLine size={28} strokeWidth={1.5} />}
+                  title="CRIAR DO ZERO"
+                  description="Cole qualquer texto como ponto de partida"
+                  selected={selectedSource === 'zero'}
+                  onClick={() => handleSourceClick('zero')}
+                />
+              </div>
             </div>
 
             {/* Dica */}
-            <div className="max-w-3xl mx-auto">
+            <div className="max-w-3xl mx-auto" data-tour="tip-box">
               <TipBox>
                 Não importa qual fonte escolher, você poderá adicionar
-                materiais complementares (links, PDFs, vídeos) na etapa 3
+                instruções e configurações complementares na etapa 3
               </TipBox>
 
               {/* Botão para ir direto ao editor */}
