@@ -1,14 +1,9 @@
 {
   "navigationFallback": {
     "rewrite": "/index.html",
-    "exclude": ["/assets/*", "/*.{css,js,png,jpg,svg,ico,json,txt}", "/api/*"]
+    "exclude": ["/assets/*", "/*.{css,js,png,jpg,svg,ico,json,txt}"]
   },
   "routes": [
-    {
-      "route": "/api/*",
-      "allowedRoles": ["anonymous"],
-      "rewrite": "https://tmc-redacao-api-b7h3dyaxazfvdcez.eastus2-01.azurewebsites.net/api/*"
-    },
     {
       "route": "/*",
       "serve": "/index.html",
