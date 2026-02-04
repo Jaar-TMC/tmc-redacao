@@ -8,6 +8,7 @@ Este arquivo registra todas as functions (triggers e routes) da aplicação.
 import azure.functions as func
 import logging
 import asyncio
+from functools import wraps
 
 # Configurar logging
 logging.basicConfig(
@@ -18,6 +19,63 @@ logger = logging.getLogger(__name__)
 
 # Criar app
 app = func.FunctionApp(http_auth_level=func.AuthLevel.ANONYMOUS)
+
+# ========================================
+# CORS Configuration
+# ========================================
+
+ALLOWED_ORIGINS = [
+    "http://localhost:5173",
+    "http://localhost:3000",
+    "https://purple-river-09235a310.azurestaticapps.net",
+    "https://purple-river-09235a310.3.azurestaticapps.net",
+]
+
+
+def add_cors_headers(response: func.HttpResponse, origin: str = None) -> func.HttpResponse:
+    """Add CORS headers to response."""
+    allowed_origin = origin if origin in ALLOWED_ORIGINS else ALLOWED_ORIGINS[0]
+
+    # Create new response with CORS headers
+    headers = dict(response.headers) if response.headers else {}
+    headers["Access-Control-Allow-Origin"] = allowed_origin
+    headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS"
+    headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, X-Requested-With"
+    headers["Access-Control-Allow-Credentials"] = "true"
+
+    return func.HttpResponse(
+        response.get_body(),
+        status_code=response.status_code,
+        headers=headers,
+        mimetype=response.mimetype
+    )
+
+
+def with_cors(handler):
+    """Decorator to add CORS headers to HTTP handlers."""
+    @wraps(handler)
+    async def wrapper(req: func.HttpRequest) -> func.HttpResponse:
+        origin = req.headers.get("Origin", "")
+
+        # Handle preflight OPTIONS request
+        if req.method == "OPTIONS":
+            allowed_origin = origin if origin in ALLOWED_ORIGINS else ALLOWED_ORIGINS[0]
+            return func.HttpResponse(
+                "",
+                status_code=204,
+                headers={
+                    "Access-Control-Allow-Origin": allowed_origin,
+                    "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
+                    "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Requested-With",
+                    "Access-Control-Allow-Credentials": "true",
+                }
+            )
+
+        # Call original handler and add CORS headers
+        response = await handler(req)
+        return add_cors_headers(response, origin)
+
+    return wrapper
 
 
 # ========================================
@@ -47,14 +105,16 @@ async def rss_collector(timer: func.TimerRequest) -> None:
 # HTTP TRIGGERS - HEALTH & STATS
 # ========================================
 
-@app.route(route="health", methods=["GET"])
+@app.route(route="health", methods=["GET", "OPTIONS"])
+@with_cors
 async def health(req: func.HttpRequest) -> func.HttpResponse:
     """GET /api/health - Health check do serviço."""
     from functions.health import health_check_handler
     return await health_check_handler(req)
 
 
-@app.route(route="stats", methods=["GET"])
+@app.route(route="stats", methods=["GET", "OPTIONS"])
+@with_cors
 async def stats(req: func.HttpRequest) -> func.HttpResponse:
     """GET /api/stats - Estatísticas de coleta."""
     from functions.health import stats_handler
@@ -65,7 +125,8 @@ async def stats(req: func.HttpRequest) -> func.HttpResponse:
 # HTTP TRIGGERS - ARTICLES API
 # ========================================
 
-@app.route(route="articles", methods=["GET"])
+@app.route(route="articles", methods=["GET", "OPTIONS"])
+@with_cors
 async def list_articles(req: func.HttpRequest) -> func.HttpResponse:
     """
     GET /api/articles - Lista artigos coletados.
@@ -82,21 +143,24 @@ async def list_articles(req: func.HttpRequest) -> func.HttpResponse:
     return await list_articles_handler(req)
 
 
-@app.route(route="articles/{id}", methods=["GET"])
+@app.route(route="articles/{id}", methods=["GET", "OPTIONS"])
+@with_cors
 async def get_article(req: func.HttpRequest) -> func.HttpResponse:
     """GET /api/articles/{id} - Retorna um artigo específico."""
     from functions.articles_api import get_article_handler
     return await get_article_handler(req)
 
 
-@app.route(route="categories", methods=["GET"])
+@app.route(route="categories", methods=["GET", "OPTIONS"])
+@with_cors
 async def get_categories(req: func.HttpRequest) -> func.HttpResponse:
     """GET /api/categories - Lista categorias com contagem."""
     from functions.articles_api import get_categories_handler
     return await get_categories_handler(req)
 
 
-@app.route(route="trending-tags", methods=["GET"])
+@app.route(route="trending-tags", methods=["GET", "OPTIONS"])
+@with_cors
 async def get_trending_tags(req: func.HttpRequest) -> func.HttpResponse:
     """
     GET /api/trending-tags - Retorna tags em alta com contagem de artigos.
@@ -115,7 +179,8 @@ async def get_trending_tags(req: func.HttpRequest) -> func.HttpResponse:
     return await get_trending_tags_handler(req)
 
 
-@app.route(route="tags", methods=["GET"])
+@app.route(route="tags", methods=["GET", "OPTIONS"])
+@with_cors
 async def get_all_tags(req: func.HttpRequest) -> func.HttpResponse:
     """
     GET /api/tags - Retorna TODAS as tags com contagem de artigos.
@@ -137,53 +202,46 @@ async def get_all_tags(req: func.HttpRequest) -> func.HttpResponse:
 # HTTP TRIGGERS - SOURCES API
 # ========================================
 
-@app.route(route="sources", methods=["GET"])
-async def list_sources(req: func.HttpRequest) -> func.HttpResponse:
-    """GET /api/sources - Lista todas as fontes RSS."""
-    from functions.sources_api import list_sources_handler
-    return await list_sources_handler(req)
-
-
-@app.route(route="sources/{id}", methods=["GET"])
-async def get_source(req: func.HttpRequest) -> func.HttpResponse:
-    """GET /api/sources/{id} - Retorna uma fonte específica."""
-    from functions.sources_api import get_source_handler
-    return await get_source_handler(req)
-
-
-@app.route(route="sources", methods=["POST"])
-async def create_source(req: func.HttpRequest) -> func.HttpResponse:
+@app.route(route="sources", methods=["GET", "POST", "OPTIONS"])
+@with_cors
+async def sources_handler(req: func.HttpRequest) -> func.HttpResponse:
     """
-    POST /api/sources - Cria uma nova fonte RSS.
+    /api/sources - Gerencia fontes RSS.
 
-    Body:
-        {
-            "name": "G1 - Política",
-            "url": "https://g1.globo.com/rss/g1/politica/",
-            "category": "Política",
-            "frequency": "30min",
-            "active": true
-        }
+    GET: Lista todas as fontes RSS.
+    POST: Cria uma nova fonte RSS.
     """
-    from functions.sources_api import create_source_handler
-    return await create_source_handler(req)
+    if req.method == "GET":
+        from functions.sources_api import list_sources_handler
+        return await list_sources_handler(req)
+    elif req.method == "POST":
+        from functions.sources_api import create_source_handler
+        return await create_source_handler(req)
 
 
-@app.route(route="sources/{id}", methods=["PUT"])
-async def update_source(req: func.HttpRequest) -> func.HttpResponse:
-    """PUT /api/sources/{id} - Atualiza uma fonte existente."""
-    from functions.sources_api import update_source_handler
-    return await update_source_handler(req)
+@app.route(route="sources/{id}", methods=["GET", "PUT", "DELETE", "OPTIONS"])
+@with_cors
+async def source_by_id_handler(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    /api/sources/{id} - Gerencia uma fonte específica.
+
+    GET: Retorna uma fonte específica.
+    PUT: Atualiza uma fonte existente.
+    DELETE: Desativa uma fonte (soft delete).
+    """
+    if req.method == "GET":
+        from functions.sources_api import get_source_handler
+        return await get_source_handler(req)
+    elif req.method == "PUT":
+        from functions.sources_api import update_source_handler
+        return await update_source_handler(req)
+    elif req.method == "DELETE":
+        from functions.sources_api import delete_source_handler
+        return await delete_source_handler(req)
 
 
-@app.route(route="sources/{id}", methods=["DELETE"])
-async def delete_source(req: func.HttpRequest) -> func.HttpResponse:
-    """DELETE /api/sources/{id} - Desativa uma fonte (soft delete)."""
-    from functions.sources_api import delete_source_handler
-    return await delete_source_handler(req)
-
-
-@app.route(route="sources/{id}/collect", methods=["POST"])
+@app.route(route="sources/{id}/collect", methods=["POST", "OPTIONS"])
+@with_cors
 async def collect_source(req: func.HttpRequest) -> func.HttpResponse:
     """POST /api/sources/{id}/collect - Dispara coleta manual."""
     from functions.sources_api import collect_source_handler
@@ -194,7 +252,8 @@ async def collect_source(req: func.HttpRequest) -> func.HttpResponse:
 # HTTP TRIGGERS - AI GENERATION API
 # ========================================
 
-@app.route(route="generate", methods=["POST"])
+@app.route(route="generate", methods=["POST", "OPTIONS"])
+@with_cors
 async def generate_article(req: func.HttpRequest) -> func.HttpResponse:
     """
     POST /api/generate - Gera matéria usando IA.
@@ -224,7 +283,8 @@ async def generate_article(req: func.HttpRequest) -> func.HttpResponse:
     return await generate_article_handler(req)
 
 
-@app.route(route="extract-topics", methods=["POST"])
+@app.route(route="extract-topics", methods=["POST", "OPTIONS"])
+@with_cors
 async def extract_topics(req: func.HttpRequest) -> func.HttpResponse:
     """
     POST /api/extract-topics - Extrai tópicos do texto usando IA.
@@ -239,7 +299,8 @@ async def extract_topics(req: func.HttpRequest) -> func.HttpResponse:
     return await extract_topics_handler(req)
 
 
-@app.route(route="generate-tags", methods=["POST"])
+@app.route(route="generate-tags", methods=["POST", "OPTIONS"])
+@with_cors
 async def generate_tags(req: func.HttpRequest) -> func.HttpResponse:
     """
     POST /api/generate-tags - Gera tags para conteúdo usando IA.
@@ -254,7 +315,8 @@ async def generate_tags(req: func.HttpRequest) -> func.HttpResponse:
     return await generate_tags_handler(req)
 
 
-@app.route(route="merge-topics", methods=["POST"])
+@app.route(route="merge-topics", methods=["POST", "OPTIONS"])
+@with_cors
 async def merge_topics(req: func.HttpRequest) -> func.HttpResponse:
     """
     POST /api/merge-topics - Agrupa tópicos de múltiplas matérias usando IA.
@@ -302,7 +364,8 @@ async def merge_topics(req: func.HttpRequest) -> func.HttpResponse:
     return await merge_topics_handler(req)
 
 
-@app.route(route="edit-article", methods=["POST"])
+@app.route(route="edit-article", methods=["POST", "OPTIONS"])
+@with_cors
 async def edit_article(req: func.HttpRequest) -> func.HttpResponse:
     """
     POST /api/edit-article - Edita uma matéria existente usando IA.
@@ -341,63 +404,42 @@ async def edit_article(req: func.HttpRequest) -> func.HttpResponse:
 # HTTP TRIGGERS - USER ARTICLES API
 # ========================================
 
-@app.route(route="user-articles", methods=["GET"])
-async def list_user_articles(req: func.HttpRequest) -> func.HttpResponse:
+@app.route(route="user-articles", methods=["GET", "POST", "OPTIONS"])
+@with_cors
+async def user_articles_handler(req: func.HttpRequest) -> func.HttpResponse:
     """
-    GET /api/user-articles - Lista matérias do usuário.
+    /api/user-articles - Gerencia matérias do usuário.
 
-    Query params:
-        page: int - Página (default: 1)
-        limit: int - Itens por página (default: 20, max: 100)
-        status: str - 'draft' ou 'published'
-        category: str - Filtrar por categoria
-        search: str - Busca em título/conteúdo
-        dateRange: str - '24h', '7d', '30d', '3m', 'year'
+    GET: Lista matérias do usuário.
+    POST: Cria uma nova matéria.
     """
-    from functions.user_articles_api import list_user_articles_handler
-    return await list_user_articles_handler(req)
+    if req.method == "GET":
+        from functions.user_articles_api import list_user_articles_handler
+        return await list_user_articles_handler(req)
+    elif req.method == "POST":
+        from functions.user_articles_api import create_user_article_handler
+        return await create_user_article_handler(req)
 
 
-@app.route(route="user-articles/{id}", methods=["GET"])
-async def get_user_article(req: func.HttpRequest) -> func.HttpResponse:
-    """GET /api/user-articles/{id} - Retorna uma matéria específica."""
-    from functions.user_articles_api import get_user_article_handler
-    return await get_user_article_handler(req)
-
-
-@app.route(route="user-articles", methods=["POST"])
-async def create_user_article(req: func.HttpRequest) -> func.HttpResponse:
+@app.route(route="user-articles/{id}", methods=["GET", "PUT", "DELETE", "OPTIONS"])
+@with_cors
+async def user_article_by_id_handler(req: func.HttpRequest) -> func.HttpResponse:
     """
-    POST /api/user-articles - Cria uma nova matéria.
+    /api/user-articles/{id} - Gerencia uma matéria específica.
 
-    Body:
-        {
-            "title": "Título da matéria",
-            "linhaFina": "Subtítulo",
-            "content": "Conteúdo...",
-            "status": "draft" | "published",
-            "category": "Categoria",
-            "tags": ["tag1", "tag2"],
-            "authorName": "Autor",
-            "sourceArticleIds": ["id1", "id2"]
-        }
+    GET: Retorna uma matéria específica.
+    PUT: Atualiza uma matéria existente.
+    DELETE: Remove uma matéria (soft delete).
     """
-    from functions.user_articles_api import create_user_article_handler
-    return await create_user_article_handler(req)
-
-
-@app.route(route="user-articles/{id}", methods=["PUT"])
-async def update_user_article(req: func.HttpRequest) -> func.HttpResponse:
-    """PUT /api/user-articles/{id} - Atualiza uma matéria existente."""
-    from functions.user_articles_api import update_user_article_handler
-    return await update_user_article_handler(req)
-
-
-@app.route(route="user-articles/{id}", methods=["DELETE"])
-async def delete_user_article(req: func.HttpRequest) -> func.HttpResponse:
-    """DELETE /api/user-articles/{id} - Remove uma matéria (soft delete)."""
-    from functions.user_articles_api import delete_user_article_handler
-    return await delete_user_article_handler(req)
+    if req.method == "GET":
+        from functions.user_articles_api import get_user_article_handler
+        return await get_user_article_handler(req)
+    elif req.method == "PUT":
+        from functions.user_articles_api import update_user_article_handler
+        return await update_user_article_handler(req)
+    elif req.method == "DELETE":
+        from functions.user_articles_api import delete_user_article_handler
+        return await delete_user_article_handler(req)
 
 
 # ========================================
