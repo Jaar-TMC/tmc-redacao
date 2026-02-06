@@ -1,14 +1,16 @@
-import { createContext, useContext, useState, useCallback, useRef } from 'react';
+import { createContext, useContext, useCallback, useRef, useMemo } from 'react';
 import PropTypes from 'prop-types';
 
 const ArticlesCacheContext = createContext(null);
 
 const CACHE_TTL = 5 * 60 * 1000; // 5 minutos
+const MAX_CACHE_ENTRIES = 50; // Evict oldest entries beyond this
 
 export function ArticlesCacheProvider({ children }) {
-  const [cache, setCache] = useState({});
-  const [trendingCache, setTrendingCache] = useState(null);
-  const lastFetchRef = useRef({});
+  // Use refs instead of state to avoid re-renders on cache updates
+  const cacheRef = useRef({});
+  const trendingCacheRef = useRef({});
+  const fetchingRef = useRef({});
 
   // Gera uma chave única baseada nos filtros
   const getCacheKey = useCallback((filters, page) => {
@@ -17,97 +19,101 @@ export function ArticlesCacheProvider({ children }) {
       tag: filters.tag || null,
       category: filters.category || null,
       source: filters.source || null,
+      urgency: filters.urgency || null,
       page: page || 1
     });
   }, []);
 
-  // Verifica se o cache é válido (não expirou)
-  const isCacheValid = useCallback((key) => {
-    const entry = cache[key];
-    if (!entry) return false;
-    return Date.now() - entry.timestamp < CACHE_TTL;
-  }, [cache]);
+  // Evict oldest cache entries if over limit
+  const evictIfNeeded = useCallback((cache) => {
+    const keys = Object.keys(cache);
+    if (keys.length <= MAX_CACHE_ENTRIES) return;
 
-  // Obtém dados do cache
+    // Sort by timestamp ascending (oldest first)
+    const sorted = keys.sort((a, b) => (cache[a].timestamp || 0) - (cache[b].timestamp || 0));
+    const toEvict = sorted.slice(0, keys.length - MAX_CACHE_ENTRIES);
+    for (const key of toEvict) {
+      delete cache[key];
+    }
+  }, []);
+
+  // Obtém dados do cache (reads ref - no re-render)
   const getCachedData = useCallback((filters, page) => {
     const key = getCacheKey(filters, page);
-    if (isCacheValid(key)) {
-      return cache[key].data;
+    const entry = cacheRef.current[key];
+    if (!entry) return null;
+    if (Date.now() - entry.timestamp >= CACHE_TTL) {
+      delete cacheRef.current[key];
+      return null;
     }
-    return null;
-  }, [cache, getCacheKey, isCacheValid]);
-
-  // Salva dados no cache
-  const setCachedData = useCallback((filters, page, data) => {
-    const key = getCacheKey(filters, page);
-    setCache(prev => ({
-      ...prev,
-      [key]: {
-        data,
-        timestamp: Date.now()
-      }
-    }));
+    return entry.data;
   }, [getCacheKey]);
 
-  // Invalida cache de uma chave específica ou todo o cache
+  // Salva dados no cache (writes ref - no re-render)
+  const setCachedData = useCallback((filters, page, data) => {
+    const key = getCacheKey(filters, page);
+    cacheRef.current[key] = {
+      data,
+      timestamp: Date.now()
+    };
+    evictIfNeeded(cacheRef.current);
+  }, [getCacheKey, evictIfNeeded]);
+
+  // Invalida cache
   const invalidateCache = useCallback((filters = null, page = null) => {
     if (filters && page) {
       const key = getCacheKey(filters, page);
-      setCache(prev => {
-        const newCache = { ...prev };
-        delete newCache[key];
-        return newCache;
-      });
+      delete cacheRef.current[key];
     } else {
-      setCache({});
+      cacheRef.current = {};
     }
   }, [getCacheKey]);
 
-  // Verifica se já está fazendo fetch para evitar duplicatas
+  // Verifica se já está fazendo fetch
   const isCurrentlyFetching = useCallback((filters, page) => {
     const key = getCacheKey(filters, page);
-    return lastFetchRef.current[key] === true;
+    return fetchingRef.current[key] === true;
   }, [getCacheKey]);
 
   const setFetching = useCallback((filters, page, isFetching) => {
     const key = getCacheKey(filters, page);
-    lastFetchRef.current[key] = isFetching;
+    fetchingRef.current[key] = isFetching;
   }, [getCacheKey]);
 
   // ========== Trending Tags Cache ==========
 
-  // Obtém trending tags do cache
-  const getCachedTrending = useCallback(() => {
-    if (!trendingCache) return null;
-    if (Date.now() - trendingCache.timestamp > CACHE_TTL) return null;
-    return trendingCache.data;
-  }, [trendingCache]);
+  const getCachedTrending = useCallback((key = 'all') => {
+    const entry = trendingCacheRef.current[key];
+    if (!entry) return null;
+    if (Date.now() - entry.timestamp > CACHE_TTL) {
+      delete trendingCacheRef.current[key];
+      return null;
+    }
+    return entry.data;
+  }, []);
 
-  // Salva trending tags no cache
-  const setCachedTrending = useCallback((data) => {
-    setTrendingCache({
+  const setCachedTrending = useCallback((data, key = 'all') => {
+    trendingCacheRef.current[key] = {
       data,
       timestamp: Date.now()
-    });
+    };
   }, []);
 
-  // Invalida trending cache
   const invalidateTrendingCache = useCallback(() => {
-    setTrendingCache(null);
+    trendingCacheRef.current = {};
   }, []);
 
-  const value = {
+  // Memoize value object - all callbacks are stable (empty deps)
+  const value = useMemo(() => ({
     getCachedData,
     setCachedData,
     invalidateCache,
-    isCacheValid,
     isCurrentlyFetching,
     setFetching,
-    // Trending cache
     getCachedTrending,
     setCachedTrending,
     invalidateTrendingCache
-  };
+  }), [getCachedData, setCachedData, invalidateCache, isCurrentlyFetching, setFetching, getCachedTrending, setCachedTrending, invalidateTrendingCache]);
 
   return (
     <ArticlesCacheContext.Provider value={value}>

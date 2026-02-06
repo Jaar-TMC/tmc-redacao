@@ -131,6 +131,7 @@ export async function getArticles(params = {}, options = {}) {
   if (params.page) queryParams.append('page', params.page.toString());
   if (params.search) queryParams.append('search', params.search);
   if (params.tag) queryParams.append('tag', params.tag);
+  if (params.max_hours) queryParams.append('max_hours', params.max_hours.toString());
 
   const queryString = queryParams.toString();
   const endpoint = `/articles${queryString ? `?${queryString}` : ''}`;

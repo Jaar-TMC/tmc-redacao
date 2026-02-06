@@ -1,4 +1,4 @@
-import { useCallback, useMemo } from 'react';
+import { memo, useCallback, useMemo } from 'react';
 import { ExternalLink, Check } from 'lucide-react';
 import { formatRelativeTime } from '../../data/mockData';
 import PropTypes from 'prop-types';
@@ -175,4 +175,4 @@ ArticleCard.propTypes = {
   onTagSelect: PropTypes.func,
 };
 
-export default ArticleCard;
+export default memo(ArticleCard);

@@ -233,31 +233,16 @@ class DatabaseService:
     # ARTICLES
     # ========================================
 
-    def get_articles(self, page: int = 1, limit: int = 20,
-                     category: Optional[str] = None,
-                     source_id: Optional[str] = None,
-                     period: Optional[str] = None,
-                     search: Optional[str] = None,
-                     tag: Optional[str] = None) -> Tuple[List[Article], int]:
+    def _build_article_filters(self,
+                               category: Optional[str] = None,
+                               source_id: Optional[str] = None,
+                               period: Optional[str] = None,
+                               search: Optional[str] = None,
+                               tag: Optional[str] = None) -> Tuple[str, list]:
         """
-        Lista artigos com filtros e paginacao.
-
-        Args:
-            page: Pagina atual (1-based)
-            limit: Itens por pagina (max 100)
-            category: Filtrar por categoria
-            source_id: Filtrar por fonte (nome da fonte, não UUID)
-            period: 'today', 'week', 'month'
-            search: Busca em titulo/conteudo
-            tag: Filtrar por tag exata (match no array JSON de tags)
-
-        Returns:
-            Tuple (lista de artigos, total de registros)
+        Build shared WHERE clause and params for article queries.
+        Reused by get_articles and get_urgency_counts to avoid duplication.
         """
-        limit = min(limit, 100)
-        offset = (page - 1) * limit
-
-        # Construir WHERE clause
         conditions = []
         params = []
 
@@ -266,7 +251,6 @@ class DatabaseService:
             params.append(category)
 
         if source_id:
-            # Filter by source name (not UUID) - matches frontend filter behavior
             conditions.append("s.name = %s")
             params.append(source_id)
 
@@ -277,18 +261,20 @@ class DatabaseService:
                 conditions.append("a.published_at >= DATEADD(week, -1, GETUTCDATE())")
             elif period == 'month':
                 conditions.append("a.published_at >= DATEADD(month, -1, GETUTCDATE())")
+            else:
+                try:
+                    hours = int(period)
+                    if 1 <= hours <= 24:
+                        conditions.append("a.published_at >= DATEADD(hour, -%s, GETUTCDATE())")
+                        params.append(hours)
+                except ValueError:
+                    pass
 
         if search:
-            # Search in title, content, AND tags (tags is JSON array stored as string)
-            # Use COLLATE to make search accent-insensitive (AI) and case-insensitive (CI)
-            # Also search with dashes replaced by spaces to match "sao-paulo" with "São Paulo"
             search_with_spaces = search.replace('-', ' ')
             search_param = f"%{search}%"
 
-            logger.info(f"[get_articles] Building search condition for: '{search}' -> param: '{search_param}'")
-
             if search_with_spaces != search:
-                # If there were dashes, search for both formats
                 search_param_spaces = f"%{search_with_spaces}%"
                 conditions.append("""(
                     a.title LIKE %s
@@ -307,19 +293,37 @@ class DatabaseService:
                 params.extend([search_param, search_param, search_param])
 
         if tag:
-            # Filter articles that have this exact tag in their JSON tags array
-            # Tags are stored as JSON: '["tag1", "tag2", "sao-paulo"]'
-            # Use LIKE with quotes to match exact tag in array
             conditions.append("""
                 a.tags COLLATE Latin1_General_CI_AI LIKE %s COLLATE Latin1_General_CI_AI
             """)
-            # Match the tag in JSON format: "tag-name" (with quotes)
             tag_param = f'%"{tag}"%'
             params.append(tag_param)
 
         where_clause = "WHERE " + " AND ".join(conditions) if conditions else ""
+        return where_clause, params
 
-        # Query para dados
+    def get_articles(self, page: int = 1, limit: int = 20,
+                     category: Optional[str] = None,
+                     source_id: Optional[str] = None,
+                     period: Optional[str] = None,
+                     search: Optional[str] = None,
+                     tag: Optional[str] = None) -> Tuple[List[Article], int]:
+        """
+        Lista artigos com filtros e paginacao.
+        Also returns urgency_counts in the same DB round-trip.
+
+        Returns:
+            Tuple (lista de artigos, total de registros)
+        """
+        limit = min(limit, 100)
+        offset = (page - 1) * limit
+
+        where_clause, params = self._build_article_filters(
+            category=category, source_id=source_id, period=period,
+            search=search, tag=tag
+        )
+
+        # Combined query: data + count in single round-trip
         query = f"""
             SELECT a.id, a.source_id, a.title, a.content, a.preview, a.url,
                    a.image_url, a.author, a.category, a.tags, a.published_at,
@@ -332,36 +336,158 @@ class DatabaseService:
             OFFSET %s ROWS FETCH NEXT %s ROWS ONLY
         """
 
-        # Query para total (needs JOIN for source name filter)
         count_query = f"""
             SELECT COUNT(*) FROM collected_articles a
             JOIN sources s ON a.source_id = s.id
             {where_clause}
         """
 
-        # Debug logging
         logger.info(f"[get_articles] search={search}, where_clause={where_clause}")
-        logger.info(f"[get_articles] params={params}, offset={offset}, limit={limit}")
-        logger.info(f"[get_articles] count_query={count_query}")
 
         with self.get_connection() as conn:
             cursor = conn.cursor()
 
-            # Executar count
             cursor.execute(count_query, params)
             total = cursor.fetchone()[0]
 
-            logger.info(f"[get_articles] total count={total}")
-
-            # Executar query principal
             cursor.execute(query, params + [offset, limit])
             rows = cursor.fetchall()
 
-            logger.info(f"[get_articles] rows fetched={len(rows)}")
+            logger.info(f"[get_articles] total={total}, rows={len(rows)}")
 
             articles = [self._row_to_article(row) for row in rows]
 
         return articles, total
+
+    def get_articles_with_urgency(self, page: int = 1, limit: int = 20,
+                                   category: Optional[str] = None,
+                                   source_id: Optional[str] = None,
+                                   period: Optional[str] = None,
+                                   search: Optional[str] = None,
+                                   tag: Optional[str] = None) -> Tuple[List[Article], int, dict]:
+        """
+        Combined query: articles + count + urgency counts in a single DB connection.
+        Avoids executing the expensive WHERE clause (especially LIKE on content) twice.
+
+        Returns:
+            Tuple (articles, total_count, urgency_counts_dict)
+        """
+        limit = min(limit, 100)
+        offset = (page - 1) * limit
+
+        where_clause, params = self._build_article_filters(
+            category=category, source_id=source_id, period=period,
+            search=search, tag=tag
+        )
+
+        # Build urgency WHERE: same content filters but restricted to last 24h
+        urgency_where, urgency_params = self._build_article_filters(
+            category=category, source_id=source_id, period=None,
+            search=search, tag=tag
+        )
+        # Add 24h constraint for urgency
+        if urgency_where:
+            urgency_where += " AND a.published_at >= DATEADD(day, -1, GETUTCDATE())"
+        else:
+            urgency_where = "WHERE a.published_at >= DATEADD(day, -1, GETUTCDATE())"
+
+        logger.info(f"[get_articles_with_urgency] search={search}")
+
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+
+            # 1. Count total (reuses same connection)
+            count_query = f"""
+                SELECT COUNT(*) FROM collected_articles a
+                JOIN sources s ON a.source_id = s.id
+                {where_clause}
+            """
+            cursor.execute(count_query, params)
+            total = cursor.fetchone()[0]
+
+            # 2. Get page of articles
+            query = f"""
+                SELECT a.id, a.source_id, a.title, a.content, a.preview, a.url,
+                       a.image_url, a.author, a.category, a.tags, a.published_at,
+                       a.collected_at, a.hash,
+                       s.name as source_name, s.url as source_url, s.favicon_url
+                FROM collected_articles a
+                JOIN sources s ON a.source_id = s.id
+                {where_clause}
+                ORDER BY a.published_at DESC
+                OFFSET %s ROWS FETCH NEXT %s ROWS ONLY
+            """
+            cursor.execute(query, params + [offset, limit])
+            rows = cursor.fetchall()
+            articles = [self._row_to_article(row) for row in rows]
+
+            # 3. Urgency counts (single scan with CASE)
+            urgency_query = f"""
+                SELECT
+                    SUM(CASE WHEN a.published_at >= DATEADD(hour, -1, GETUTCDATE()) THEN 1 ELSE 0 END),
+                    SUM(CASE WHEN a.published_at >= DATEADD(hour, -3, GETUTCDATE()) THEN 1 ELSE 0 END),
+                    SUM(CASE WHEN a.published_at >= DATEADD(hour, -8, GETUTCDATE()) THEN 1 ELSE 0 END),
+                    COUNT(*)
+                FROM collected_articles a
+                JOIN sources s ON a.source_id = s.id
+                {urgency_where}
+            """
+            cursor.execute(urgency_query, urgency_params)
+            urow = cursor.fetchone()
+
+            urgency_counts = {
+                "now": urow[0] or 0,
+                "recent": urow[1] or 0,
+                "today": urow[2] or 0,
+                "all": urow[3] or 0
+            } if urow else {"now": 0, "recent": 0, "today": 0, "all": 0}
+
+            logger.info(f"[get_articles_with_urgency] total={total}, rows={len(rows)}, urgency={urgency_counts}")
+
+        return articles, total, urgency_counts
+
+    def get_urgency_counts(self,
+                           category: Optional[str] = None,
+                           source_id: Optional[str] = None,
+                           search: Optional[str] = None,
+                           tag: Optional[str] = None) -> dict:
+        """
+        Returns article counts per urgency cluster using a single SQL query.
+        Kept for backward compatibility. Prefer get_articles_with_urgency() for combined calls.
+        """
+        urgency_where, urgency_params = self._build_article_filters(
+            category=category, source_id=source_id, period=None,
+            search=search, tag=tag
+        )
+        if urgency_where:
+            urgency_where += " AND a.published_at >= DATEADD(day, -1, GETUTCDATE())"
+        else:
+            urgency_where = "WHERE a.published_at >= DATEADD(day, -1, GETUTCDATE())"
+
+        query = f"""
+            SELECT
+                SUM(CASE WHEN a.published_at >= DATEADD(hour, -1, GETUTCDATE()) THEN 1 ELSE 0 END) as now_count,
+                SUM(CASE WHEN a.published_at >= DATEADD(hour, -3, GETUTCDATE()) THEN 1 ELSE 0 END) as recent_count,
+                SUM(CASE WHEN a.published_at >= DATEADD(hour, -8, GETUTCDATE()) THEN 1 ELSE 0 END) as today_count,
+                COUNT(*) as all_count
+            FROM collected_articles a
+            JOIN sources s ON a.source_id = s.id
+            {urgency_where}
+        """
+
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(query, urgency_params)
+            row = cursor.fetchone()
+
+            if row:
+                return {
+                    "now": row[0] or 0,
+                    "recent": row[1] or 0,
+                    "today": row[2] or 0,
+                    "all": row[3] or 0
+                }
+            return {"now": 0, "recent": 0, "today": 0, "all": 0}
 
     def get_article_by_id(self, article_id: UUID) -> Optional[Article]:
         """Retorna um artigo especifico pelo ID."""
@@ -644,17 +770,17 @@ class DatabaseService:
 
             return [{"tag": row[0], "count": row[1]} for row in rows]
 
-    def get_all_tags(self, search: Optional[str] = None) -> List[dict]:
+    def get_all_tags(self, search: Optional[str] = None, limit: int = 100) -> List[dict]:
         """
-        Get ALL unique tags with article counts.
+        Get unique tags with article counts, ordered by popularity.
 
         Args:
             search: Optional search term to filter tags
+            limit: Maximum number of tags to return (default: 100)
 
         Returns:
             List of dicts: [{"tag": "tagname", "theme": "Tag Name", "count": N}, ...]
         """
-        # Build search filter if specified
         search_filter = ""
         params = []
         if search:
@@ -676,11 +802,9 @@ class DatabaseService:
                 FROM ArticleTags
                 WHERE tag IS NOT NULL
                     AND LEN(tag) > 2
-                    -- Exclude source names (media outlets)
                     AND tag NOT IN ('g1', 'globo', 'folha', 'uol', 'estadao', 'cnn', 'bbc',
                                     'r7', 'terra', 'ig', 'globoesporte', 'tecmundo', 'infomoney',
                                     'noticias', 'noticia', 'news')
-                    -- Exclude domain-like tags
                     AND tag NOT LIKE '%%.com'
                     AND tag NOT LIKE '%%.com.br'
                     AND tag NOT LIKE '%%.br'
@@ -689,17 +813,17 @@ class DatabaseService:
                     {search_filter}
                 GROUP BY tag
             )
-            SELECT tag, article_count
+            SELECT TOP %s tag, article_count
             FROM TagCounts
             ORDER BY article_count DESC, tag ASC
         """
+        params.append(limit)
 
         with self.get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute(query, params if params else None)
+            cursor.execute(query, params)
             rows = cursor.fetchall()
 
-            # Format theme as Title Case
             result = []
             for row in rows:
                 tag = row[0]

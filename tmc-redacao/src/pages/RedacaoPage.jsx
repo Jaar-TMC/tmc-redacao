@@ -1,5 +1,5 @@
-import { useState, useMemo, useCallback, useEffect, useRef } from 'react';
-import { TrendingUp, Sparkles, FileText, RefreshCw, AlertCircle, Loader2 } from 'lucide-react';
+import { useState, useCallback, useEffect, useRef } from 'react';
+import { TrendingUp, Sparkles, FileText, RefreshCw, AlertCircle } from 'lucide-react';
 import TrendsSidebar from '../components/layout/TrendsSidebar';
 import ActionPanel from '../components/layout/ActionPanel';
 import FilterBar from '../components/ui/FilterBar';
@@ -12,6 +12,17 @@ import { transformArticles } from '../utils/transformers';
 import { useArticles, useFilters, useUI } from '../context';
 import { useArticlesCache } from '../context/ArticlesCacheContext';
 import { useOnboarding, TOUR_IDS } from '../components/onboarding';
+
+// Stable function outside component - no re-creation on render
+const deduplicateByTitle = (articles) => {
+  const seen = new Set();
+  return articles.filter(article => {
+    const normalizedTitle = article.title.toLowerCase().trim();
+    if (seen.has(normalizedTitle)) return false;
+    seen.add(normalizedTitle);
+    return true;
+  });
+};
 
 const RedacaoPage = () => {
   const { selectedArticles, addArticle, removeArticle, clearSelection, isArticleSelected } = useArticles();
@@ -27,21 +38,12 @@ const RedacaoPage = () => {
   const { shouldShowTour, startTour } = useOnboarding();
   const { getCachedData, setCachedData } = useArticlesCache();
 
-  // Refs to store cache functions to avoid dependency issues in useEffect
-  const getCachedDataRef = useRef(getCachedData);
-  const setCachedDataRef = useRef(setCachedData);
-
-  // Keep refs updated
-  useEffect(() => {
-    getCachedDataRef.current = getCachedData;
-    setCachedDataRef.current = setCachedData;
-  }, [getCachedData, setCachedData]);
-
   // API State
   const [articles, setArticles] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState(null);
   const [isInitialized, setIsInitialized] = useState(false);
+  const [urgencyCounts, setUrgencyCounts] = useState({ now: 0, recent: 0, today: 0, all: 0 });
 
   // Pagination State
   const [currentPage, setCurrentPage] = useState(1);
@@ -58,23 +60,11 @@ const RedacaoPage = () => {
     tag: filters.tag,
     category: filters.category,
     source: filters.source,
+    urgency: filters.urgency,
   });
 
   // Ref to skip redundant fetch after page reset
   const skipNextFetchRef = useRef(false);
-
-  // Deduplicate articles by title (keep first occurrence)
-  const deduplicateByTitle = (articles) => {
-    const seen = new Set();
-    return articles.filter(article => {
-      const normalizedTitle = article.title.toLowerCase().trim();
-      if (seen.has(normalizedTitle)) {
-        return false;
-      }
-      seen.add(normalizedTitle);
-      return true;
-    });
-  };
 
   // Fetch articles from API with AbortController for request cancellation
   useEffect(() => {
@@ -94,7 +84,8 @@ const RedacaoPage = () => {
       prevFiltersRef.current.searchQuery !== filters.searchQuery ||
       prevFiltersRef.current.tag !== filters.tag ||
       prevFiltersRef.current.category !== filters.category ||
-      prevFiltersRef.current.source !== filters.source;
+      prevFiltersRef.current.source !== filters.source ||
+      prevFiltersRef.current.urgency !== filters.urgency;
 
     // Update prev filters ref
     prevFiltersRef.current = {
@@ -102,6 +93,7 @@ const RedacaoPage = () => {
       tag: filters.tag,
       category: filters.category,
       source: filters.source,
+      urgency: filters.urgency,
     };
 
     // When filters change, always fetch from page 1 (and sync state)
@@ -116,12 +108,15 @@ const RedacaoPage = () => {
       // Continue with the fetch using effectivePage=1
     }
 
-    // Check cache first (use ref to avoid dependency issues)
-    const cachedData = getCachedDataRef.current(filters, effectivePage);
+    // Check cache first
+    const cachedData = getCachedData(filters, effectivePage);
     if (cachedData) {
       setArticles(cachedData.articles);
       setTotalItems(cachedData.totalItems);
       setTotalPages(cachedData.totalPages);
+      if (cachedData.urgencyCounts) {
+        setUrgencyCounts(cachedData.urgencyCounts);
+      }
       setIsLoading(false);
       setIsInitialized(true);
       return;
@@ -143,6 +138,7 @@ const RedacaoPage = () => {
           ...(filters.tag && { tag: filters.tag }),
           ...(filters.category && { category: filters.category }),
           ...(filters.source && { source: filters.source }),
+          ...(filters.urgency && { max_hours: filters.urgency }),
         };
 
         const response = await getArticles(params, { signal: abortController.signal });
@@ -154,16 +150,22 @@ const RedacaoPage = () => {
 
           setArticles(uniqueArticles);
 
+          // Update urgency counts from server response
+          if (response?.urgency_counts) {
+            setUrgencyCounts(response.urgency_counts);
+          }
+
           // Update pagination info from response - use nullish coalescing to handle 0 correctly
           const total = response?.total ?? uniqueArticles.length;
           setTotalItems(total);
           setTotalPages(Math.ceil(total / ITEMS_PER_PAGE) || 1);
 
-          // Save to cache (use ref to avoid dependency issues)
-          setCachedDataRef.current(filters, effectivePage, {
+          // Save to cache
+          setCachedData(filters, effectivePage, {
             articles: uniqueArticles,
             totalItems: total,
-            totalPages: Math.ceil(total / ITEMS_PER_PAGE) || 1
+            totalPages: Math.ceil(total / ITEMS_PER_PAGE) || 1,
+            urgencyCounts: response?.urgency_counts || null,
           });
 
           setIsInitialized(true);
@@ -189,9 +191,7 @@ const RedacaoPage = () => {
     return () => {
       abortController.abort();
     };
-    // Note: getCachedData and setCachedData are accessed via refs to avoid
-    // triggering re-fetches when cache state changes
-  }, [filters.searchQuery, filters.tag, filters.category, filters.source, currentPage]);
+  }, [filters.searchQuery, filters.tag, filters.category, filters.source, filters.urgency, currentPage, getCachedData, setCachedData]);
 
   // Retry fetch after error
   const handleRetry = useCallback(async () => {
@@ -205,11 +205,17 @@ const RedacaoPage = () => {
         ...(filters.tag && { tag: filters.tag }),
         ...(filters.category && { category: filters.category }),
         ...(filters.source && { source: filters.source }),
+        ...(filters.urgency && { max_hours: filters.urgency }),
       };
       const response = await getArticles(params);
       const transformedArticles = transformArticles(response?.items);
       const uniqueArticles = deduplicateByTitle(transformedArticles);
       setArticles(uniqueArticles);
+
+      // Update urgency counts from response, or calculate from article timestamps as fallback
+      if (response?.urgency_counts) {
+        setUrgencyCounts(response.urgency_counts);
+      }
 
       // Update pagination info from response
       const total = response?.total || uniqueArticles.length;
@@ -220,7 +226,8 @@ const RedacaoPage = () => {
       setCachedData(filters, currentPage, {
         articles: uniqueArticles,
         totalItems: total,
-        totalPages: Math.ceil(total / ITEMS_PER_PAGE) || 1
+        totalPages: Math.ceil(total / ITEMS_PER_PAGE) || 1,
+        urgencyCounts: response?.urgency_counts || null,
       });
 
       setIsInitialized(true);
@@ -250,15 +257,6 @@ const RedacaoPage = () => {
     // Scroll to top of article grid when changing pages
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }, []);
-
-  // Articles are now server-side filtered, so we just return them directly
-  // Client-side filtering is only kept as a visual fallback during loading transitions
-  const filteredArticles = useMemo(() => {
-    // Since server-side filtering is now in place, articles are already filtered
-    // We only need to do additional client-side filtering if the server doesn't support
-    // certain filter types or during transitional states
-    return articles;
-  }, [articles]);
 
   // Auto-trigger onboarding tour for first-time users
   useEffect(() => {
@@ -314,10 +312,10 @@ const RedacaoPage = () => {
         {/* Main Content - Articles Grid */}
         <div className="flex-1 p-4 md:p-6 mt-16 lg:mt-0">
           <div data-tour="filter-bar">
-            <FilterBar />
+            <FilterBar urgencyCounts={urgencyCounts} />
           </div>
 
-          {isLoading && !isInitialized ? (
+          {isLoading ? (
             <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-2 gap-4">
               {[...Array(6)].map((_, i) => (
                 <div key={i} className="bg-white rounded-xl border border-light-gray p-4 space-y-3">
@@ -332,27 +330,6 @@ const RedacaoPage = () => {
                 </div>
               ))}
             </div>
-          ) : isLoading && isInitialized ? (
-            /* Loading overlay when changing pages/filters */
-            <div className="relative">
-              <div className="absolute inset-0 bg-white/70 backdrop-blur-sm z-10 flex items-center justify-center min-h-[400px] rounded-xl">
-                <div className="flex flex-col items-center gap-3">
-                  <Loader2 className="w-8 h-8 text-tmc-orange animate-spin" />
-                  <span className="text-sm text-medium-gray font-medium">Carregando matérias...</span>
-                </div>
-              </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-2 gap-4 opacity-30 pointer-events-none">
-                {filteredArticles.map((article) => (
-                  <div key={article.id}>
-                    <ArticleCard
-                      article={article}
-                      isSelected={isArticleSelected(article.id)}
-                      onSelect={handleSelectArticle}
-                    />
-                  </div>
-                ))}
-              </div>
-            </div>
           ) : error ? (
             <div className="flex flex-col items-center justify-center py-16">
               <AlertCircle size={48} className="text-red-500 mb-4" />
@@ -366,7 +343,7 @@ const RedacaoPage = () => {
                 Tentar novamente
               </button>
             </div>
-          ) : filteredArticles.length === 0 ? (
+          ) : articles.length === 0 ? (
             <EmptyState
               icon={FileText}
               title="Nenhuma matéria encontrada"
@@ -375,7 +352,7 @@ const RedacaoPage = () => {
           ) : (
             <>
               <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-2 gap-4">
-                {filteredArticles.map((article, index) => (
+                {articles.map((article, index) => (
                   <div key={article.id} data-tour={index === 0 ? "article-card" : undefined}>
                     <ArticleCard
                       article={article}

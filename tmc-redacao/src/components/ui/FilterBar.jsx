@@ -1,8 +1,10 @@
 import { Search, ChevronDown, Building2, Tag, Hash } from 'lucide-react';
-import { useState, useCallback, useEffect, useRef } from 'react';
+import { useState, useCallback, useEffect, useRef, useMemo } from 'react';
+import PropTypes from 'prop-types';
 import { getSources, getCategories, getAllTags } from '../../services/api';
 import { transformSources, transformCategories } from '../../utils/transformers';
 import { useFilters } from '../../context';
+import UrgencyChips from './UrgencyChips';
 
 /**
  * FilterBar Component
@@ -13,7 +15,7 @@ import { useFilters } from '../../context';
  * - Link Purpose in Context (2.4.4): All filters have clear labels and context
  * - Headings and Labels (2.4.6): All form controls have descriptive labels
  */
-const FilterBar = () => {
+const FilterBar = ({ urgencyCounts }) => {
   const { filters, updateFilter } = useFilters();
   const [searchTerm, setSearchTerm] = useState(filters.searchQuery || '');
   const [openDropdown, setOpenDropdown] = useState(null);
@@ -35,29 +37,23 @@ const FilterBar = () => {
   const [sources, setSources] = useState([]);
   const [tags, setTags] = useState([]);
 
-  // Fetch filter data from API on mount
+  // Fetch filter data from API on mount (all in parallel)
   useEffect(() => {
     const fetchFilters = async () => {
-      // Fetch each filter independently to avoid one failure breaking all
-      try {
-        const catRes = await getCategories();
-        setCategories(transformCategories(catRes?.categories));
-      } catch (err) {
-        console.error('Error fetching categories:', err);
-      }
+      const [catRes, srcRes, tagsRes] = await Promise.allSettled([
+        getCategories(),
+        getSources(),
+        getAllTags()
+      ]);
 
-      try {
-        const srcRes = await getSources();
-        setSources(transformSources(srcRes?.items || srcRes?.sources));
-      } catch (err) {
-        console.error('Error fetching sources:', err);
+      if (catRes.status === 'fulfilled') {
+        setCategories(transformCategories(catRes.value?.categories));
       }
-
-      try {
-        const tagsRes = await getAllTags();
-        setTags(tagsRes?.items || []);
-      } catch (err) {
-        console.error('Error fetching tags:', err);
+      if (srcRes.status === 'fulfilled') {
+        setSources(transformSources(srcRes.value?.items || srcRes.value?.sources));
+      }
+      if (tagsRes.status === 'fulfilled') {
+        setTags(tagsRes.value?.items || []);
       }
     };
     fetchFilters();
@@ -147,24 +143,29 @@ const FilterBar = () => {
     return () => document.removeEventListener('keydown', handleEscapeKey);
   }, [openDropdown, handleCloseDropdown]);
 
-  // Filtered categories based on search term
-  const filteredCategories = categories.filter(cat =>
-    cat.name.toLowerCase().includes(categorySearch.toLowerCase())
-  );
+  // Memoize filtered lists to avoid recomputing on every render
+  const filteredCategories = useMemo(() =>
+    categories.filter(cat =>
+      cat.name.toLowerCase().includes(categorySearch.toLowerCase())
+    ), [categories, categorySearch]);
 
-  // Filtered sources based on search term
-  const filteredSources = sources.filter(s =>
-    s.active && s.name.toLowerCase().includes(sourceSearch.toLowerCase())
-  );
+  const filteredSources = useMemo(() =>
+    sources.filter(s =>
+      s.active && s.name.toLowerCase().includes(sourceSearch.toLowerCase())
+    ), [sources, sourceSearch]);
 
-  // Filtered tags based on search term
-  const filteredTags = tags.filter(t =>
-    t.theme.toLowerCase().includes(tagSearch.toLowerCase()) ||
-    t.tag.toLowerCase().includes(tagSearch.toLowerCase())
-  );
+  const filteredTags = useMemo(() =>
+    tags.filter(t =>
+      t.theme.toLowerCase().includes(tagSearch.toLowerCase()) ||
+      t.tag.toLowerCase().includes(tagSearch.toLowerCase())
+    ), [tags, tagSearch]);
+
+  const handleUrgencyChange = useCallback((value) => {
+    updateFilter('urgency', value);
+  }, [updateFilter]);
 
   return (
-    <div className={`bg-white rounded-xl border border-light-gray p-4 mb-6 ${!searchTerm ? 'lg:pb-8' : ''}`} role="search" aria-label="Filtros de matérias">
+    <div className="bg-white rounded-xl border border-light-gray p-4 pb-3 mb-6" role="search" aria-label="Filtros de matérias">
       <div className="flex items-center gap-4">
         {/* Search Input */}
         <div className="flex-1 relative">
@@ -408,6 +409,15 @@ const FilterBar = () => {
         </div>
       </div>
 
+      {/* Urgency Chips - temporal filter */}
+      <div className="mt-3 pt-3 border-t border-dashed border-light-gray">
+        <UrgencyChips
+          counts={urgencyCounts}
+          activeUrgency={filters.urgency}
+          onUrgencyChange={handleUrgencyChange}
+        />
+      </div>
+
       {/* Close dropdown when clicking outside */}
       {openDropdown && (
         <div
@@ -417,6 +427,15 @@ const FilterBar = () => {
       )}
     </div>
   );
+};
+
+FilterBar.propTypes = {
+  urgencyCounts: PropTypes.shape({
+    now: PropTypes.number,
+    recent: PropTypes.number,
+    today: PropTypes.number,
+    all: PropTypes.number,
+  }),
 };
 
 export default FilterBar;

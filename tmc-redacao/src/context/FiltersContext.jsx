@@ -17,7 +17,7 @@ export const FiltersProvider = ({ children }) => {
     tag: null,
     category: null,
     source: null,
-    period: 'today',
+    urgency: null,
   });
 
   const updateFilter = useCallback((filterName, value) => {
@@ -40,7 +40,7 @@ export const FiltersProvider = ({ children }) => {
       tag: null,
       category: null,
       source: null,
-      period: 'today',
+      urgency: null,
     });
   }, []);
 

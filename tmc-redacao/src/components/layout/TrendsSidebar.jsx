@@ -28,15 +28,18 @@ const TrendsSidebar = ({ isOpen, onClose }) => {
   const [twitterTrends] = useState(mockTwitterTrends);
   const [feedThemes, setFeedThemes] = useState([]);
   const [lastUpdated, setLastUpdated] = useState(null);
-  const { filters, updateFilter } = useFilters();
+  const { filters, updateFilter, updateFilters } = useFilters();
   const { getCachedTrending, setCachedTrending } = useArticlesCache();
 
   // Fetch trending tags directly from backend API
   // This queries ALL articles in the database for accurate tag counts
+  // When urgency filter is active, only count tags from articles within that period
   const fetchThemes = useCallback(async (forceRefresh = false) => {
+    const cacheKey = filters.urgency ? `urgency-${filters.urgency}` : 'all';
+
     // Check cache first (unless forcing refresh)
     if (!forceRefresh) {
-      const cached = getCachedTrending();
+      const cached = getCachedTrending(cacheKey);
       if (cached) {
         setFeedThemes(cached.items);
         setLastUpdated(new Date(cached.timestamp));
@@ -48,24 +51,28 @@ const TrendsSidebar = ({ isOpen, onClose }) => {
     setIsLoading(true);
     setError(null);
     try {
-      const response = await getTrendingTags({ limit: 20 });
+      const params = { limit: 20 };
+      if (filters.urgency) {
+        params.period = filters.urgency;
+      }
+      const response = await getTrendingTags(params);
       const items = response?.items || [];
       setFeedThemes(items);
       setLastUpdated(new Date());
-      // Save to cache
-      setCachedTrending({ items, timestamp: Date.now() });
+      // Save to cache with urgency key
+      setCachedTrending({ items, timestamp: Date.now() }, cacheKey);
     } catch (err) {
       console.error('Error fetching themes:', err);
       setError(err.message || 'Erro ao carregar temas');
     } finally {
       setIsLoading(false);
     }
-  }, [getCachedTrending, setCachedTrending]);
+  }, [getCachedTrending, setCachedTrending, filters.urgency]);
 
-  // Fetch on mount
+  // Fetch on mount and when urgency filter changes (use cache, don't force refresh)
   useEffect(() => {
-    fetchThemes();
-  }, []);
+    fetchThemes(false);
+  }, [filters.urgency]);
 
   const handleRefresh = useCallback(() => {
     if (!isPaused) {
@@ -86,10 +93,10 @@ const TrendsSidebar = ({ isOpen, onClose }) => {
   // Filtra o feed RSS pelo tema selecionado
   // Use dedicated tag filter instead of searchQuery
   // Clear searchQuery when selecting a tag to avoid conflicting filters
+  // Use batch update to avoid double fetch
   const handleThemeClick = useCallback((tag) => {
-    updateFilter('searchQuery', '');  // Clear search when selecting a tag
-    updateFilter('tag', tag);
-  }, [updateFilter]);
+    updateFilters({ searchQuery: '', tag });
+  }, [updateFilters]);
 
   // Limpa o filtro de tema
   const handleClearThemeFilter = useCallback(() => {
@@ -254,9 +261,7 @@ const TrendsSidebar = ({ isOpen, onClose }) => {
                       className={`flex items-center justify-between p-2 rounded-lg cursor-pointer transition-all group ${
                         isActive
                           ? 'bg-tmc-orange text-white shadow-md ring-2 ring-tmc-orange/30'
-                          : index === 0
-                            ? 'bg-white shadow-sm border border-orange-200 hover:border-orange-300'
-                            : 'hover:bg-white/60'
+                          : 'hover:bg-white/60'
                       }`}
                     >
                       <div className="flex items-center gap-2 min-w-0 flex-1">
@@ -264,9 +269,7 @@ const TrendsSidebar = ({ isOpen, onClose }) => {
                           <Flame
                             size={14}
                             className={`flex-shrink-0 ${
-                              isActive
-                                ? 'text-white'
-                                : index === 0 ? 'text-red-500' : 'text-orange-400'
+                              isActive ? 'text-white' : 'text-orange-400'
                             }`}
                             aria-hidden="true"
                           />
@@ -274,9 +277,7 @@ const TrendsSidebar = ({ isOpen, onClose }) => {
                         <span className={`text-sm font-medium truncate transition-colors ${
                           isActive
                             ? 'text-white'
-                            : index === 0
-                              ? 'text-dark-gray group-hover:text-red-600'
-                              : 'text-dark-gray group-hover:text-tmc-orange'
+                            : 'text-dark-gray group-hover:text-tmc-orange'
                         }`}>
                           {item.theme}
                         </span>
@@ -293,9 +294,7 @@ const TrendsSidebar = ({ isOpen, onClose }) => {
                         <span className={`text-xs px-2 py-0.5 rounded ${
                           isActive
                             ? 'text-white bg-white/20 font-medium'
-                            : index === 0
-                              ? 'text-orange-700 bg-orange-100 font-medium'
-                              : 'text-medium-gray bg-white/80'
+                            : 'text-medium-gray bg-white/80'
                         }`} aria-label={`${item.count} matérias`}>
                           {item.count} mat.
                         </span>

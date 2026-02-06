@@ -39,16 +39,26 @@ async def list_articles_handler(req: func.HttpRequest) -> func.HttpResponse:
         search = req.params.get('search')
         tag = req.params.get('tag')
 
+        # Parse max_hours for urgency filter (1-24)
+        max_hours = req.params.get('max_hours')
+        if max_hours:
+            try:
+                hours = int(max_hours)
+                if 1 <= hours <= 24:
+                    period = str(hours)  # Reuse period field internally
+            except ValueError:
+                pass
+
         # Debug logging
-        logger.info(f"[list_articles] Received params: page={page}, limit={limit}, category={category}, source={source}, search='{search}', tag={tag}")
+        logger.info(f"[list_articles] Received params: page={page}, limit={limit}, category={category}, source={source}, search='{search}', tag={tag}, max_hours={max_hours}")
 
         # Validar page
         if page < 1:
             page = 1
 
-        # Buscar artigos
+        # Fetch articles + urgency counts in single DB connection
         db = get_db()
-        articles, total = db.get_articles(
+        articles, total, urgency_counts = db.get_articles_with_urgency(
             page=page,
             limit=limit,
             category=category,
@@ -66,7 +76,8 @@ async def list_articles_handler(req: func.HttpRequest) -> func.HttpResponse:
             "items": [article.to_frontend_format() for article in articles],
             "total": total,
             "page": page,
-            "pages": pages
+            "pages": pages,
+            "urgency_counts": urgency_counts
         }
 
         return func.HttpResponse(
@@ -239,9 +250,10 @@ async def get_all_tags_handler(req: func.HttpRequest) -> func.HttpResponse:
     """
     try:
         search = req.params.get('search')
+        limit = min(int(req.params.get('limit', '100')), 200)
 
         db = get_db()
-        tags = db.get_all_tags(search=search)
+        tags = db.get_all_tags(search=search, limit=limit)
 
         # Format response
         items = []

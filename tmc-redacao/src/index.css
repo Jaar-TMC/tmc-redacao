@@ -134,6 +134,20 @@ select:focus-visible {
   }
 }
 
+/* ============================================
+ * Urgency Chip Pulse Animation
+ * Applied to "Agora" chip when it has items and is not selected
+ * ============================================
+ */
+@keyframes urgency-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); }
+  50% { box-shadow: 0 0 0 4px rgba(239, 68, 68, 0.15); }
+}
+
+.urgency-pulse {
+  animation: urgency-pulse 2s ease-in-out infinite;
+}
+
 /*
  * WCAG 2.1 Audio Control (1.4.2)
  * If audio is added to the application in the future:
