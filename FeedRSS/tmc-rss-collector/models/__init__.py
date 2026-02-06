@@ -9,6 +9,23 @@ from .user_article import (
     UserArticle, UserArticleCreate, UserArticleUpdate,
     UserArticleBase, UserArticleListResponse
 )
+from .theme import (
+    Theme, ThemeCreate, ThemeUpdate, ThemeBase,
+    ThemeResponse, ThemeListResponse
+)
+from .article_score import (
+    ArticleScore, ArticleScoreCreate, ArticleScoreUpdate, ArticleScoreBase,
+    ArticleScoreResponse, ArticleScoreListResponse
+)
+from .article_embedding import (
+    ArticleEmbedding, ArticleEmbeddingCreate, ArticleEmbeddingUpdate, ArticleEmbeddingBase,
+    ArticleEmbeddingResponse, ArticleEmbeddingListResponse,
+    BulkEmbeddingCreate, SemanticSearchRequest, SemanticSearchResult, SemanticSearchResponse
+)
+from .event_signature import (
+    EventSignature, EventSignatureCreate, EventSignatureUpdate, EventSignatureBase,
+    EventSignatureResponse, normalize_entity, entities_match, calculate_entity_similarity
+)
 
 __all__ = [
     # Source
@@ -30,4 +47,38 @@ __all__ = [
     'UserArticleUpdate',
     'UserArticleBase',
     'UserArticleListResponse',
+    # Theme (Semantic Clustering)
+    'Theme',
+    'ThemeCreate',
+    'ThemeUpdate',
+    'ThemeBase',
+    'ThemeResponse',
+    'ThemeListResponse',
+    # Article Score (4 Signals)
+    'ArticleScore',
+    'ArticleScoreCreate',
+    'ArticleScoreUpdate',
+    'ArticleScoreBase',
+    'ArticleScoreResponse',
+    'ArticleScoreListResponse',
+    # Article Embedding (Vectors)
+    'ArticleEmbedding',
+    'ArticleEmbeddingCreate',
+    'ArticleEmbeddingUpdate',
+    'ArticleEmbeddingBase',
+    'ArticleEmbeddingResponse',
+    'ArticleEmbeddingListResponse',
+    'BulkEmbeddingCreate',
+    'SemanticSearchRequest',
+    'SemanticSearchResult',
+    'SemanticSearchResponse',
+    # Event Signature (Event-Based Clustering)
+    'EventSignature',
+    'EventSignatureCreate',
+    'EventSignatureUpdate',
+    'EventSignatureBase',
+    'EventSignatureResponse',
+    'normalize_entity',
+    'entities_match',
+    'calculate_entity_similarity',
 ]

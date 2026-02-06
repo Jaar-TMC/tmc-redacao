@@ -102,6 +102,88 @@ async def rss_collector(timer: func.TimerRequest) -> None:
 
 
 # ========================================
+# TIMER TRIGGER - EMBEDDING GENERATOR
+# ========================================
+
+@app.timer_trigger(
+    schedule="0 */5 * * * *",  # A cada 5 minutos
+    arg_name="timer",
+    run_on_startup=False
+)
+async def embedding_generator(timer: func.TimerRequest) -> None:
+    """
+    Timer trigger que gera embeddings para artigos a cada 5 minutos.
+
+    Processa até 50 artigos por execução.
+    """
+    from functions.embedding_generator import embedding_generator_handler
+    await embedding_generator_handler(timer)
+
+
+# ========================================
+# TIMER TRIGGER - SCORING CALCULATOR
+# ========================================
+
+@app.timer_trigger(
+    schedule="0 */10 * * * *",  # A cada 10 minutos
+    arg_name="timer",
+    run_on_startup=False
+)
+async def scoring_calculator(timer: func.TimerRequest) -> None:
+    """
+    Timer trigger que calcula scores editoriais a cada 10 minutos.
+
+    Classifica artigos em A/B/C usando 4 sinais editoriais.
+    Processa até 20 artigos por execução.
+    """
+    from functions.scoring_calculator import scoring_calculator_handler
+    await scoring_calculator_handler(timer)
+
+
+# ========================================
+# TIMER TRIGGER - CLUSTERING ENGINE
+# ========================================
+
+@app.timer_trigger(
+    schedule="0 */30 * * * *",  # A cada 30 minutos
+    arg_name="timer",
+    run_on_startup=False
+)
+async def clustering_engine(timer: func.TimerRequest) -> None:
+    """
+    Timer trigger que agrupa artigos em temas semanticos a cada 30 minutos.
+
+    Usa embeddings para clustering por similaridade de conteudo.
+    """
+    from functions.clustering_engine import clustering_engine_handler
+    await clustering_engine_handler(timer)
+
+
+# ========================================
+# TIMER TRIGGER - CLUSTERING MAINTENANCE
+# ========================================
+
+@app.timer_trigger(
+    schedule="0 0 3 * * *",  # Diariamente as 3AM UTC
+    arg_name="timer",
+    run_on_startup=False
+)
+async def clustering_maintenance(timer: func.TimerRequest) -> None:
+    """
+    Timer trigger para manutencao diaria do clustering.
+    Executa diariamente as 3AM UTC.
+
+    Tarefas:
+    1. Merge temas muito similares (> 0.90)
+    2. Desativa temas orfaos (0 artigos)
+    3. Recalcula scores de todos os temas
+    4. Gera relatorio de qualidade
+    """
+    from functions.clustering_maintenance import clustering_maintenance_handler
+    await clustering_maintenance_handler(timer)
+
+
+# ========================================
 # HTTP TRIGGERS - HEALTH & STATS
 # ========================================
 
@@ -443,12 +525,125 @@ async def user_article_by_id_handler(req: func.HttpRequest) -> func.HttpResponse
 
 
 # ========================================
+# HTTP TRIGGERS - SEMANTIC THEMES API
+# ========================================
+
+@app.route(route="semantic-themes", methods=["GET", "OPTIONS"])
+@with_cors
+async def list_themes(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    GET /api/semantic-themes - Lista temas semanticos com classificacao A/B/C.
+
+    Query params:
+        classification: str - Filtrar por classificacao ('A', 'B', 'C')
+        status: str - Status do tema ('active', 'inactive') default: 'active'
+        limit: int - Maximo de temas (default: 50, max: 100)
+        page: int - Pagina (default: 1)
+        sort: str - Ordenacao ('score', 'articles', 'recent') default: 'score'
+
+    Returns:
+        {
+            "items": [...],
+            "stats": {"totalA": N, "totalB": N, "totalC": N},
+            "total": N,
+            "page": N,
+            "pages": N
+        }
+    """
+    from functions.themes_api import list_themes_handler
+    return await list_themes_handler(req)
+
+
+@app.route(route="semantic-themes/{id}", methods=["GET", "OPTIONS"])
+@with_cors
+async def get_theme(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    GET /api/semantic-themes/{id} - Retorna detalhes de um tema com artigos.
+
+    Query params:
+        articles_limit: int - Maximo de artigos (default: 10, max: 50)
+        articles_page: int - Pagina de artigos (default: 1)
+    """
+    from functions.themes_api import get_theme_handler
+    return await get_theme_handler(req)
+
+
+# ========================================
+# HTTP TRIGGERS - CLUSTERING STATS API
+# ========================================
+
+@app.route(route="clustering-stats", methods=["GET", "OPTIONS"])
+@with_cors
+async def clustering_stats(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    GET /api/clustering-stats - Retorna metricas de qualidade do clustering.
+
+    Returns:
+        {
+            "totalThemes": N,
+            "totalArticlesClustered": N,
+            "avgArticlesPerTheme": N.N,
+            "themesWithMultipleArticles": N,
+            "silhouetteScore": N.NNNN,
+            "coverageRatio": N.NNNN,
+            "singletonThemes": N,
+            "largestThemeSize": N,
+            "evaluatedAt": "2024-01-15T14:45:00Z",
+            "qualityLevel": "good|excellent|fair|poor",
+            "recommendations": [...]
+        }
+    """
+    from functions.themes_api import get_clustering_stats_handler
+    return await get_clustering_stats_handler(req)
+
+
+# ========================================
+# HTTP TRIGGERS - CLUSTERING MAINTENANCE API
+# ========================================
+
+@app.route(route="clustering/maintenance", methods=["POST", "OPTIONS"])
+@with_cors
+async def clustering_maintenance_manual(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    POST /api/clustering/maintenance - Executa manutencao do clustering manualmente.
+
+    Executa as mesmas tarefas do timer diario:
+    1. Merge temas muito similares (> 0.90)
+    2. Desativa temas orfaos (0 artigos)
+    3. Recalcula scores de todos os temas
+    4. Gera relatorio de qualidade
+
+    Query params:
+        dry_run: bool - Se true, apenas retorna metricas sem fazer alteracoes (default: false)
+
+    Returns:
+        {
+            "success": bool,
+            "report": {
+                "themes_merged": [...],
+                "themes_deactivated": [...],
+                "themes_scores_updated": N,
+                "quality_metrics": {...},
+                "duration_seconds": N,
+                ...
+            }
+        }
+    """
+    from functions.clustering_maintenance import clustering_maintenance_manual_handler
+    return await clustering_maintenance_manual_handler(req)
+
+
+# ========================================
 # STARTUP
 # ========================================
 
 logger.info("TMC RSS Collector initialized")
 logger.info("Endpoints disponíveis:")
 logger.info("  - Timer: rss_collector (cada 15 min)")
+logger.info("  - Timer: embedding_generator (cada 5 min)")
+logger.info("  - Timer: scoring_calculator (cada 10 min)")
+logger.info("  - Timer: clustering_engine (cada 30 min)")
+logger.info("  - Timer: clustering_maintenance (diario 3AM UTC)")
 logger.info("  - GET  /api/health")
 logger.info("  - GET  /api/stats")
 logger.info("  - GET  /api/articles")
@@ -471,3 +666,7 @@ logger.info("  - GET  /api/user-articles/{id}")
 logger.info("  - POST /api/user-articles")
 logger.info("  - PUT  /api/user-articles/{id}")
 logger.info("  - DELETE /api/user-articles/{id}")
+logger.info("  - GET  /api/semantic-themes")
+logger.info("  - GET  /api/semantic-themes/{id}")
+logger.info("  - GET  /api/clustering-stats")
+logger.info("  - POST /api/clustering/maintenance")
