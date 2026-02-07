@@ -74,6 +74,7 @@ const transformArticlesToMateriasInitial = (articles) => {
     id: `art-${article.id}`,
     title: article.title,
     source: article.source,
+    url: article.url,
     topics: extractTopicsFromArticleFallback(article, index),
     fullText: article.content || article.preview || article.title,
     isLoadingTopics: true
@@ -492,13 +493,17 @@ const TextoBaseFeed = ({
                     {currentMateria?.title}
                   </p>
                 </div>
-                <a
-                  href="#"
-                  className="text-tmc-orange hover:underline flex items-center gap-1 text-sm"
-                >
-                  <ExternalLink size={14} />
-                  Ver original
-                </a>
+                {currentMateria?.url && (
+                  <a
+                    href={currentMateria.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-tmc-orange hover:underline flex items-center gap-1 text-sm"
+                  >
+                    <ExternalLink size={14} />
+                    Ver original
+                  </a>
+                )}
               </div>
 
               {/* Tabs */}

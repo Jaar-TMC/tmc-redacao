@@ -7,7 +7,6 @@ import {
   Type,
   FileText,
   BarChart2,
-  BookOpen,
   Link2,
   Image,
   Sparkles,
@@ -564,12 +563,8 @@ const SEOAnalyzerPanel = ({
   articleType = 'default',
   targetKeyword,
   hasAuthor = false,
-  onOptimizeWithAI,
-  learningMode: externalLearningMode
+  onOptimizeWithAI
 }) => {
-  const [internalLearningMode, setInternalLearningMode] = useState(false);
-  const learningMode = externalLearningMode !== undefined ? externalLearningMode : internalLearningMode;
-
   const [expandedCategories, setExpandedCategories] = useState({
     contentQuality: false,
     onPageOptimization: false,
@@ -678,7 +673,7 @@ const SEOAnalyzerPanel = ({
             key={categoryKey}
             categoryKey={categoryKey}
             category={category}
-            explanations={learningMode ? SEO_EXPLANATIONS[categoryKey] : null}
+            explanations={SEO_EXPLANATIONS[categoryKey]}
             isExpanded={expandedCategories[categoryKey]}
             onToggle={() => toggleCategory(categoryKey)}
           />
@@ -689,29 +684,6 @@ const SEOAnalyzerPanel = ({
 
         {/* Recommendations */}
         <RecommendationsPanel recommendations={analysis.recommendations} />
-      </div>
-
-      {/* Learning Mode Toggle */}
-      <div className="p-3 border-t border-light-gray bg-off-white/30">
-        <button
-          onClick={() => setInternalLearningMode(!internalLearningMode)}
-          className="w-full flex items-center justify-between cursor-pointer hover:bg-off-white/50 rounded p-1 -m-1 transition-colors"
-        >
-          <div className="flex items-center gap-2">
-            <BookOpen size={12} className={learningMode ? 'text-tmc-orange' : 'text-medium-gray'} />
-            <span className="text-[10px] text-dark-gray">Modo Aprendizado</span>
-          </div>
-          <div className={`text-[9px] px-1.5 py-0.5 rounded ${
-            learningMode ? 'bg-tmc-orange/10 text-tmc-orange font-medium' : 'bg-light-gray/50 text-medium-gray'
-          }`}>
-            {learningMode ? 'Ativo' : 'Inativo'}
-          </div>
-        </button>
-        <p className="text-[9px] text-medium-gray mt-1">
-          {learningMode
-            ? 'Clique no ícone (?) para ver dicas de cada métrica'
-            : 'Ative para ver explicações detalhadas de SEO'}
-        </p>
       </div>
 
       {/* Manual Tasks Panel - shows what needs manual work */}
@@ -789,8 +761,7 @@ SEOAnalyzerPanel.propTypes = {
   articleType: PropTypes.oneOf(['noticia', 'reportagem', 'analise', 'opiniao', 'default']),
   targetKeyword: PropTypes.string,
   hasAuthor: PropTypes.bool,
-  onOptimizeWithAI: PropTypes.func,
-  learningMode: PropTypes.bool
+  onOptimizeWithAI: PropTypes.func
 };
 
 // Re-export calculateSEOScore for backward compatibility

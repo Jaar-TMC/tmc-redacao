@@ -147,16 +147,44 @@ async def get_categories_handler(req: func.HttpRequest) -> func.HttpResponse:
     GET /api/categories
 
     Retorna lista de categorias disponiveis com contagem de artigos.
+    Accepts optional filter params to return contextual counts.
+
+    Query Parameters:
+        search: str - Active search filter
+        tag: str - Active tag filter
+        source: str - Active source filter
+        max_hours: str - Active urgency filter
     """
     try:
         db = get_db()
-        stats = db.get_collection_stats()
 
-        # Converter para formato de lista
-        categories = [
-            {"name": name, "count": count}
-            for name, count in stats.get('by_category', {}).items()
-        ]
+        # Check if contextual filters are provided
+        search = req.params.get('search')
+        tag = req.params.get('tag')
+        source = req.params.get('source')
+        max_hours = req.params.get('max_hours')
+
+        period = None
+        if max_hours:
+            try:
+                hours = int(max_hours)
+                if 1 <= hours <= 24:
+                    period = str(hours)
+            except ValueError:
+                pass
+
+        has_filters = any([search, tag, source, period])
+
+        if has_filters:
+            categories = db.get_categories_filtered(
+                search=search, tag=tag, source_id=source, period=period
+            )
+        else:
+            stats = db.get_collection_stats()
+            categories = [
+                {"name": name, "count": count}
+                for name, count in stats.get('by_category', {}).items()
+            ]
 
         # Ordenar por contagem
         categories.sort(key=lambda x: x['count'], reverse=True)
@@ -243,17 +271,42 @@ async def get_all_tags_handler(req: func.HttpRequest) -> func.HttpResponse:
     GET /api/tags
 
     Returns ALL unique tags with article counts, ordered by popularity.
-    Use for tag filter dropdown.
+    Use for tag filter dropdown. Accepts optional filter params for contextual counts.
 
     Query Parameters:
         search: str - Optional search term to filter tags
+        category: str - Active category filter
+        source: str - Active source filter
+        max_hours: str - Active urgency filter
     """
     try:
         search = req.params.get('search')
         limit = min(int(req.params.get('limit', '100')), 200)
 
+        # Contextual filter params
+        category = req.params.get('category')
+        source = req.params.get('source')
+        max_hours = req.params.get('max_hours')
+
+        period = None
+        if max_hours:
+            try:
+                hours = int(max_hours)
+                if 1 <= hours <= 24:
+                    period = str(hours)
+            except ValueError:
+                pass
+
+        has_filters = any([category, source, period])
+
         db = get_db()
-        tags = db.get_all_tags(search=search, limit=limit)
+
+        if has_filters:
+            tags = db.get_all_tags_filtered(
+                category=category, source_id=source, period=period, limit=limit
+            )
+        else:
+            tags = db.get_all_tags(search=search, limit=limit)
 
         # Format response
         items = []

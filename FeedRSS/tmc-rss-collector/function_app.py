@@ -220,6 +220,10 @@ async def list_articles(req: func.HttpRequest) -> func.HttpResponse:
         source: str - Filtrar por source_id
         period: str - 'today', 'week', 'month'
         search: str - Busca em título/conteúdo
+        tag: str - Filtrar por tag exata
+        max_hours: int - Filtrar por urgência (1-24 horas)
+
+    Response includes urgency_counts: {now, recent, today, all}
     """
     from functions.articles_api import list_articles_handler
     return await list_articles_handler(req)

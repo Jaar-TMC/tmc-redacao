@@ -26,12 +26,15 @@ import {
   FileText,
   Save,
   Code,
-  AlertTriangle
+  AlertTriangle,
+  ShieldAlert,
+  ShieldCheck
 } from 'lucide-react';
 import { countWords, markdownToHtml } from '../utils/markdownRenderer';
 import { mockTones, mockPersonas } from '../data/mockData';
 import Tooltip from '../components/ui/Tooltip';
 import { SEOAnalyzerPanel, calculateSEOScore, RichTextEditor, EditorToolbar } from '../components/editor';
+import VerificationBanner from '../components/ui/VerificationBanner';
 import { useCriar } from '../context';
 import { useVersionHistory, useChatEditor } from '../hooks';
 import { createUserArticle, updateUserArticle, getUserArticle, generateTags, editArticle } from '../services/api';
@@ -53,6 +56,14 @@ const CriarPostPage = () => {
   const [searchParams] = useSearchParams();
   const { articleId: editArticleId } = useParams(); // For editing existing articles
   const { resultado } = useCriar();
+
+  // Anti-hallucination: publish blocking + human review
+  const publishBlocked = resultado?.publishBlocked || false;
+  const blockReason = resultado?.blockReason || null;
+  const verificationData = resultado?.verification || null;
+  const riskLevel = resultado?.riskLevel || null;
+  const humanReviewRequired = resultado?.humanReviewRequired || false;
+  const reviewReasons = resultado?.reviewReasons || [];
 
   // State for loading existing article
   const [isLoadingArticle, setIsLoadingArticle] = useState(false);
@@ -786,13 +797,23 @@ Com esse desempenho, o Brasil reafirma sua posição estratégica no cenário gl
             </Tooltip>
             <button
               onClick={handlePublish}
-              disabled={!title.trim() || !content.trim() || isPublishing}
-              className="flex items-center gap-2 px-3 md:px-4 py-2 text-sm font-semibold text-white bg-tmc-orange rounded-lg hover:bg-tmc-orange/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              disabled={!title.trim() || !content.trim() || isPublishing || publishBlocked}
+              className={`flex items-center gap-2 px-3 md:px-4 py-2 text-sm font-semibold text-white rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
+                publishBlocked
+                  ? 'bg-red-500 cursor-not-allowed'
+                  : 'bg-tmc-orange hover:bg-tmc-orange/90'
+              }`}
+              title={publishBlocked ? `Publicacao bloqueada: ${blockReason}` : ''}
             >
               {isPublishing ? (
                 <>
                   <Loader2 size={16} className="animate-spin" />
                   <span>Publicando...</span>
+                </>
+              ) : publishBlocked ? (
+                <>
+                  <ShieldAlert size={16} />
+                  <span>Bloqueado</span>
                 </>
               ) : (
                 <span>Publicar</span>
@@ -812,6 +833,20 @@ Com esse desempenho, o Brasil reafirma sua posição estratégica no cenário gl
             >
               <X size={16} />
             </button>
+          </div>
+        )}
+
+        {/* Publish blocked warning banner */}
+        {publishBlocked && (
+          <div className="bg-red-600 text-white px-4 py-3 flex items-center gap-3">
+            <ShieldAlert size={20} className="flex-shrink-0" />
+            <div className="flex-1">
+              <p className="text-sm font-semibold">Publicacao bloqueada - risco critico de desinformacao</p>
+              <p className="text-xs text-red-100 mt-0.5">{blockReason}</p>
+            </div>
+            <span className="text-xs bg-red-800 px-2 py-1 rounded font-medium">
+              Revise o conteudo antes de publicar
+            </span>
           </div>
         )}
       </div>
@@ -1053,6 +1088,16 @@ Com esse desempenho, o Brasil reafirma sua posição estratégica no cenário gl
 
           {/* Editor */}
           <div className="flex-1 p-4 md:p-8 overflow-y-auto bg-white">
+            {/* Verification Banner */}
+            {verificationData && (
+              <VerificationBanner
+                verification={verificationData}
+                publishBlocked={publishBlocked}
+                blockReason={blockReason}
+                humanReviewRequired={humanReviewRequired}
+                reviewReasons={reviewReasons}
+              />
+            )}
             <RichTextEditor
               ref={editorRef}
               content={content}

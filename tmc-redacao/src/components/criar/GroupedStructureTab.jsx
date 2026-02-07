@@ -401,9 +401,6 @@ const GroupedStructureTab = ({
                 <p className="text-sm font-medium text-dark-gray truncate">
                   {source.name}
                 </p>
-                <p className="text-xs text-medium-gray">
-                  {source.count} tópicos
-                </p>
               </div>
             </div>
           ))}

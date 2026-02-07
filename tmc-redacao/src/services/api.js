@@ -213,11 +213,25 @@ export async function collectSource(sourceId) {
 }
 
 /**
- * Get available categories
- * @returns {Promise<{categories: Array<string>}>}
+ * Get available categories with article counts.
+ * Accepts optional filter params for contextual counts.
+ * @param {Object} [params] - Optional filter context
+ * @param {string} [params.search] - Active search filter
+ * @param {string} [params.tag] - Active tag filter
+ * @param {string} [params.source] - Active source filter
+ * @param {number} [params.max_hours] - Active urgency filter
+ * @returns {Promise<{categories: Array<{name: string, count: number}>}>}
  */
-export async function getCategories() {
-  return fetchApi('/categories');
+export async function getCategories(params = {}) {
+  const queryParams = new URLSearchParams();
+
+  if (params.search) queryParams.append('search', params.search);
+  if (params.tag) queryParams.append('tag', params.tag);
+  if (params.source) queryParams.append('source', params.source);
+  if (params.max_hours) queryParams.append('max_hours', params.max_hours.toString());
+
+  const queryString = queryParams.toString();
+  return fetchApi(`/categories${queryString ? `?${queryString}` : ''}`);
 }
 
 /**
@@ -251,6 +265,9 @@ export async function getAllTags(params = {}) {
   const queryParams = new URLSearchParams();
 
   if (params.search) queryParams.append('search', params.search);
+  if (params.category) queryParams.append('category', params.category);
+  if (params.source) queryParams.append('source', params.source);
+  if (params.max_hours) queryParams.append('max_hours', params.max_hours.toString());
 
   const queryString = queryParams.toString();
   const endpoint = `/tags${queryString ? `?${queryString}` : ''}`;
@@ -279,10 +296,24 @@ export async function getAllTags(params = {}) {
  * @returns {Promise<{titulo: string, linha_fina: string, conteudo: string, tags_sugeridas: string[]}>}
  */
 export async function generateArticle(params) {
-  return fetchApi('/generate', {
-    method: 'POST',
-    body: JSON.stringify(params),
-  });
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 90000);
+
+  try {
+    const response = await fetchApi('/generate', {
+      method: 'POST',
+      body: JSON.stringify(params),
+      signal: controller.signal,
+    });
+    return response;
+  } catch (error) {
+    if (error.name === 'AbortError') {
+      throw new Error('A geracao demorou mais que o esperado. Tente novamente.');
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeoutId);
+  }
 }
 
 /**

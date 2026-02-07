@@ -128,6 +128,113 @@ MAX_TOKENS = 4096
 MIN_ARTICLE_LENGTH = 2000  # TMC standard for columnists
 
 # =============================================================================
+# FIDELIDADE FACTUAL - Anti-Hallucination System
+# =============================================================================
+
+FIDELIDADE_FACTUAL = """
+## FIDELIDADE FACTUAL (OBRIGATORIO - PRIORIDADE MAXIMA)
+- USE APENAS informacoes presentes no TEXTO-BASE e CONTEXTO VERIFICADO abaixo
+- NAO invente nomes, numeros, estatisticas, datas ou citacoes
+- NAO use seu conhecimento de treinamento (training data) para adicionar detalhes - mesmo que voce "lembre" de algo, isso pode estar errado ou desatualizado
+- PROIBIDO: completar placares, resultados, valores monetarios ou datas que NAO estejam nas fontes
+- PROIBIDO: adicionar contexto historico, bastidores ou declaracoes que NAO estejam nas fontes
+- PROIBIDO: misturar eventos diferentes - cada materia trata de UM evento especifico
+- Quando informacao for insuficiente: escreva materia MAIS CURTA e factual
+- NUNCA apresente informacao incerta como fato consumado
+- Citacoes: use APENAS as fornecidas no texto-base ou contexto verificado
+- REGRA DE OURO: se um dado especifico (numero, nome, data, resultado) NAO aparece literalmente nas fontes abaixo, NAO o inclua
+"""
+
+FIDELIDADE_CURTA = """
+## FIDELIDADE FACTUAL - FONTE CURTA (PRIORIDADE ABSOLUTA)
+O texto-base e MUITO CURTO. Voce DEVE seguir estas regras rigidamente:
+- Escreva APENAS 3 a 5 frases curtas e factuais
+- USE EXCLUSIVAMENTE informacoes do texto-base e do contexto verificado
+- NAO adicione NENHUMA informacao generica, dicas, conselhos, contexto historico ou explicacoes de seguranca
+- NAO invente nomes, numeros, estatisticas, datas, resultados, citacoes ou detalhes
+- NAO use seu conhecimento geral - ele pode estar DESATUALIZADO e causar desinformacao
+- Se o texto-base nao tem detalhes suficientes, escreva uma NOTA CURTA factual
+- NUNCA expanda alem do que as fontes verificadas permitem
+- Prefira dizer MENOS com precisao do que MAIS com risco de fabricacao
+"""
+
+FIDELIDADE_MEDIA = """
+## FIDELIDADE FACTUAL - FONTE MEDIA-CURTA (PRIORIDADE ALTA)
+O texto-base tem poucas informacoes. Siga estas regras:
+- Escreva uma materia CURTA e objetiva (5 a 8 paragrafos no maximo)
+- USE EXCLUSIVAMENTE informacoes do texto-base e do contexto verificado
+- NAO adicione contexto historico, bastidores, explicacoes ou dados do seu treinamento
+- NAO preencha lacunas com informacoes que voce "acha" que estao corretas
+- Se o texto-base nao detalha um ponto, OMITA esse ponto - nao tente completa-lo
+- Prefira ser breve e preciso a ser completo e impreciso
+"""
+
+ANTI_FABRICACAO_UNIVERSAL = """
+
+## ANTI-FABRICACAO (OBRIGATORIO - TODAS AS CATEGORIAS)
+- NAO adicione dados especificos (nomes, numeros, datas, valores, resultados) que NAO estejam no texto-base ou contexto verificado
+- NAO use sua memoria de treinamento para "completar" a historia - mesmo que voce saiba algo, pode estar errado
+- NAO misture eventos: se a fonte fala do evento A, NAO insira detalhes do evento B mesmo que sejam relacionados
+- Se falta informacao para um ponto, OMITA o ponto inteiro em vez de preencher com suposicoes
+- Qualquer dado especifico no seu texto DEVE ter correspondencia direta nas fontes fornecidas"""
+
+ANTI_FABRICACAO_PADROES = """
+
+## PADROES DE FABRICACAO PROIBIDOS (OBRIGATORIO)
+Estes sao erros COMUNS que voce DEVE evitar:
+
+1. **Especificidade temporal inventada**: NAO adicione dias da semana ("nesta quinta-feira"), horarios ou datas que NAO estejam LITERALMENTE nas fontes. Se a fonte nao diz o dia, NAO invente.
+2. **Afirmacoes negativas**: NAO escreva "X nao se pronunciou", "nao ha informacoes sobre", "X nao divulgou detalhes". Se algo NAO esta na fonte, simplesmente OMITA - nao afirme que algo NAO aconteceu.
+3. **Preenchimento editorial**: NAO adicione frases que soam jornalisticas mas sao inventadas, como "um dos dias de maior movimento", "em meio a crescente preocupacao", "segundo especialistas". Se nao esta nas fontes, e fabricacao.
+4. **Generalizacao de comportamento**: NAO atribua padroes de comportamento como "tem feito", "tem usado", "tem declarado", "costuma dizer". Reporte APENAS acoes especificas documentadas nas fontes.
+5. **Dados de treinamento**: NAO use conhecimento geral para adicionar detalhes factuais ("O Pix permite transferencias 24h", "criado pelo Banco Central em 2020"). Mesmo que seja verdade, nao esta nas fontes fornecidas.
+6. **Atribuicao cruzada de enriquecimento**: Ao usar dados do CONTEXTO VERIFICADO, confirme que cada dado esta associado a entidade CORRETA. NAO atribua dados de uma pessoa/time/empresa a outra.
+7. **Inferencias causais**: NAO adicione relacoes de causa e efeito que nao estejam explicitas nas fontes ("isso ocorreu porque", "em consequencia de").
+8. **Expansao de citacoes**: NAO parafrase citacoes adicionando palavras ou sentido que NAO estao no original."""
+
+# Dynamic length tiers based on TOTAL VERIFIED material (source + enrichment)
+# (max_verified_chars, min_output, max_output, format_label)
+SOURCE_LENGTH_TIERS = [
+    (150, 200, 400, "nota curta"),
+    (500, 400, 1000, "materia curta"),
+    (1500, 800, 2000, "materia media"),
+    (3000, 1500, 3500, "materia longa"),
+    (float('inf'), 2000, 4000, "materia completa"),
+]
+
+
+def get_dynamic_length_requirement(texto_base: str, verified_chars: int = 0) -> tuple:
+    """
+    Get dynamic min/max length based on total verified material.
+
+    Uses the LARGER of source text length or total verified chars
+    (source + enrichment from Exa). This allows short sources that were
+    enriched with verified external content to produce full articles.
+
+    Args:
+        texto_base: Source text content
+        verified_chars: Total verified material chars (source + enrichment).
+                       If 0, uses source length only.
+
+    Returns:
+        Tuple of (min_chars, max_chars, format_label)
+    """
+    source_len = len(texto_base.strip())
+    # Use the larger of source alone or total verified material
+    effective_len = max(source_len, verified_chars)
+    for max_source, min_output, max_output, label in SOURCE_LENGTH_TIERS:
+        if effective_len <= max_source:
+            # Safety: cap max_output at 3x verified material
+            if effective_len > 0:
+                expansion_cap = int(effective_len * 3)
+                capped_max = min(max_output, max(expansion_cap, min_output))
+                return min_output, capped_max, label
+            return min_output, max_output, label
+    # Fallback
+    return 2000, 4000, "materia completa"
+
+
+# =============================================================================
 # TMC EDITORIAL GUIDELINES - Category-Based System
 # =============================================================================
 
@@ -193,7 +300,16 @@ Referência de estilo: CazéTV - proximidade com torcedor, paixão, humor com re
 - Ofensas ou palavrões diretos
 - Incitar rivalidade violenta entre torcidas
 - Tratar eventos graves (acidentes com torcida, violência em estádio) como entretenimento
-- Em casos de violência, acidentes ou mortes: adotar tom jornalístico sóbrio, sem piada""",
+- Em casos de violência, acidentes ou mortes: adotar tom jornalístico sóbrio, sem piada
+
+## ANTI-FABRICACAO ESPORTIVA (OBRIGATORIO)
+- NAO inclua placares, resultados, escalacoes ou estatisticas que NAO estejam LITERALMENTE no texto-base
+- Mesmo que voce "lembre" de um resultado (ex: placar de um jogo), NAO o use - sua memoria pode ter detalhes errados (placar invertido, gol atribuido ao jogador errado, etc.)
+- NAO complete parciais: se a fonte diz "time venceu" sem placar, NAO adicione o placar
+- NAO invente nomes de tecnicos, jogadores ou dirigentes
+- NAO invente datas de partidas, rodadas ou classificacoes
+- Se nao tem dados especificos, descreva o CONTEXTO (importancia da partida, rivalidade, momento do time)
+- NUNCA apresente um dado esportivo especifico como fato se ele nao esta nas fontes""",
         "dos": [
             "Use gírias esportivas moderadamente",
             "Expressões como 'jogo pegado', 'clima de decisão'",
@@ -480,7 +596,9 @@ def get_system_prompt(
     tom: str = "formal",
     tipo_materia: str = "destaque",
     categoria: str = None,
-    modo_opinativo: bool = False
+    modo_opinativo: bool = False,
+    source_len: int = 0,
+    has_enrichment: bool = False
 ) -> str:
     """
     Build the system prompt for article generation.
@@ -493,6 +611,8 @@ def get_system_prompt(
         tipo_materia: Article type key
         categoria: Editorial category (esportes|entretenimento|politica|economia|geral)
         modo_opinativo: Whether opinion mode is enabled (for categories that allow it)
+        source_len: Length of source text in chars (for selecting appropriate FIDELIDADE)
+        has_enrichment: Whether enrichment context is available
 
     Returns:
         Complete system prompt string
@@ -501,7 +621,7 @@ def get_system_prompt(
 
     # Use category-based system if categoria is provided
     if categoria and categoria in CATEGORIAS_EDITORIAIS:
-        return _build_category_prompt(categoria, tom, tipo_materia, modo_opinativo)
+        return _build_category_prompt(categoria, tom, tipo_materia, modo_opinativo, source_len, has_enrichment)
 
     # Legacy persona-based system (backwards compatibility)
     persona_info = PERSONAS.get(persona, PERSONAS["imparcial"])
@@ -511,6 +631,9 @@ def get_system_prompt(
 
 ## PERSONA
 {persona_info['description']}
+{ANTI_FABRICACAO_UNIVERSAL}
+{ANTI_FABRICACAO_PADROES}
+{FIDELIDADE_FACTUAL}
 
 ## TOM DE ESCRITA
 {tone_info}
@@ -523,7 +646,7 @@ def get_system_prompt(
 1. **Estrutura da Matéria:**
    - Título: Claro, informativo, 50-60 caracteres para SEO
    - Linha Fina: Resumo que complementa o título, 150-160 caracteres
-   - Corpo: Mínimo {MIN_ARTICLE_LENGTH} caracteres, estrutura de pirâmide invertida
+   - Corpo: Tamanho proporcional ao texto-base (veja instrucoes no prompt do usuario)
 
 2. **Formatação:**
    - Use parágrafos curtos (3-4 linhas)
@@ -582,7 +705,9 @@ def _build_category_prompt(
     categoria: str,
     tom: str,
     tipo_materia: str,
-    modo_opinativo: bool
+    modo_opinativo: bool,
+    source_len: int = 0,
+    has_enrichment: bool = False
 ) -> str:
     """
     Build the system prompt using TMC's category-based editorial guidelines.
@@ -592,12 +717,35 @@ def _build_category_prompt(
         tom: Writing tone key
         tipo_materia: Article type key
         modo_opinativo: Whether opinion mode is enabled
+        source_len: Length of source text in chars (for selecting appropriate FIDELIDADE)
+        has_enrichment: Whether enrichment context is available
 
     Returns:
         Complete system prompt string
     """
     cat_info = CATEGORIAS_EDITORIAIS[categoria]
     type_info = ARTICLE_TYPES.get(tipo_materia, ARTICLE_TYPES["destaque"])
+
+    # Choose appropriate fidelidade based on source length
+    if source_len > 0 and source_len < 200:
+        fidelidade_prompt = FIDELIDADE_CURTA
+    elif source_len >= 200 and source_len < 500:
+        fidelidade_prompt = FIDELIDADE_MEDIA
+    else:
+        fidelidade_prompt = FIDELIDADE_FACTUAL
+
+    # Enrichment awareness block
+    if has_enrichment:
+        enrichment_awareness = """
+## DADOS DE ENRIQUECIMENTO
+Voce recebera no prompt do usuario um CONTEXTO VERIFICADO obtido de fontes externas.
+ATENCAO: Este contexto pode conter dados de eventos SIMILARES mas DISTINTOS do texto-base.
+- Verifique que cada dado esta associado a entidade CORRETA antes de usar
+- NAO misture informacoes de eventos diferentes
+- Na duvida, use APENAS o texto-base original
+"""
+    else:
+        enrichment_awareness = ""
 
     # Get tone description for this category
     category_tones = TONS_POR_CATEGORIA.get(categoria, {})
@@ -626,8 +774,11 @@ Este é um texto de COLUNA. Adjetivos valorativos e posicionamento estão libera
 Mantenha os vetos universais (sem preconceito, ataques pessoais, etc.)"""
 
     return f"""{cat_info['system_prompt_base']}
+{ANTI_FABRICACAO_UNIVERSAL}
+{ANTI_FABRICACAO_PADROES}
 {TMC_GENERAL_GUIDELINES}
-
+{fidelidade_prompt}
+{enrichment_awareness}
 ## TOM DE ESCRITA: {tom.upper()}
 {tone_desc}
 
@@ -640,7 +791,7 @@ Mantenha os vetos universais (sem preconceito, ataques pessoais, etc.)"""
 1. **Estrutura da Matéria:**
    - Título: Claro, informativo, 50-60 caracteres para SEO
    - Linha Fina: Resumo que complementa o título, 150-160 caracteres
-   - Corpo: Mínimo {MIN_ARTICLE_LENGTH} caracteres, estrutura de pirâmide invertida
+   - Corpo: Tamanho proporcional ao texto-base (veja instrucoes no prompt do usuario)
 
 2. **Formatação:**
    - Use parágrafos curtos (3-4 linhas)
@@ -701,7 +852,10 @@ def build_user_prompt(
     citacoes: Optional[list] = None,
     contexto: Optional[str] = None,
     creditos: Optional[str] = None,
-    tags: Optional[list] = None
+    tags: Optional[list] = None,
+    enrichment_context: Optional[str] = None,
+    enrichment_key_facts: Optional[list] = None,
+    verified_chars: int = 0
 ) -> str:
     """
     Build the user prompt with all provided content.
@@ -713,11 +867,17 @@ def build_user_prompt(
         contexto: Background context
         creditos: Source credits
         tags: Tags for SEO targeting
+        enrichment_context: Verified context from external search (Exa)
+        enrichment_key_facts: List of verified key facts from enrichment
+        verified_chars: Total verified material chars (source + enrichment)
 
     Returns:
         Complete user prompt string
     """
     prompt_parts = []
+
+    # NOTE: FIDELIDADE_CURTA/MEDIA is now injected in the system prompt
+    # via _build_category_prompt(source_len=...) to avoid duplication.
 
     prompt_parts.append(f"""## TEXTO-BASE PARA REESCRITA
 
@@ -726,6 +886,23 @@ def build_user_prompt(
 ---
 
 Por favor, reescreva o texto acima como uma matéria jornalística completa.""")
+
+    # Inject enrichment context if available
+    if enrichment_context:
+        prompt_parts.append(f"""
+## CONTEXTO VERIFICADO (de fontes externas)
+As informacoes abaixo foram obtidas de fontes jornalisticas verificadas.
+Voce pode usa-las para COMPLEMENTAR o texto-base com detalhes adicionais.
+IMPORTANTE: O texto-base + este contexto verificado sao as UNICAS fontes permitidas.
+Qualquer informacao que NAO apareca em nenhuma dessas duas fontes e PROIBIDA.
+ATENCAO: Este contexto pode conter imprecisoes ou dados de eventos SIMILARES mas distintos. Verifique que cada dado esta associado a entidade CORRETA (ex: jogador ao time correto, politico ao partido correto, valor ao evento correto). Na duvida, USE APENAS o texto-base.
+{enrichment_context}""")
+
+    if enrichment_key_facts:
+        facts_text = "\n".join([f"- {fact}" for fact in enrichment_key_facts])
+        prompt_parts.append(f"""
+## FATOS-CHAVE VERIFICADOS
+{facts_text}""")
 
     if orientacao_lide:
         prompt_parts.append(f"""
@@ -760,13 +937,23 @@ Inclua a atribuição de créditos apropriadamente.""")
 
 Incorpore esses termos naturalmente no texto para SEO.""")
 
-    prompt_parts.append("""
+    # Dynamic length based on total verified material (source + enrichment)
+    min_chars, max_chars, format_label = get_dynamic_length_requirement(
+        texto_base, verified_chars=verified_chars
+    )
+
+    prompt_parts.append(f"""
 ---
 
-Lembre-se:
-- Mínimo 2000 caracteres no corpo da matéria
+## INSTRUCOES FINAIS (LEIA COM ATENCAO)
+- Tamanho do corpo: entre {min_chars} e {max_chars} caracteres ({format_label})
+- REGRA INVIOLAVEL: cada fato, nome, numero, data, resultado e citacao no seu texto DEVE existir no TEXTO-BASE ou CONTEXTO VERIFICADO acima. Se nao existe la, NAO inclua.
+- NAO faca afirmacoes negativas ("X nao se pronunciou", "nao ha informacoes sobre", "ainda nao divulgou") - se algo nao esta na fonte, simplesmente OMITA
+- NAO adicione dias da semana ("nesta quinta-feira"), horarios ou datas que NAO estejam explicitamente nas fontes
+- NAO use conhecimento geral para preencher lacunas - mesmo fatos verdadeiros sao PROIBIDOS se nao estao nas fontes
+- Se o material disponivel nao e suficiente para {min_chars} caracteres, escreva MENOS. Precisao > tamanho.
 - Responda APENAS com o JSON no formato especificado
-- Não inclua explicações fora do JSON""")
+- Nao inclua explicacoes fora do JSON""")
 
     return "\n".join(prompt_parts)
 
@@ -857,7 +1044,10 @@ class LLMService:
         creditos: Optional[str] = None,
         tags: Optional[list] = None,
         categoria: Optional[str] = None,
-        modo_opinativo: bool = False
+        modo_opinativo: bool = False,
+        enrichment_context: Optional[str] = None,
+        enrichment_key_facts: Optional[list] = None,
+        verified_chars: int = 0
     ) -> dict:
         """
         Generate a journalistic article using Claude.
@@ -874,8 +1064,10 @@ class LLMService:
             contexto: Background context
             creditos: Source credits
             tags: Tags for SEO targeting
-            categoria: Editorial category (esportes|entretenimento|politica|economia|geral) - NEW
-            modo_opinativo: Enable opinion mode for categories that allow it - NEW
+            categoria: Editorial category (esportes|entretenimento|politica|economia|geral)
+            modo_opinativo: Enable opinion mode for categories that allow it
+            enrichment_context: Verified context from external search (anti-hallucination)
+            enrichment_key_facts: List of verified key facts from enrichment
 
         Returns:
             dict with titulo, linha_fina, conteudo, tags_sugeridas
@@ -890,7 +1082,9 @@ class LLMService:
             tom=tom,
             tipo_materia=tipo_materia,
             categoria=categoria,
-            modo_opinativo=modo_opinativo
+            modo_opinativo=modo_opinativo,
+            source_len=len(texto_base.strip()),
+            has_enrichment=bool(enrichment_context)
         )
         user_prompt = build_user_prompt(
             texto_base=texto_base,
@@ -898,7 +1092,10 @@ class LLMService:
             citacoes=citacoes,
             contexto=contexto,
             creditos=creditos,
-            tags=tags
+            tags=tags,
+            enrichment_context=enrichment_context,
+            enrichment_key_facts=enrichment_key_facts,
+            verified_chars=verified_chars,
         )
 
         try:
@@ -921,10 +1118,11 @@ class LLMService:
                 if "tags_sugeridas" not in result:
                     result["tags_sugeridas"] = []
 
-                # Validate minimum length
+                # Validate minimum length (dynamic based on verified material)
                 content_length = len(result["conteudo"])
-                if content_length < MIN_ARTICLE_LENGTH:
-                    logger.warning(f"Article length {content_length} below minimum {MIN_ARTICLE_LENGTH}")
+                min_chars, _, _ = get_dynamic_length_requirement(texto_base, verified_chars)
+                if content_length < min_chars:
+                    logger.warning(f"Article length {content_length} below dynamic minimum {min_chars}")
 
                 logger.info(f"Article generated successfully. Length: {content_length} chars")
                 return result
@@ -1290,7 +1488,9 @@ Você deve:
 2. Agrupar versões semelhantes de cada elemento vindas de diferentes fontes
 3. Identificar conteúdo exclusivo de cada fonte
 4. Extrair citações com atribuição de fonte
-5. Recomendar a melhor versão de cada elemento"""
+5. Recomendar a melhor versão de cada elemento
+
+""" + ANTI_FABRICACAO_UNIVERSAL
 
 
 # Edit Article System Prompt
@@ -1317,7 +1517,8 @@ Responda SEMPRE em JSON válido com a estrutura:
   "changes_summary": "Breve descrição das alterações feitas"
 }
 ```
-"""
+
+""" + ANTI_FABRICACAO_UNIVERSAL
 
 
 def get_edit_article_prompt(current_article: dict, instruction: str, edit_scope: str) -> str:

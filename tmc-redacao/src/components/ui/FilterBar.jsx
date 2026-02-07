@@ -5,6 +5,7 @@ import { getSources, getCategories, getAllTags } from '../../services/api';
 import { transformSources, transformCategories } from '../../utils/transformers';
 import { useFilters } from '../../context';
 import UrgencyChips from './UrgencyChips';
+import { addAccents, formatTagDisplay, normalizeForSearch } from '../../utils/accentMap';
 
 /**
  * FilterBar Component
@@ -22,14 +23,12 @@ const FilterBar = ({ urgencyCounts }) => {
 
   // Search terms for dropdowns
   const [categorySearch, setCategorySearch] = useState('');
-  const [sourceSearch, setSourceSearch] = useState('');
   const [tagSearch, setTagSearch] = useState('');
 
   // Refs to prevent race conditions between user typing and external updates
   const isUserTypingRef = useRef(false);
   const debounceTimerRef = useRef(null);
   const categorySearchRef = useRef(null);
-  const sourceSearchRef = useRef(null);
   const tagSearchRef = useRef(null);
 
   // API State for filters
@@ -37,13 +36,28 @@ const FilterBar = ({ urgencyCounts }) => {
   const [sources, setSources] = useState([]);
   const [tags, setTags] = useState([]);
 
-  // Fetch filter data from API on mount (all in parallel)
+  // Fetch filter data from API - refetch when active filters change for contextual counts
   useEffect(() => {
     const fetchFilters = async () => {
+      // Build contextual filter params (exclude the filter type being fetched)
+      const catParams = {};
+      const tagParams = {};
+
+      // Categories: filter by tag, source, urgency, search (not by category itself)
+      if (filters.tag) catParams.tag = filters.tag;
+      if (filters.source) catParams.source = filters.source;
+      if (filters.urgency) catParams.max_hours = filters.urgency;
+      if (filters.searchQuery) catParams.search = filters.searchQuery;
+
+      // Tags: filter by category, source, urgency (not by tag itself)
+      if (filters.category) tagParams.category = filters.category;
+      if (filters.source) tagParams.source = filters.source;
+      if (filters.urgency) tagParams.max_hours = filters.urgency;
+
       const [catRes, srcRes, tagsRes] = await Promise.allSettled([
-        getCategories(),
+        getCategories(catParams),
         getSources(),
-        getAllTags()
+        getAllTags(tagParams)
       ]);
 
       if (catRes.status === 'fulfilled') {
@@ -57,7 +71,7 @@ const FilterBar = ({ urgencyCounts }) => {
       }
     };
     fetchFilters();
-  }, []);
+  }, [filters.tag, filters.category, filters.source, filters.urgency, filters.searchQuery]);
 
   // Sync local state when filters.searchQuery changes externally (e.g., from TrendsSidebar)
   // Only update if user is not currently typing to prevent race conditions
@@ -99,7 +113,6 @@ const FilterBar = ({ urgencyCounts }) => {
       if (prev === type) {
         // Closing dropdown - clear search
         if (type === 'category') setCategorySearch('');
-        if (type === 'source') setSourceSearch('');
         if (type === 'tag') setTagSearch('');
         return null;
       }
@@ -107,9 +120,6 @@ const FilterBar = ({ urgencyCounts }) => {
       setTimeout(() => {
         if (type === 'category' && categorySearchRef.current) {
           categorySearchRef.current.focus();
-        }
-        if (type === 'source' && sourceSearchRef.current) {
-          sourceSearchRef.current.focus();
         }
         if (type === 'tag' && tagSearchRef.current) {
           tagSearchRef.current.focus();
@@ -127,7 +137,6 @@ const FilterBar = ({ urgencyCounts }) => {
   const handleCloseDropdown = useCallback(() => {
     setOpenDropdown(null);
     setCategorySearch('');
-    setSourceSearch('');
     setTagSearch('');
   }, []);
 
@@ -144,21 +153,26 @@ const FilterBar = ({ urgencyCounts }) => {
   }, [openDropdown, handleCloseDropdown]);
 
   // Memoize filtered lists to avoid recomputing on every render
-  const filteredCategories = useMemo(() =>
-    categories.filter(cat =>
-      cat.name.toLowerCase().includes(categorySearch.toLowerCase())
-    ), [categories, categorySearch]);
+  const filteredCategories = useMemo(() => {
+    const term = normalizeForSearch(categorySearch);
+    return categories.filter(cat =>
+      normalizeForSearch(cat.name).includes(term) ||
+      normalizeForSearch(addAccents(cat.name)).includes(term)
+    );
+  }, [categories, categorySearch]);
 
   const filteredSources = useMemo(() =>
-    sources.filter(s =>
-      s.active && s.name.toLowerCase().includes(sourceSearch.toLowerCase())
-    ), [sources, sourceSearch]);
+    sources.filter(s => s.active),
+  [sources]);
 
-  const filteredTags = useMemo(() =>
-    tags.filter(t =>
-      t.theme.toLowerCase().includes(tagSearch.toLowerCase()) ||
-      t.tag.toLowerCase().includes(tagSearch.toLowerCase())
-    ), [tags, tagSearch]);
+  const filteredTags = useMemo(() => {
+    const term = normalizeForSearch(tagSearch);
+    return tags.filter(t =>
+      normalizeForSearch(t.theme).includes(term) ||
+      normalizeForSearch(addAccents(t.theme)).includes(term) ||
+      normalizeForSearch(t.tag).includes(term)
+    );
+  }, [tags, tagSearch]);
 
   const handleUrgencyChange = useCallback((value) => {
     updateFilter('urgency', value);
@@ -204,7 +218,7 @@ const FilterBar = ({ urgencyCounts }) => {
               }`}
             >
               <Tag style={{ width: '18px', height: '18px' }} aria-hidden="true" />
-              <span>{filters.category || 'Tema'}</span>
+              <span>{addAccents(filters.category) || 'Tema'}</span>
               <ChevronDown style={{ width: '14px', height: '14px' }} aria-hidden="true" />
             </button>
 
@@ -249,7 +263,7 @@ const FilterBar = ({ urgencyCounts }) => {
                         role="option"
                         aria-selected={filters.category === cat.name}
                       >
-                        <span>{cat.name}</span>
+                        <span>{addAccents(cat.name)}</span>
                         <span className="text-xs text-medium-gray bg-off-white px-2 py-0.5 rounded" aria-label={`${cat.count} matérias`}>
                           {cat.count}
                         </span>
@@ -268,7 +282,7 @@ const FilterBar = ({ urgencyCounts }) => {
               onClick={() => handleFilterClick('tag')}
               aria-expanded={openDropdown === 'tag'}
               aria-haspopup="listbox"
-              aria-label={`Filtrar por tag: ${filters.tag || 'Todas as tags'}`}
+              aria-label={`Filtrar por tag: ${formatTagDisplay(filters.tag) || 'Todas as tags'}`}
               className={`flex items-center gap-2 px-4 py-2.5 rounded-lg font-medium transition-colors ${
                 filters.tag
                   ? 'bg-tmc-orange text-white'
@@ -276,7 +290,7 @@ const FilterBar = ({ urgencyCounts }) => {
               }`}
             >
               <Hash style={{ width: '18px', height: '18px' }} aria-hidden="true" />
-              <span className="hidden sm:inline">{filters.tag || 'Tag'}</span>
+              <span className="hidden sm:inline">{formatTagDisplay(filters.tag) || 'Tag'}</span>
               <ChevronDown style={{ width: '14px', height: '14px' }} aria-hidden="true" />
             </button>
 
@@ -323,7 +337,7 @@ const FilterBar = ({ urgencyCounts }) => {
                       >
                         <span className="flex items-center gap-2">
                           <Hash style={{ width: '14px', height: '14px' }} className="text-medium-gray" />
-                          {tagItem.theme}
+                          {addAccents(tagItem.theme)}
                         </span>
                         <span className="text-xs text-medium-gray bg-off-white px-2 py-0.5 rounded" aria-label={`${tagItem.count} matérias`}>
                           {tagItem.count}
@@ -351,37 +365,22 @@ const FilterBar = ({ urgencyCounts }) => {
               }`}
             >
               <Building2 style={{ width: '18px', height: '18px' }} aria-hidden="true" />
-              <span>{filters.source || 'Origem'}</span>
+              <span>{addAccents(filters.source) || 'Origem'}</span>
               <ChevronDown style={{ width: '14px', height: '14px' }} aria-hidden="true" />
             </button>
 
             {openDropdown === 'source' && (
               <div className="absolute top-full left-0 mt-2 w-56 bg-white rounded-lg border border-light-gray py-2 z-20" role="listbox" aria-label="Origens disponíveis">
-                {/* Search input */}
-                <div className="px-2 pb-2 border-b border-light-gray mb-2">
-                  <input
-                    ref={sourceSearchRef}
-                    type="text"
-                    placeholder="Pesquisar origem..."
-                    value={sourceSearch}
-                    onChange={(e) => setSourceSearch(e.target.value)}
-                    onClick={(e) => e.stopPropagation()}
-                    className="w-full px-3 py-2 text-sm border border-light-gray rounded-lg focus:outline-none focus:ring-2 focus:ring-tmc-orange/50 focus:border-tmc-orange"
-                    aria-label="Pesquisar origens"
-                  />
-                </div>
                 <div className="max-h-64 overflow-y-auto">
-                  {!sourceSearch && (
-                    <button
-                      type="button"
-                      onClick={() => handleSelectFilter('source', null)}
-                      className="w-full px-4 py-2 text-left text-sm hover:bg-off-white text-medium-gray"
-                      role="option"
-                      aria-selected={!filters.source}
-                    >
-                      Todas as origens
-                    </button>
-                  )}
+                  <button
+                    type="button"
+                    onClick={() => handleSelectFilter('source', null)}
+                    className="w-full px-4 py-2 text-left text-sm hover:bg-off-white text-medium-gray"
+                    role="option"
+                    aria-selected={!filters.source}
+                  >
+                    Todas as origens
+                  </button>
                   {filteredSources.length === 0 ? (
                     <div className="px-4 py-3 text-sm text-medium-gray text-center">
                       Nenhuma origem encontrada
@@ -397,7 +396,7 @@ const FilterBar = ({ urgencyCounts }) => {
                         aria-selected={filters.source === source.name}
                       >
                         <img src={source.favicon} alt="" className="w-4 h-4 rounded" aria-hidden="true" />
-                        <span>{source.name}</span>
+                        <span>{addAccents(source.name)}</span>
                       </button>
                     ))
                   )}

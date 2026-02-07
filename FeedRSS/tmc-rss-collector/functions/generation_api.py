@@ -2,13 +2,14 @@
 Generation API - Azure Functions endpoints for AI article generation.
 
 Endpoints:
-- POST /api/generate - Generate article from source text
+- POST /api/generate - Generate article from source text (3-phase anti-hallucination pipeline)
 - POST /api/extract-topics - Extract topics from text
 - POST /api/generate-tags - Generate tags for content
 """
 
 import logging
 import json
+import time
 from typing import Optional
 import azure.functions as func
 from pydantic import BaseModel, Field
@@ -19,7 +20,7 @@ logger = logging.getLogger(__name__)
 # Request/Response Models
 class GenerateRequest(BaseModel):
     """Request model for article generation."""
-    texto_base: str = Field(..., min_length=100, description="Source text content")
+    texto_base: str = Field(..., min_length=20, description="Source text content")
     persona: str = Field(default="imparcial", description="Writer persona (legacy)")
     tom: str = Field(default="formal", description="Writing tone")
     tipo_materia: str = Field(default="destaque", description="Article type")
@@ -31,6 +32,10 @@ class GenerateRequest(BaseModel):
     # New category-based fields
     categoria: Optional[str] = Field(default=None, description="Editorial category (esportes|entretenimento|politica|economia|geral)")
     modo_opinativo: bool = Field(default=False, description="Enable opinion mode for categories that allow it")
+    # Anti-hallucination pipeline options
+    titulo_fonte: Optional[str] = Field(default=None, description="Source article title (for better enrichment search)")
+    skip_verification: bool = Field(default=False, description="Skip post-generation verification")
+    skip_enrichment: bool = Field(default=False, description="Skip pre-generation enrichment")
 
 
 class ExtractTopicsRequest(BaseModel):
@@ -80,13 +85,18 @@ def create_success_response(data: dict, status_code: int = 200) -> func.HttpResp
 
 async def generate_article_handler(req: func.HttpRequest) -> func.HttpResponse:
     """
-    Generate article using AI.
+    Generate article using AI with 3-phase anti-hallucination pipeline.
+
+    Phase 1: Enrichment (Exa web search for verified context)
+    Phase 2: Generation (hardened prompts + dynamic length)
+    Phase 3: Verification (claim extraction, entity comparison, quote checking)
 
     POST /api/generate
     Body: GenerateRequest JSON
-    Returns: {titulo, linha_fina, conteudo, tags_sugeridas}
+    Returns: {titulo, linha_fina, conteudo, tags_sugeridas, verification?: {...}}
     """
     logger.info("Generate article request received")
+    pipeline_start = time.time()
 
     try:
         # Parse request body
@@ -101,8 +111,11 @@ async def generate_article_handler(req: func.HttpRequest) -> func.HttpResponse:
         except Exception as e:
             return create_error_response(f"Validation error: {str(e)}", 400)
 
-        # Import LLM service (lazy import to avoid startup issues)
+        # Import services (lazy to avoid startup issues)
         from services.llm_service import get_llm_service
+        from services.fact_check_service import (
+            get_fact_check_service, is_fact_check_enabled
+        )
 
         try:
             llm = get_llm_service()
@@ -113,22 +126,249 @@ async def generate_article_handler(req: func.HttpRequest) -> func.HttpResponse:
                 503
             )
 
-        # Generate article
-        result = await llm.generate_article(
-            texto_base=request_data.texto_base,
-            persona=request_data.persona,
-            tom=request_data.tom,
-            tipo_materia=request_data.tipo_materia,
-            orientacao_lide=request_data.orientacao_lide,
-            citacoes=request_data.citacoes,
-            contexto=request_data.contexto,
-            creditos=request_data.creditos,
-            tags=request_data.tags,
-            categoria=request_data.categoria,
-            modo_opinativo=request_data.modo_opinativo
-        )
+        # ==============================================================
+        # Phase 1: Enrichment (non-blocking, try/except)
+        # ==============================================================
+        enrichment = None
+        enrichment_context = None
+        enrichment_key_facts = None
+        verified_chars = len(request_data.texto_base.strip())
 
-        logger.info("Article generated successfully")
+        if is_fact_check_enabled() and not request_data.skip_enrichment:
+            try:
+                fact_checker = get_fact_check_service()
+                enrichment = await fact_checker.enrich_context(
+                    texto_base=request_data.texto_base,
+                    titulo_fonte=request_data.titulo_fonte,
+                    tags=request_data.tags,
+                )
+                if enrichment.success:
+                    enrichment_context = enrichment.context_text
+                    enrichment_key_facts = enrichment.key_facts if enrichment.key_facts else None
+                    verified_chars = enrichment.verified_chars
+                    logger.info(
+                        f"Phase 1 complete: {len(enrichment.key_facts or [])} facts, "
+                        f"{len(enrichment.source_urls)} sources, "
+                        f"verified_chars={verified_chars}, "
+                        f"context_only={'yes' if not enrichment.key_facts else 'no'}"
+                    )
+                else:
+                    logger.info(
+                        f"Phase 1: no enrichment (urls={len(enrichment.source_urls)}, "
+                        f"context_len={len(enrichment.context_text)})"
+                    )
+            except Exception as e:
+                logger.warning(f"Phase 1 enrichment failed (non-blocking): {e}")
+
+        # ==============================================================
+        # Phase 2: Generation (blocking - same core as before)
+        # ==============================================================
+        try:
+            result = await llm.generate_article(
+                texto_base=request_data.texto_base,
+                persona=request_data.persona,
+                tom=request_data.tom,
+                tipo_materia=request_data.tipo_materia,
+                orientacao_lide=request_data.orientacao_lide,
+                citacoes=request_data.citacoes,
+                contexto=request_data.contexto,
+                creditos=request_data.creditos,
+                tags=request_data.tags,
+                categoria=request_data.categoria,
+                modo_opinativo=request_data.modo_opinativo,
+                enrichment_context=enrichment_context,
+                enrichment_key_facts=enrichment_key_facts,
+                verified_chars=verified_chars,
+            )
+        except Exception as e:
+            logger.error(f"Phase 2 generation failed: {e}")
+            return func.HttpResponse(
+                json.dumps({
+                    "error": "Falha na geracao do artigo",
+                    "details": str(e),
+                }, ensure_ascii=False),
+                status_code=502,
+                mimetype="application/json",
+            )
+
+        logger.info("Phase 2 complete: article generated")
+
+        # ==============================================================
+        # Sufficiency check: flag if material was insufficient for 2000+
+        # ==============================================================
+        source_len = len(request_data.texto_base.strip())
+        content_len = len(result.get("conteudo", ""))
+        similar_articles = []
+
+        if content_len < 2000 and source_len < 1500:
+            # Material was insufficient for a full article
+            # Try to find similar articles in database for merge suggestion
+            try:
+                similar_articles = await _find_similar_articles(
+                    request_data.tags,
+                    request_data.titulo_fonte,
+                    request_data.categoria,
+                )
+            except Exception as e:
+                logger.warning(f"Similar articles search failed: {e}")
+
+            result["material_sufficiency"] = {
+                "sufficient": False,
+                "source_chars": source_len,
+                "verified_chars": verified_chars,
+                "generated_chars": content_len,
+                "recommendation": (
+                    "Material insuficiente para materia completa (2000+ chars). "
+                    "Sugerimos unir com materias similares para uma cobertura mais completa."
+                ),
+                "similar_articles": similar_articles,
+            }
+            logger.info(
+                f"Material insufficient: source={source_len}, "
+                f"verified={verified_chars}, generated={content_len}, "
+                f"similar_found={len(similar_articles)}"
+            )
+        else:
+            result["material_sufficiency"] = {
+                "sufficient": True,
+                "source_chars": source_len,
+                "verified_chars": verified_chars,
+                "generated_chars": content_len,
+            }
+
+        # ==============================================================
+        # Phase 3: Verification (non-blocking, try/except)
+        # ==============================================================
+        if is_fact_check_enabled() and not request_data.skip_verification:
+            try:
+                fact_checker = get_fact_check_service()
+                verification = await fact_checker.verify_article(
+                    texto_base=request_data.texto_base,
+                    generated_article=result.get("conteudo", ""),
+                    citacoes=request_data.citacoes,
+                    enrichment=enrichment,
+                )
+                result["verification"] = verification.to_dict()
+                logger.info(
+                    f"Phase 3 complete: confidence={verification.confidence_score:.3f}, "
+                    f"risk={verification.risk_level}"
+                )
+            except Exception as e:
+                logger.warning(f"Phase 3 verification failed (non-blocking): {e}")
+                result["verification"] = {
+                    "is_verified": False,
+                    "risk_level": "high",
+                    "requires_human_review": True,
+                    "warnings": [f"Verification failed: {str(e)[:100]}"],
+                    "review_reasons": ["Verification pipeline error"],
+                }
+                # Ensure failed verification flags human review at top level
+                result["human_review_required"] = True
+                result["review_reasons"] = [
+                    "Verificacao automatica falhou - revisao manual necessaria"
+                ]
+
+        # ==============================================================
+        # Publish safety gate: block critical-risk articles
+        # ==============================================================
+        verification_data = result.get("verification", {})
+        risk_level = verification_data.get("risk_level", "high")
+        confidence_score = verification_data.get("confidence_score", 0.0)
+        fabricated_claims = verification_data.get("fabricated_claims", 0)
+        unverifiable_claims = verification_data.get("unverifiable_claims", 0)
+        total_claims = verification_data.get("total_claims", 0)
+        expansion_ratio = verification_data.get("expansion_ratio", 0.0)
+
+        publish_blocked = False
+        block_reasons = []
+        # Carry over human_review flags from verification failure (if set)
+        human_review_required = result.get("human_review_required", False)
+        review_reasons = list(result.get("review_reasons", []))
+
+        # --- HARD BLOCKS ---
+        if risk_level == "critical":
+            publish_blocked = True
+            block_reasons.append("Nivel de risco CRITICO detectado")
+
+        if confidence_score < 0.4 and verification_data.get("is_verified", False):
+            publish_blocked = True
+            block_reasons.append(f"Confianca muito baixa ({confidence_score:.0%})")
+
+        # Fabricated claims: block on 2+ fabricated, or 1 fabricated with very low confidence
+        if fabricated_claims >= 2:
+            publish_blocked = True
+            block_reasons.append(f"{fabricated_claims} afirmacoes fabricadas")
+        elif fabricated_claims == 1 and confidence_score < 0.45:
+            publish_blocked = True
+            block_reasons.append(f"1 afirmacao fabricada com confianca baixa ({confidence_score:.0%})")
+
+        if total_claims > 0 and unverifiable_claims >= 3:
+            if unverifiable_claims / total_claims > 0.40:
+                publish_blocked = True
+                block_reasons.append(
+                    f"{unverifiable_claims}/{total_claims} afirmacoes inverificaveis"
+                )
+
+        # Use enrichment-adjusted source length for expansion ratio if available
+        effective_source_len = source_len  # default to raw source length
+        if enrichment and hasattr(enrichment, 'verified_chars') and enrichment.verified_chars > 0:
+            effective_source_len = enrichment.verified_chars
+        elif enrichment and isinstance(enrichment, dict) and enrichment.get('verified_chars', 0) > 0:
+            effective_source_len = enrichment['verified_chars']
+
+        # Recalculate expansion ratio with effective source
+        if effective_source_len > 0:
+            effective_expansion = len(result.get("conteudo", "")) / effective_source_len
+        else:
+            effective_expansion = expansion_ratio  # fallback to verification-reported ratio
+
+        # Use effective_expansion for the block decision
+        if effective_expansion > 15:
+            publish_blocked = True
+            block_reasons.append(f"Expansao extrema: {effective_expansion:.1f}x")
+
+        # --- SOFT GATES (human review) ---
+        # 1 fabricated claim with reasonable confidence → review, not block
+        if fabricated_claims == 1 and confidence_score >= 0.45 and not publish_blocked:
+            human_review_required = True
+            review_reasons.append(f"1 afirmacao possivelmente fabricada")
+
+        if total_claims > 0 and unverifiable_claims >= 2:
+            if unverifiable_claims / total_claims > 0.30:
+                human_review_required = True
+                review_reasons.append(
+                    f"{unverifiable_claims} afirmacoes inverificaveis"
+                )
+
+        entity_comparison = verification_data.get("entity_comparison", {})
+        novel_entities = entity_comparison.get("novel_entities", [])
+        output_entities = entity_comparison.get("output_entities", [])
+        if output_entities and len(novel_entities) >= 3:
+            if len(novel_entities) / len(output_entities) > 0.50:
+                human_review_required = True
+                review_reasons.append(
+                    f"{len(novel_entities)} entidades novas nao presentes na fonte"
+                )
+
+        if 10 < effective_expansion <= 15:
+            human_review_required = True
+            review_reasons.append(f"Expansao elevada: {effective_expansion:.1f}x")
+
+        if risk_level == "high" and not publish_blocked:
+            human_review_required = True
+            review_reasons.append("Nivel de risco ALTO")
+
+        result["publish_blocked"] = publish_blocked
+        result["human_review_required"] = human_review_required
+        if publish_blocked:
+            result["block_reason"] = "; ".join(block_reasons)
+            logger.warning(f"PUBLISH BLOCKED: {result['block_reason']}")
+        elif human_review_required:
+            result["review_reasons"] = review_reasons
+            logger.info(f"HUMAN REVIEW: {'; '.join(review_reasons)}")
+
+        total_ms = int((time.time() - pipeline_start) * 1000)
+        logger.info(f"Full pipeline complete in {total_ms}ms")
         return create_success_response(result)
 
     except RuntimeError as e:
@@ -228,6 +468,59 @@ async def generate_tags_handler(req: func.HttpRequest) -> func.HttpResponse:
     except Exception as e:
         logger.exception(f"Error in generate_tags: {e}")
         return create_error_response("Internal server error", 500)
+
+
+async def _find_similar_articles(
+    tags: Optional[list] = None,
+    titulo_fonte: Optional[str] = None,
+    categoria: Optional[str] = None,
+    limit: int = 5,
+) -> list:
+    """
+    Find similar articles in the database for merge suggestion.
+
+    Searches by tags overlap. Returns lightweight article summaries
+    the frontend can use to suggest merging.
+    """
+    if not tags or len(tags) == 0:
+        return []
+
+    try:
+        from services.database import DatabaseService
+        db = DatabaseService()
+
+        # Search by the most specific tag (first tag is usually most relevant)
+        articles_found = []
+        seen_ids = set()
+
+        for tag in tags[:3]:
+            results, count, _ = db.get_articles_with_urgency(
+                page=1, limit=limit, tag=tag, category=categoria
+            )
+            for article in results:
+                article_id = str(article.id)
+                if article_id not in seen_ids:
+                    seen_ids.add(article_id)
+                    # Only suggest articles with substantial content
+                    content = article.content or article.preview or ""
+                    if len(content.strip()) > 200:
+                        articles_found.append({
+                            "id": article_id,
+                            "title": article.title,
+                            "source": article.source_name if hasattr(article, 'source_name') else "",
+                            "preview": (content[:200] + "...") if len(content) > 200 else content,
+                            "content_length": len(content),
+                            "published_at": article.published_at.isoformat() if article.published_at else None,
+                        })
+
+            if len(articles_found) >= limit:
+                break
+
+        return articles_found[:limit]
+
+    except Exception as e:
+        logger.warning(f"Similar articles search failed: {e}")
+        return []
 
 
 # Synchronous wrappers for Azure Functions (if needed)

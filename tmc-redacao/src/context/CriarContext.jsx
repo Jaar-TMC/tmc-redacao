@@ -75,11 +75,27 @@ const initialState = {
   },
 
   // Etapa 4: Resultado gerado
-  resultado: {
-    titulo: '',
-    conteudo: '',
-    geradoEm: null,
-  },
+  resultado: (() => {
+    const defaultResultado = {
+      titulo: '',
+      conteudo: '',
+      geradoEm: null,
+      // Anti-hallucination verification data
+      verification: null,
+      riskLevel: null,
+      publishBlocked: false,
+      blockReason: null,
+      materialSufficiency: null,
+      humanReviewRequired: false,
+      reviewReasons: [],
+    };
+    try {
+      const saved = sessionStorage.getItem('tmc_resultado');
+      return saved ? { ...defaultResultado, ...JSON.parse(saved) } : defaultResultado;
+    } catch {
+      return defaultResultado;
+    }
+  })(),
 
   // Controle de navegação
   etapaAtual: 0,
@@ -327,14 +343,22 @@ export const CriarProvider = ({ children }) => {
 
   // === Ações para Resultado (Etapa 4) ===
   const setResultado = useCallback((resultado) => {
+    const resultadoWithTimestamp = {
+      ...resultado,
+      geradoEm: new Date().toISOString(),
+    };
     setState(prev => ({
       ...prev,
-      resultado: {
-        ...resultado,
-        geradoEm: new Date().toISOString(),
-      },
+      resultado: resultadoWithTimestamp,
       etapasCompletas: new Set([...prev.etapasCompletas, 3]),
     }));
+    try {
+      if (resultado && (resultado.verification || resultado.publishBlocked)) {
+        sessionStorage.setItem('tmc_resultado', JSON.stringify(resultadoWithTimestamp));
+      }
+    } catch (e) {
+      console.warn('Failed to persist verification data:', e);
+    }
   }, []);
 
   // === Navegação ===
@@ -351,6 +375,7 @@ export const CriarProvider = ({ children }) => {
 
   // === Reset ===
   const resetFluxo = useCallback(() => {
+    sessionStorage.removeItem('tmc_resultado');
     setState(initialState);
   }, []);
 

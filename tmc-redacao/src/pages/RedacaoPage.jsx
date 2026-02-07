@@ -6,6 +6,8 @@ import FilterBar from '../components/ui/FilterBar';
 import ArticleCard from '../components/cards/ArticleCard';
 import Skeleton from '../components/ui/Skeleton';
 import EmptyState from '../components/ui/EmptyState';
+import ActiveFiltersBar from '../components/ui/ActiveFiltersBar';
+import SmartEmptyState from '../components/ui/SmartEmptyState';
 import Pagination from '../components/ui/Pagination';
 import { getArticles } from '../services/api';
 import { transformArticles } from '../utils/transformers';
@@ -315,6 +317,8 @@ const RedacaoPage = () => {
             <FilterBar urgencyCounts={urgencyCounts} />
           </div>
 
+          <ActiveFiltersBar />
+
           {isLoading ? (
             <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-2 gap-4">
               {[...Array(6)].map((_, i) => (
@@ -344,11 +348,15 @@ const RedacaoPage = () => {
               </button>
             </div>
           ) : articles.length === 0 ? (
-            <EmptyState
-              icon={FileText}
-              title="Nenhuma matéria encontrada"
-              description="Não encontramos matérias que correspondam aos filtros selecionados. Tente ajustar os filtros ou aguarde novas coletas."
-            />
+            (filters.searchQuery || filters.tag || filters.category || filters.source) ? (
+              <SmartEmptyState />
+            ) : (
+              <EmptyState
+                icon={FileText}
+                title="Nenhuma matéria encontrada"
+                description="Não encontramos matérias no momento. Aguarde novas coletas."
+              />
+            )
           ) : (
             <>
               <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-2 gap-4">

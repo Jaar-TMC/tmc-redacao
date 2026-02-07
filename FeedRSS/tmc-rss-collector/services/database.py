@@ -277,18 +277,18 @@ class DatabaseService:
             if search_with_spaces != search:
                 search_param_spaces = f"%{search_with_spaces}%"
                 conditions.append("""(
-                    a.title LIKE %s
-                    OR a.title LIKE %s
-                    OR a.content LIKE %s
-                    OR a.content LIKE %s
-                    OR a.tags LIKE %s
+                    a.title COLLATE Latin1_General_CI_AI LIKE %s COLLATE Latin1_General_CI_AI
+                    OR a.title COLLATE Latin1_General_CI_AI LIKE %s COLLATE Latin1_General_CI_AI
+                    OR a.content COLLATE Latin1_General_CI_AI LIKE %s COLLATE Latin1_General_CI_AI
+                    OR a.content COLLATE Latin1_General_CI_AI LIKE %s COLLATE Latin1_General_CI_AI
+                    OR a.tags COLLATE Latin1_General_CI_AI LIKE %s COLLATE Latin1_General_CI_AI
                 )""")
                 params.extend([search_param, search_param_spaces, search_param, search_param_spaces, search_param])
             else:
                 conditions.append("""(
-                    a.title LIKE %s
-                    OR a.content LIKE %s
-                    OR a.tags LIKE %s
+                    a.title COLLATE Latin1_General_CI_AI LIKE %s COLLATE Latin1_General_CI_AI
+                    OR a.content COLLATE Latin1_General_CI_AI LIKE %s COLLATE Latin1_General_CI_AI
+                    OR a.tags COLLATE Latin1_General_CI_AI LIKE %s COLLATE Latin1_General_CI_AI
                 )""")
                 params.extend([search_param, search_param, search_param])
 
@@ -830,6 +830,121 @@ class DatabaseService:
                 theme = ' '.join(word.capitalize() for word in tag.replace('-', ' ').split())
                 result.append({
                     "tag": tag,
+                    "theme": theme,
+                    "count": row[1]
+                })
+            return result
+
+    def get_categories_filtered(self,
+                               search: Optional[str] = None,
+                               tag: Optional[str] = None,
+                               source_id: Optional[str] = None,
+                               period: Optional[str] = None) -> List[dict]:
+        """
+        Get categories with article counts, filtered by active filters.
+        Returns counts that reflect what the user would see with those filters.
+        """
+        where_clause, params = self._build_article_filters(
+            search=search, tag=tag, source_id=source_id, period=period
+        )
+
+        query = f"""
+            SELECT a.category, COUNT(*) as count
+            FROM collected_articles a
+            JOIN sources s ON a.source_id = s.id
+            {where_clause}
+            {'AND' if where_clause else 'WHERE'} a.category IS NOT NULL
+            GROUP BY a.category
+            ORDER BY count DESC
+        """
+
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(query, params)
+            return [{"name": row[0], "count": row[1]} for row in cursor.fetchall()]
+
+    def get_all_tags_filtered(self,
+                              search: Optional[str] = None,
+                              category: Optional[str] = None,
+                              source_id: Optional[str] = None,
+                              period: Optional[str] = None,
+                              limit: int = 100) -> List[dict]:
+        """
+        Get tags with article counts, filtered by active filters.
+        Returns counts that reflect what the user would see with those filters.
+        """
+        conditions = []
+        params = []
+
+        # Build base filter conditions (reusing logic from _build_article_filters)
+        if category:
+            conditions.append("a.category = %s")
+            params.append(category)
+        if source_id:
+            conditions.append("s.name = %s")
+            params.append(source_id)
+        if search:
+            search_param = f"%{search}%"
+            conditions.append("""(
+                a.title COLLATE Latin1_General_CI_AI LIKE %s COLLATE Latin1_General_CI_AI
+                OR a.content COLLATE Latin1_General_CI_AI LIKE %s COLLATE Latin1_General_CI_AI
+            )""")
+            params.extend([search_param, search_param])
+        if period:
+            try:
+                hours = int(period)
+                if 1 <= hours <= 24:
+                    conditions.append("a.published_at >= DATEADD(hour, -%s, GETUTCDATE())")
+                    params.append(hours)
+            except ValueError:
+                pass
+
+        where_extra = ("AND " + " AND ".join(conditions)) if conditions else ""
+
+        query = f"""
+            WITH ArticleTags AS (
+                SELECT
+                    a.id as article_id,
+                    LOWER(LTRIM(RTRIM(t.value))) as tag
+                FROM collected_articles a
+                JOIN sources s ON a.source_id = s.id
+                CROSS APPLY OPENJSON(a.tags) t
+                WHERE 1=1 {where_extra}
+            ),
+            TagCounts AS (
+                SELECT
+                    tag,
+                    COUNT(DISTINCT article_id) as article_count
+                FROM ArticleTags
+                WHERE tag IS NOT NULL
+                    AND LEN(tag) > 2
+                    AND tag NOT IN ('g1', 'globo', 'folha', 'uol', 'estadao', 'cnn', 'bbc',
+                                    'r7', 'terra', 'ig', 'globoesporte', 'tecmundo', 'infomoney',
+                                    'noticias', 'noticia', 'news')
+                    AND tag NOT LIKE '%%.com'
+                    AND tag NOT LIKE '%%.com.br'
+                    AND tag NOT LIKE '%%.br'
+                    AND tag NOT LIKE '%%.net'
+                    AND tag NOT LIKE '%%.org'
+                GROUP BY tag
+            )
+            SELECT TOP %s tag, article_count
+            FROM TagCounts
+            ORDER BY article_count DESC, tag ASC
+        """
+        params.append(limit)
+
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(query, params)
+            rows = cursor.fetchall()
+
+            result = []
+            for row in rows:
+                tag_val = row[0]
+                theme = ' '.join(word.capitalize() for word in tag_val.replace('-', ' ').split())
+                result.append({
+                    "tag": tag_val,
                     "theme": theme,
                     "count": row[1]
                 })

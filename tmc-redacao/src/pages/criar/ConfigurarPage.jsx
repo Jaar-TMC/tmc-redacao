@@ -98,7 +98,7 @@ const tooltips = {
     )
   },
   categoria: {
-    title: 'Categoria Editorial',
+    title: 'Estilo Editorial',
     content: (
       <div className="space-y-2">
         <p>Define a voz e regras editoriais específicas do TMC:</p>
@@ -343,7 +343,7 @@ const ConfigurarPage = () => {
         {/* Category Selector - Full Width */}
         <div className="bg-white border border-light-gray rounded-xl p-6 mb-6">
           <ConfigField
-            label="Categoria Editorial"
+            label="Estilo Editorial"
             icon={<Layers size={18} />}
             tooltip={tooltips.categoria}
           >

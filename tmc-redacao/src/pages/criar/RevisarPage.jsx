@@ -262,6 +262,9 @@ const RevisarPage = () => {
     try {
       startProgressSimulation();
 
+      // Get source title for enrichment search
+      const tituloFonte = fonte?.dados?.[0]?.title || reviewData.textoBase.title || '';
+
       // Call the real generation API
       const result = await generateArticle({
         texto_base: reviewData._raw.textoBaseContent,
@@ -273,7 +276,8 @@ const RevisarPage = () => {
         citacoes: reviewData._raw.citacoes || [],
         contexto: reviewData._raw.contexto || '',
         creditos: reviewData._raw.creditos || '',
-        tags: reviewData._raw.tags || []
+        tags: reviewData._raw.tags || [],
+        titulo_fonte: tituloFonte,
       });
 
       // Stop progress simulation
@@ -283,14 +287,22 @@ const RevisarPage = () => {
       setGenerationProgress(100);
       setGenerationMessage('Matéria gerada com sucesso!');
 
-      // Store result in context
+      // Store result in context (including verification data)
       if (setResultado) {
         setResultado({
           titulo: result.titulo,
           linhaFina: result.linha_fina,
           conteudo: result.conteudo,
           tagsSugeridas: result.tags_sugeridas || [],
-          geradoEm: new Date().toISOString()
+          geradoEm: new Date().toISOString(),
+          // Anti-hallucination verification data
+          verification: result.verification || null,
+          riskLevel: result.verification?.risk_level || null,
+          publishBlocked: result.publish_blocked || false,
+          blockReason: result.block_reason || null,
+          materialSufficiency: result.material_sufficiency || null,
+          humanReviewRequired: result.human_review_required || false,
+          reviewReasons: result.review_reasons || [],
         });
       }
 
@@ -569,7 +581,7 @@ const RevisarPage = () => {
               <div className="flex items-center gap-3">
                 <User size={18} className="text-tmc-orange" />
                 <div>
-                  <p className="text-xs text-medium-gray">Categoria Editorial</p>
+                  <p className="text-xs text-medium-gray">Estilo Editorial</p>
                   <p className="text-sm font-medium text-dark-gray">{reviewData.configuracoes.categoria}</p>
                 </div>
               </div>

@@ -7,6 +7,7 @@ import Skeleton from '../ui/Skeleton';
 import EmptyState from '../ui/EmptyState';
 import PropTypes from 'prop-types';
 import { FEATURES } from '../../config/featureFlags';
+import { addAccents } from '../../utils/accentMap';
 
 // Static mock data for Google and Twitter trends (disabled via feature flags)
 const mockGoogleTrends = [];
@@ -212,7 +213,7 @@ const TrendsSidebar = ({ isOpen, onClose }) => {
                 aria-label="Limpar filtro de tema"
               >
                 <Filter size={12} aria-hidden="true" />
-                Limpar filtro: &quot;{activeTheme.theme}&quot;
+                Limpar filtro: &quot;{addAccents(activeTheme.theme)}&quot;
               </button>
             )}
 
@@ -257,7 +258,7 @@ const TrendsSidebar = ({ isOpen, onClose }) => {
                       onClick={() => handleThemeClick(item.tag)}
                       onKeyDown={(e) => e.key === 'Enter' && handleThemeClick(item.tag)}
                       aria-pressed={isActive}
-                      aria-label={`Filtrar por ${item.theme}. ${item.count} matérias`}
+                      aria-label={`Filtrar por ${addAccents(item.theme)}. ${item.count} matérias`}
                       className={`flex items-center justify-between p-2 rounded-lg cursor-pointer transition-all group ${
                         isActive
                           ? 'bg-tmc-orange text-white shadow-md ring-2 ring-tmc-orange/30'
@@ -279,7 +280,7 @@ const TrendsSidebar = ({ isOpen, onClose }) => {
                             ? 'text-white'
                             : 'text-dark-gray group-hover:text-tmc-orange'
                         }`}>
-                          {item.theme}
+                          {addAccents(item.theme)}
                         </span>
                       </div>
                       <div className="flex items-center gap-2 flex-shrink-0">
