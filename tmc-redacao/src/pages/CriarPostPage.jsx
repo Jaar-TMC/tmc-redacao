@@ -797,23 +797,14 @@ Com esse desempenho, o Brasil reafirma sua posição estratégica no cenário gl
             </Tooltip>
             <button
               onClick={handlePublish}
-              disabled={!title.trim() || !content.trim() || isPublishing || publishBlocked}
-              className={`flex items-center gap-2 px-3 md:px-4 py-2 text-sm font-semibold text-white rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
-                publishBlocked
-                  ? 'bg-red-500 cursor-not-allowed'
-                  : 'bg-tmc-orange hover:bg-tmc-orange/90'
-              }`}
-              title={publishBlocked ? `Publicacao bloqueada: ${blockReason}` : ''}
+              disabled={!title.trim() || !content.trim() || isPublishing}
+              className={`flex items-center gap-2 px-3 md:px-4 py-2 text-sm font-semibold text-white rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed bg-tmc-orange hover:bg-tmc-orange/90`}
+              title=""
             >
               {isPublishing ? (
                 <>
                   <Loader2 size={16} className="animate-spin" />
                   <span>Publicando...</span>
-                </>
-              ) : publishBlocked ? (
-                <>
-                  <ShieldAlert size={16} />
-                  <span>Bloqueado</span>
                 </>
               ) : (
                 <span>Publicar</span>
@@ -836,19 +827,7 @@ Com esse desempenho, o Brasil reafirma sua posição estratégica no cenário gl
           </div>
         )}
 
-        {/* Publish blocked warning banner */}
-        {publishBlocked && (
-          <div className="bg-red-600 text-white px-4 py-3 flex items-center gap-3">
-            <ShieldAlert size={20} className="flex-shrink-0" />
-            <div className="flex-1">
-              <p className="text-sm font-semibold">Publicacao bloqueada - risco critico de desinformacao</p>
-              <p className="text-xs text-red-100 mt-0.5">{blockReason}</p>
-            </div>
-            <span className="text-xs bg-red-800 px-2 py-1 rounded font-medium">
-              Revise o conteudo antes de publicar
-            </span>
-          </div>
-        )}
+        {/* Verification UI temporarily hidden */}
       </div>
 
       {/* Banner de Contexto do Tema */}
@@ -1088,16 +1067,7 @@ Com esse desempenho, o Brasil reafirma sua posição estratégica no cenário gl
 
           {/* Editor */}
           <div className="flex-1 p-4 md:p-8 overflow-y-auto bg-white">
-            {/* Verification Banner */}
-            {verificationData && (
-              <VerificationBanner
-                verification={verificationData}
-                publishBlocked={publishBlocked}
-                blockReason={blockReason}
-                humanReviewRequired={humanReviewRequired}
-                reviewReasons={reviewReasons}
-              />
-            )}
+            {/* Verification Banner temporarily hidden */}
             <RichTextEditor
               ref={editorRef}
               content={content}
