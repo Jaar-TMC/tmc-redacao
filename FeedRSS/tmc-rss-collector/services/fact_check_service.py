@@ -770,21 +770,28 @@ Responda em JSON:
 
 Regras de classificacao:
 - **grounded**: Informacao factual presente no texto-fonte ou contexto verificado
-- **fabricated**: Informacao factual inventada, sem base no material fornecido
+- **fabricated**: Informacao factual INCORRETA, DESCONEXA do tema, ou dados especificos inventados que CONTRADIZEM ou DISTORCEM os fatos (ex: inventar placar, atribuir fala a pessoa errada, criar evento que nao aconteceu)
 - **inaccurate**: Informacao factual distorcida (ex: numeros errados, nomes trocados)
 - **unverifiable**: Informacao factual impossivel de confirmar com o material disponivel
-- **editorial**: Opiniao, analise, previsao ou comentario editorial (NAO e uma afirmacao factual). Exemplos: "a visita sera um momento importante", "o cenario e preocupante", "analistas esperam melhoras"
+- **editorial**: Inclui TODAS as seguintes situacoes:
+  1. Opinioes, analises, previsoes ou comentarios editoriais ("o cenario e preocupante", "analistas esperam melhoras")
+  2. Contexto factual correto que ENRIQUECE a materia com coesao tematica, mesmo que nao esteja nas fontes (ex: "O Kommersant e um dos principais jornais da Russia", "tentativas de assassinato contra oficiais de inteligencia sao raras")
+  3. Inferencias logicas razoaveis baseadas nos fatos apresentados (ex: "a detencao rapida sugere que o caso e prioritario")
+  4. Background factual de conhecimento publico que contextualiza a noticia
 
-IMPORTANTE - REGRAS DE CLASSIFICACAO ESTRITA:
-- Se uma afirmacao contem DETALHES ESPECIFICOS (nomes, numeros, datas, locais, cargos, valores) que NAO aparecem no texto-fonte NEM no contexto verificado, classifique como "fabricated" - NAO como "unverifiable"
-- "unverifiable" so deve ser usado para informacoes GENERICAS ou CONTEXTUAIS que nao contem detalhes inventados (ex: "o cenario economico e complexo")
-- Exemplos de "fabricated" (NAO "unverifiable"):
-  * Nome de pessoa/cargo nao mencionado na fonte -> fabricated
-  * Numero/estatistica/percentual nao presente na fonte -> fabricated
-  * Data/local especifico nao mencionado na fonte -> fabricated
-  * Citacao atribuida a alguem que nao esta na fonte -> fabricated
-- Classifique como "editorial" APENAS opinioes, previsoes e analises subjetivas
-- NA DUVIDA entre "unverifiable" e "fabricated" para detalhes especificos: prefira "fabricated"
+IMPORTANTE - REGRAS DE CLASSIFICACAO:
+- "fabricated" deve ser usado APENAS para informacoes que sao INCORRETAS, DESCONEXAS do tema, ou que DISTORCEM os fatos. Informacao factualmente correta que enriquece a materia com coesao tematica e "editorial", NAO "fabricated"
+- Exemplos de "fabricated" (erros reais):
+  * Inventar resultado de jogo/eleicao que nao aconteceu -> fabricated
+  * Atribuir citacao a pessoa errada -> fabricated
+  * Criar estatistica/numero falso -> fabricated
+  * Adicionar detalhes desconexos do tema (misturar eventos diferentes) -> fabricated
+- Exemplos de "editorial" (contexto correto, NAO fabricated):
+  * Descrever uma organizacao mencionada na fonte ("e um dos maiores jornais") -> editorial
+  * Analise razoavel dos fatos ("isso sugere que...") -> editorial
+  * Contexto historico/geografico correto e relevante ao tema -> editorial
+  * Generalizacoes fatuais de conhecimento publico ("ataques a oficiais sao raros") -> editorial
+- NA DUVIDA entre "editorial" e "fabricated": se a informacao e factualmente correta e tem coesao com o tema, prefira "editorial"
 - Afirmacoes editoriais NAO contam na avaliacao de precisao factual"""
 
             response_text = await llm._call_api(system, prompt, 2048)
@@ -1100,14 +1107,20 @@ IMPORTANTE - REGRAS DE CLASSIFICACAO ESTRITA:
             level = "critical"
 
         # Override: fabricated claims escalate risk
-        # 2+ fabricated = critical (regardless of confidence)
-        # 1 fabricated + low confidence = high (not critical - may be verifier false positive)
-        if metadata.fabricated_claims >= 2:
+        # NOTE: With the updated classifier, "fabricated" means genuinely incorrect
+        # or thematically disconnected info (not factually correct editorial context).
+        # 3+ fabricated = critical (multiple real errors)
+        # 2 fabricated = high (likely real issues)
+        # 1 fabricated = keep base level (may be verifier false positive)
+        if metadata.fabricated_claims >= 3:
             level = "critical"
-        elif metadata.fabricated_claims == 1:
+        elif metadata.fabricated_claims == 2:
             if score < 0.35:
                 level = "critical"
             elif level in ("low", "medium"):
+                level = "high"
+        elif metadata.fabricated_claims == 1:
+            if score < 0.30:
                 level = "high"
 
         # Override: extreme expansion

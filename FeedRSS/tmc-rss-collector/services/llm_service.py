@@ -598,7 +598,8 @@ def get_system_prompt(
     categoria: str = None,
     modo_opinativo: bool = False,
     source_len: int = 0,
-    has_enrichment: bool = False
+    has_enrichment: bool = False,
+    verified_chars: int = 0
 ) -> str:
     """
     Build the system prompt for article generation.
@@ -613,6 +614,7 @@ def get_system_prompt(
         modo_opinativo: Whether opinion mode is enabled (for categories that allow it)
         source_len: Length of source text in chars (for selecting appropriate FIDELIDADE)
         has_enrichment: Whether enrichment context is available
+        verified_chars: Total verified material chars (source + enrichment)
 
     Returns:
         Complete system prompt string
@@ -621,7 +623,7 @@ def get_system_prompt(
 
     # Use category-based system if categoria is provided
     if categoria and categoria in CATEGORIAS_EDITORIAIS:
-        return _build_category_prompt(categoria, tom, tipo_materia, modo_opinativo, source_len, has_enrichment)
+        return _build_category_prompt(categoria, tom, tipo_materia, modo_opinativo, source_len, has_enrichment, verified_chars)
 
     # Legacy persona-based system (backwards compatibility)
     persona_info = PERSONAS.get(persona, PERSONAS["imparcial"])
@@ -707,7 +709,8 @@ def _build_category_prompt(
     tipo_materia: str,
     modo_opinativo: bool,
     source_len: int = 0,
-    has_enrichment: bool = False
+    has_enrichment: bool = False,
+    verified_chars: int = 0
 ) -> str:
     """
     Build the system prompt using TMC's category-based editorial guidelines.
@@ -719,6 +722,7 @@ def _build_category_prompt(
         modo_opinativo: Whether opinion mode is enabled
         source_len: Length of source text in chars (for selecting appropriate FIDELIDADE)
         has_enrichment: Whether enrichment context is available
+        verified_chars: Total verified material chars (source + enrichment)
 
     Returns:
         Complete system prompt string
@@ -726,10 +730,13 @@ def _build_category_prompt(
     cat_info = CATEGORIAS_EDITORIAIS[categoria]
     type_info = ARTICLE_TYPES.get(tipo_materia, ARTICLE_TYPES["destaque"])
 
-    # Choose appropriate fidelidade based on source length
-    if source_len > 0 and source_len < 200:
+    # Choose appropriate fidelidade based on EFFECTIVE material length
+    # When enrichment is available, use verified_chars (source + enrichment)
+    # so short sources enriched with external context get proper treatment
+    effective_material = max(source_len, verified_chars) if verified_chars > 0 else source_len
+    if effective_material > 0 and effective_material < 200:
         fidelidade_prompt = FIDELIDADE_CURTA
-    elif source_len >= 200 and source_len < 500:
+    elif effective_material >= 200 and effective_material < 500:
         fidelidade_prompt = FIDELIDADE_MEDIA
     else:
         fidelidade_prompt = FIDELIDADE_FACTUAL
@@ -1084,7 +1091,8 @@ class LLMService:
             categoria=categoria,
             modo_opinativo=modo_opinativo,
             source_len=len(texto_base.strip()),
-            has_enrichment=bool(enrichment_context)
+            has_enrichment=bool(enrichment_context),
+            verified_chars=verified_chars,
         )
         user_prompt = build_user_prompt(
             texto_base=texto_base,

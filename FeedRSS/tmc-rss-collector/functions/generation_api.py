@@ -294,13 +294,15 @@ async def generate_article_handler(req: func.HttpRequest) -> func.HttpResponse:
             publish_blocked = True
             block_reasons.append(f"Confianca muito baixa ({confidence_score:.0%})")
 
-        # Fabricated claims: block on 2+ fabricated, or 1 fabricated with very low confidence
-        if fabricated_claims >= 2:
+        # Fabricated claims: block on 3+ fabricated, or 2 fabricated with low confidence
+        # NOTE: With the updated classifier, "fabricated" means genuinely incorrect info
+        # (not factually correct editorial context), so thresholds are higher.
+        if fabricated_claims >= 3:
             publish_blocked = True
             block_reasons.append(f"{fabricated_claims} afirmacoes fabricadas")
-        elif fabricated_claims == 1 and confidence_score < 0.45:
+        elif fabricated_claims == 2 and confidence_score < 0.40:
             publish_blocked = True
-            block_reasons.append(f"1 afirmacao fabricada com confianca baixa ({confidence_score:.0%})")
+            block_reasons.append(f"2 afirmacoes fabricadas com confianca baixa ({confidence_score:.0%})")
 
         if total_claims > 0 and unverifiable_claims >= 3:
             if unverifiable_claims / total_claims > 0.40:
@@ -328,10 +330,10 @@ async def generate_article_handler(req: func.HttpRequest) -> func.HttpResponse:
             block_reasons.append(f"Expansao extrema: {effective_expansion:.1f}x")
 
         # --- SOFT GATES (human review) ---
-        # 1 fabricated claim with reasonable confidence → review, not block
-        if fabricated_claims == 1 and confidence_score >= 0.45 and not publish_blocked:
+        # 2 fabricated claims with reasonable confidence → review, not block
+        if fabricated_claims == 2 and confidence_score >= 0.40 and not publish_blocked:
             human_review_required = True
-            review_reasons.append(f"1 afirmacao possivelmente fabricada")
+            review_reasons.append(f"2 afirmacoes possivelmente fabricadas")
 
         if total_claims > 0 and unverifiable_claims >= 2:
             if unverifiable_claims / total_claims > 0.30:
