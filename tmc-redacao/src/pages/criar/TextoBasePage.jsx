@@ -36,7 +36,7 @@ const tooltipContent = {
 
 const TextoBasePage = () => {
   const navigate = useNavigate();
-  const { fonte, confirmarTextoBase, setBlocos, setFonte } = useCriar();
+  const { fonte, confirmarTextoBase, setBlocos, setFonte, textoBase, setVariantSelections } = useCriar();
 
   // Estado para dados coletados da variante
   const [variantData, setVariantData] = useState(null);
@@ -61,6 +61,15 @@ const TextoBasePage = () => {
   const handleDataChange = useCallback((data) => {
     setVariantData(data);
 
+    // Persist selections to context so they survive navigation
+    if (data && (data.selectedTopics || data.editedTexts)) {
+      setVariantSelections({
+        selectedTopics: data.selectedTopics || [],
+        editedTexts: data.editedTexts || {},
+        topicTexts: data.topicTexts || {},
+      });
+    }
+
     // Verificar se pode prosseguir baseado nos dados
     if (data) {
       const hasSelection = (
@@ -77,7 +86,7 @@ const TextoBasePage = () => {
       );
       setCanProceed(hasSelection);
     }
-  }, []);
+  }, [setVariantSelections]);
 
   // Handler para trocar fonte
   const handleChangeSource = useCallback(() => {
@@ -229,6 +238,7 @@ const TextoBasePage = () => {
           fonte={{ tipo: 'tema-articles', dados: temaArticlesForEdit }}
           onChangeSource={handleBackFromTopicEdit}
           onDataChange={handleDataChange}
+          savedSelections={textoBase.variantSelections}
         />
       );
     }
@@ -260,6 +270,7 @@ const TextoBasePage = () => {
             fonte={fonte}
             onChangeSource={handleChangeSource}
             onDataChange={handleDataChange}
+            savedSelections={textoBase.variantSelections}
           />
         );
       case 'link':
@@ -268,6 +279,7 @@ const TextoBasePage = () => {
             fonte={fonte}
             onChangeSource={handleChangeSource}
             onDataChange={handleDataChange}
+            savedSelections={textoBase.variantSelections}
           />
         );
       case 'zero':

@@ -51,13 +51,18 @@ Especialistas alertam que, como consequência da alta do dólar, produtos import
 const TextoBaseLink = ({
   fonte,
   onChangeSource,
-  onDataChange
+  onDataChange,
+  savedSelections
 }) => {
-  // States
+  // States - restore saved selections if returning from another step
   const [selectedTopics, setSelectedTopics] = useState(
-    () => new Set(mockLinkData.topics.map(t => t.id))
+    () => savedSelections?.selectedTopics?.length > 0
+      ? new Set(savedSelections.selectedTopics)
+      : new Set(mockLinkData.topics.map(t => t.id))
   );
-  const [editedTexts, setEditedTexts] = useState({});
+  const [editedTexts, setEditedTexts] = useState(
+    () => savedSelections?.editedTexts || {}
+  );
   const [activeTab, setActiveTab] = useState('topics');
   const [fullText, setFullText] = useState(mockLinkData.fullText);
   const [isReprocessing, setIsReprocessing] = useState(false);

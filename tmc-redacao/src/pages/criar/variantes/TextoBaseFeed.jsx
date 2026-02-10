@@ -84,7 +84,8 @@ const transformArticlesToMateriasInitial = (articles) => {
 const TextoBaseFeed = ({
   fonte,
   onChangeSource,
-  onDataChange
+  onDataChange,
+  savedSelections
 }) => {
   // States
   const [materias, setMaterias] = useState([]);
@@ -105,16 +106,26 @@ const TextoBaseFeed = ({
       const initialMaterias = transformArticlesToMateriasInitial(fonte.dados);
       setMaterias(initialMaterias);
 
-      // Set active materia and select all topics
       if (initialMaterias.length > 0) {
         setActiveMateria(initialMaterias[0].id);
-        const allTopics = new Set();
-        initialMaterias.forEach(m => {
-          m.topics.forEach(t => allTopics.add(t.id));
-        });
-        setSelectedTopics(allTopics);
+
+        // Restore saved selections if returning from another step
+        if (savedSelections?.selectedTopics?.length > 0) {
+          setSelectedTopics(new Set(savedSelections.selectedTopics));
+          if (savedSelections.editedTexts) {
+            setEditedTexts(savedSelections.editedTexts);
+          }
+        } else {
+          // First visit: select all topics by default
+          const allTopics = new Set();
+          initialMaterias.forEach(m => {
+            m.topics.forEach(t => allTopics.add(t.id));
+          });
+          setSelectedTopics(allTopics);
+        }
       }
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fonte?.dados]);
 
   // Extract topics with AI after initial load
@@ -589,7 +600,12 @@ TextoBaseFeed.propTypes = {
     dados: PropTypes.array
   }),
   onChangeSource: PropTypes.func,
-  onDataChange: PropTypes.func
+  onDataChange: PropTypes.func,
+  savedSelections: PropTypes.shape({
+    selectedTopics: PropTypes.array,
+    editedTexts: PropTypes.object,
+    topicTexts: PropTypes.object
+  })
 };
 
 export default TextoBaseFeed;

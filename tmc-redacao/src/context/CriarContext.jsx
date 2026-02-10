@@ -33,6 +33,8 @@ const initialState = {
     textoCompleto: '', // Texto editável completo
     modoEdicao: 'blocos', // 'blocos' | 'texto'
     blocosSelecionados: new Set(),
+    // Persisted variant selections (survives navigation between steps)
+    variantSelections: null, // { selectedTopics: string[], editedTexts: {}, topicTexts: {} }
   },
 
   // Etapa 2 (Multi-Source): Story Fusion state
@@ -179,6 +181,16 @@ export const CriarProvider = ({ children }) => {
       textoBase: {
         ...prev.textoBase,
         modoEdicao: modo,
+      },
+    }));
+  }, []);
+
+  const setVariantSelections = useCallback((selections) => {
+    setState(prev => ({
+      ...prev,
+      textoBase: {
+        ...prev.textoBase,
+        variantSelections: selections,
       },
     }));
   }, []);
@@ -426,6 +438,7 @@ export const CriarProvider = ({ children }) => {
       atualizarBloco,
       setTextoCompleto,
       setModoEdicao,
+      setVariantSelections,
       confirmarTextoBase,
 
       // Ações Story Fusion
@@ -475,6 +488,7 @@ export const CriarProvider = ({ children }) => {
       atualizarBloco,
       setTextoCompleto,
       setModoEdicao,
+      setVariantSelections,
       confirmarTextoBase,
       setStoryFusionData,
       updateStoryFusionSelection,
