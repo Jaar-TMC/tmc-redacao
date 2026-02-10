@@ -1,10 +1,11 @@
 """
 Fact Check Service for TMC Article Generation
 
-Anti-hallucination pipeline with 3 components:
+Anti-hallucination pipeline with 4 components:
 1. Pre-generation enrichment via Exa web search
 2. Post-generation claim verification
-3. Confidence scoring and risk assessment
+3. Chain-of-Verification (CoVe) for fabricated claims
+4. Confidence scoring and risk assessment
 
 Verification failures NEVER block article generation - progressive degradation.
 """
@@ -13,10 +14,12 @@ import os
 import re
 import json
 import time
+import math
 import asyncio
 import logging
 from typing import Optional
 from dataclasses import dataclass, field
+from collections import Counter
 
 import httpx
 
@@ -31,6 +34,11 @@ ENRICHMENT_ENABLED = os.environ.get("FACT_CHECK_ENRICHMENT_ENABLED", "true").low
 VERIFICATION_ENABLED = os.environ.get("FACT_CHECK_VERIFICATION_ENABLED", "true").lower() == "true"
 MAX_CLAIMS = int(os.environ.get("FACT_CHECK_MAX_CLAIMS", "10"))
 
+# CoVe (Chain-of-Verification) configuration
+COVE_ENABLED = os.environ.get("COVE_ENABLED", "true").lower() == "true"
+COVE_MAX_CLAIMS = int(os.environ.get("COVE_MAX_CLAIMS", "5"))
+COVE_QUESTIONS_PER_CLAIM = int(os.environ.get("COVE_QUESTIONS_PER_CLAIM", "3"))
+
 EXA_API_KEY = os.environ.get("EXA_API_KEY", "")
 EXA_ENDPOINT = os.environ.get("EXA_API_ENDPOINT", "https://api.exa.ai/search")
 EXA_MAX_RESULTS = int(os.environ.get("EXA_MAX_RESULTS", "5"))
@@ -38,11 +46,12 @@ EXA_SEARCH_DAYS = int(os.environ.get("EXA_SEARCH_DAYS", "7"))
 EXA_TIMEOUT = int(os.environ.get("EXA_TIMEOUT_SECONDS", "15"))
 
 # Confidence scoring weights (calibrated for journalism safety)
-WEIGHT_CLAIM_GROUNDING = 0.50
+WEIGHT_CLAIM_GROUNDING = 0.40
 WEIGHT_ENTITY_OVERLAP = 0.25
 WEIGHT_EXPANSION_RATIO = 0.10
-WEIGHT_QUOTE_VERIFICATION = 0.05
+WEIGHT_QUOTE_VERIFICATION = 0.10
 WEIGHT_MATERIAL_SUFFICIENCY = 0.10
+WEIGHT_CLAIM_SIMILARITY = 0.05  # TF-IDF claim-source similarity (non-LLM signal)
 
 
 # =============================================================================
@@ -89,6 +98,18 @@ class EnrichmentContext:
 
 
 @dataclass
+class CoVeVerification:
+    """Chain-of-Verification result for a single claim."""
+    original_claim: str = ""
+    original_verdict: str = "fabricated"
+    questions: list = field(default_factory=list)
+    answers: list = field(default_factory=list)
+    final_verdict: str = "fabricated"
+    confidence_delta: float = 0.0  # positive = confidence boost
+    evidence_strength: str = "weak"  # strong | moderate | weak
+
+
+@dataclass
 class VerificationMetadata:
     """Complete verification output."""
     confidence_score: float = 0.0
@@ -108,6 +129,9 @@ class VerificationMetadata:
     is_verified: bool = False
     verification_duration_ms: int = 0
     enrichment_used: bool = False
+    cove_applied: bool = False
+    cove_reclassified: int = 0
+    cove_results: list = field(default_factory=list)  # List[CoVeVerification]
 
     def to_dict(self) -> dict:
         """Convert to JSON-serializable dict."""
@@ -141,7 +165,31 @@ class VerificationMetadata:
             "is_verified": self.is_verified,
             "verification_duration_ms": self.verification_duration_ms,
             "enrichment_used": self.enrichment_used,
+            "cove_applied": self.cove_applied,
+            "cove_reclassified": self.cove_reclassified,
         }
+
+
+# =============================================================================
+# Helper Functions
+# =============================================================================
+
+def _lcs_length(a: list, b: list) -> int:
+    """Compute Longest Common Subsequence length between two word lists."""
+    m, n = len(a), len(b)
+    if m == 0 or n == 0:
+        return 0
+    # Space-optimized: only keep previous row
+    prev = [0] * (n + 1)
+    for i in range(1, m + 1):
+        curr = [0] * (n + 1)
+        for j in range(1, n + 1):
+            if a[i - 1] == b[j - 1]:
+                curr[j] = prev[j - 1] + 1
+            else:
+                curr[j] = max(prev[j], curr[j - 1])
+        prev = curr
+    return prev[n]
 
 
 # =============================================================================
@@ -160,12 +208,37 @@ class FactCheckService:
         self.http_client = httpx.AsyncClient(timeout=float(EXA_TIMEOUT))
         self._llm_service = None
 
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *args):
+        await self.close()
+
+    async def close(self):
+        """Close the HTTP client."""
+        if self.http_client:
+            await self.http_client.aclose()
+
     def _get_llm(self):
         """Lazy-load LLM service to avoid circular imports."""
         if self._llm_service is None:
             from services.llm_service import get_llm_service
             self._llm_service = get_llm_service()
         return self._llm_service
+
+    def _parse_json_response(self, response_text: str) -> Optional[dict]:
+        """Extract and parse JSON from an LLM response text."""
+        json_start = response_text.find("{")
+        json_end = response_text.rfind("}") + 1
+        if json_start != -1 and json_end > json_start:
+            try:
+                return json.loads(response_text[json_start:json_end])
+            except json.JSONDecodeError:
+                return None
+        return None
+
+    # CoVe evidence strength -> confidence delta mapping
+    _EVIDENCE_DELTA_MAP = {"strong": 0.08, "moderate": 0.05, "weak": 0.02}
 
     # =========================================================================
     # Phase 1: Pre-Generation Enrichment
@@ -498,7 +571,7 @@ Regras:
 - Nao inclua opinioes ou analises"""
 
             max_tokens = 2048 if source_len < 500 else 1024
-            response_text = await llm._call_api(system, prompt, max_tokens)
+            response_text = await llm.call_api(system, prompt, max_tokens)
 
             # Try standard JSON extraction
             json_start = response_text.find("{")
@@ -581,9 +654,9 @@ Regras:
         metadata.expansion_ratio = output_len / max(effective_source, 1)
 
         # Classify source sufficiency
-        if source_len < 150:
+        if effective_source < 150:
             metadata.source_sufficiency = "insufficient"
-        elif source_len < 500:
+        elif effective_source < 500:
             metadata.source_sufficiency = "marginal"
         else:
             metadata.source_sufficiency = "sufficient"
@@ -662,9 +735,57 @@ Regras:
                     "verification_rate": round(quote_result.verification_rate, 3),
                 }
 
+            # ==============================================================
+            # CoVe: Chain-of-Verification for fabricated claims
+            # ==============================================================
+            if metadata.fabricated_claims > 0:
+                try:
+                    claims, cove_results, reclassified = await self._cove_verify_claims(
+                        metadata.claims, texto_base, enrichment
+                    )
+                    metadata.claims = claims
+                    metadata.cove_applied = True
+                    metadata.cove_reclassified = reclassified
+                    metadata.cove_results = cove_results
+
+                    # Recount verdicts after CoVe reclassification
+                    if reclassified > 0:
+                        metadata.grounded_claims = sum(
+                            1 for c in claims
+                            if (isinstance(c, ExtractedClaim) and c.verdict == "grounded")
+                            or (isinstance(c, dict) and c.get("verdict") == "grounded")
+                        )
+                        metadata.fabricated_claims = sum(
+                            1 for c in claims
+                            if (isinstance(c, ExtractedClaim) and c.verdict == "fabricated")
+                            or (isinstance(c, dict) and c.get("verdict") == "fabricated")
+                        )
+                        metadata.unverifiable_claims = sum(
+                            1 for c in claims
+                            if (isinstance(c, ExtractedClaim) and c.verdict == "unverifiable")
+                            or (isinstance(c, dict) and c.get("verdict") == "unverifiable")
+                        )
+                        logger.info(
+                            f"Post-CoVe verdicts: grounded={metadata.grounded_claims}, "
+                            f"fabricated={metadata.fabricated_claims}, "
+                            f"unverifiable={metadata.unverifiable_claims}"
+                        )
+                except Exception as e:
+                    logger.warning(f"CoVe failed (non-blocking): {e}")
+
+            # Compute TF-IDF claim-source similarity (pure CPU, no API calls)
+            claim_similarities = []
+            if metadata.claims:
+                enrichment_text = ""
+                if enrichment and enrichment.success:
+                    enrichment_text = enrichment.context_text or ""
+                claim_similarities = self._compute_claim_source_similarity(
+                    metadata.claims, texto_base, enrichment_text
+                )
+
             # Compute confidence score
             metadata.confidence_score = self._compute_confidence(
-                metadata, entity_result, quote_result
+                metadata, entity_result, quote_result, claim_similarities
             )
 
             # Determine risk level
@@ -794,7 +915,7 @@ IMPORTANTE - REGRAS DE CLASSIFICACAO:
 - NA DUVIDA entre "editorial" e "fabricated": se a informacao e factualmente correta e tem coesao com o tema, prefira "editorial"
 - Afirmacoes editoriais NAO contam na avaliacao de precisao factual"""
 
-            response_text = await llm._call_api(system, prompt, 2048)
+            response_text = await llm.call_api(system, prompt, 2048)
 
             json_start = response_text.find("{")
             json_end = response_text.rfind("}") + 1
@@ -825,7 +946,8 @@ IMPORTANTE - REGRAS DE CLASSIFICACAO:
         """
         Compare named entities between source and generated article.
 
-        Uses regex patterns - no API calls needed.
+        Uses regex patterns with substring and abbreviation matching.
+        No API calls needed.
         """
         result = EntityComparisonResult()
 
@@ -839,20 +961,69 @@ IMPORTANTE - REGRAS DE CLASSIFICACAO:
         source_normalized = {self._normalize(e) for e in source_entities}
         output_normalized = {self._normalize(e) for e in output_entities}
 
+        # Exact match
         common = source_normalized & output_normalized
-        novel = output_normalized - source_normalized
 
-        result.common_entities = list(common)[:20]
+        # Substring matching: "Lula" matches "Luiz Inacio Lula da Silva"
+        remaining_output = output_normalized - common
+        remaining_source = source_normalized - common
+        substring_matched = set()
+        for out_ent in remaining_output:
+            for src_ent in remaining_source:
+                if len(out_ent) >= 3 and len(src_ent) >= 3:
+                    if out_ent in src_ent or src_ent in out_ent:
+                        substring_matched.add(out_ent)
+                        break
+
+        # Abbreviation matching: "STF" matches "Supremo Tribunal Federal"
+        abbreviation_matched = set()
+        for out_ent in (remaining_output - substring_matched):
+            for src_ent in remaining_source:
+                if self._is_abbreviation_match(out_ent, src_ent):
+                    abbreviation_matched.add(out_ent)
+                    break
+        for src_ent in remaining_source:
+            for out_ent in (remaining_output - substring_matched - abbreviation_matched):
+                if self._is_abbreviation_match(src_ent, out_ent):
+                    abbreviation_matched.add(out_ent)
+                    break
+
+        all_matched = common | substring_matched | abbreviation_matched
+        novel = output_normalized - all_matched
+
+        result.common_entities = list(all_matched)[:20]
         result.novel_entities = list(novel)[:20]
 
-        # Jaccard overlap
+        # Jaccard overlap using enhanced matching
         union = source_normalized | output_normalized
-        result.overlap_score = len(common) / max(len(union), 1)
+        result.overlap_score = len(all_matched) / max(len(union), 1)
 
         return result
 
+    def _is_abbreviation_match(self, abbrev: str, full_name: str) -> bool:
+        """Check if abbrev is an abbreviation of full_name or vice-versa."""
+        # Check known abbreviation map
+        if abbrev in self._ABBREVIATION_MAP:
+            if self._ABBREVIATION_MAP[abbrev] in full_name or full_name in self._ABBREVIATION_MAP[abbrev]:
+                return True
+        if full_name in self._ABBREVIATION_MAP:
+            if self._ABBREVIATION_MAP[full_name] in abbrev or abbrev in self._ABBREVIATION_MAP[full_name]:
+                return True
+
+        # Heuristic: check if uppercase letters of full_name form the abbreviation
+        if len(abbrev) <= 6 and abbrev.replace(" ", "").isalpha():
+            words = full_name.split()
+            # Skip small connector words
+            skip = {"de", "da", "do", "dos", "das", "e", "para", "em", "com", "por", "o", "a", "os", "as"}
+            initials = "".join(w[0] for w in words if w not in skip and len(w) > 1)
+            if initials == abbrev:
+                return True
+
+        return False
+
     # Portuguese stopwords that get falsely detected as named entities
     _ENTITY_STOPWORDS = {
+        # Prepositions / articles / conjunctions
         "segundo", "como", "durante", "formado", "composto", "apos", "sobre",
         "ainda", "mais", "outros", "entre", "tambem", "desde", "antes", "depois",
         "quando", "onde", "porque", "porem", "assim", "apenas", "cerca", "foram",
@@ -860,6 +1031,60 @@ IMPORTANTE - REGRAS DE CLASSIFICACAO:
         "muito", "pouco", "outro", "outra", "algumas", "alguns", "essa", "esse",
         "esta", "este", "pelo", "pela", "pelos", "pelas", "numa", "neste",
         "nesta", "desta", "deste", "aquele", "aquela",
+        # Common verbs / adverbs that appear capitalized at sentence start
+        "pode", "deve", "seria", "estava", "estao", "esteve", "ficou", "disse",
+        "afirmou", "declarou", "segundo", "conforme", "enquanto", "embora",
+        "portanto", "entretanto", "contudo", "todavia", "inclusive", "sobretudo",
+        "principalmente", "praticamente", "atualmente", "recentemente",
+        # Common nouns that appear capitalized at start of sentence
+        "governo", "estado", "pais", "cidade", "empresa", "grupo", "parte",
+        "caso", "forma", "meio", "modo", "area", "fonte", "dados", "acordo",
+        "medida", "projeto", "plano", "programa", "processo", "relacao",
+        "situacao", "condicao", "resultado", "informacao", "decisao",
+        # Common journalistic filler
+        "neste", "nesta", "nesse", "nessa", "deste", "desta", "desse", "dessa",
+        "aqui", "ali", "agora", "hoje", "ontem", "amanha", "semana", "ano",
+        # Extra verbs, adverbs, common nouns (v3 expansion)
+        "quanto", "qual", "quais", "alem", "contra", "trata", "diz", "mostra",
+        "segue", "ocorreu", "houve", "permite", "garante", "busca", "visa",
+    }
+
+    # Known abbreviation → full name mappings for Brazilian entities
+    _ABBREVIATION_MAP = {
+        "stf": "supremo tribunal federal",
+        "stj": "superior tribunal de justica",
+        "tse": "tribunal superior eleitoral",
+        "tcu": "tribunal de contas da uniao",
+        "pf": "policia federal",
+        "prf": "policia rodoviaria federal",
+        "mpf": "ministerio publico federal",
+        "cgu": "controladoria-geral da uniao",
+        "bc": "banco central",
+        "bcb": "banco central do brasil",
+        "pib": "produto interno bruto",
+        "ipca": "indice de precos ao consumidor amplo",
+        "selic": "taxa selic",
+        "inss": "instituto nacional do seguro social",
+        "sus": "sistema unico de saude",
+        "onu": "organizacao das nacoes unidas",
+        "otan": "organizacao do tratado do atlantico norte",
+        "eua": "estados unidos",
+        "ue": "uniao europeia",
+        "cbf": "confederacao brasileira de futebol",
+        "conmebol": "confederacao sul-americana de futebol",
+        "fifa": "federacao internacional de futebol",
+        "cpi": "comissao parlamentar de inquerito",
+        "pl": "projeto de lei",
+        "pec": "proposta de emenda constitucional",
+        "pt": "partido dos trabalhadores",
+        "mdb": "movimento democratico brasileiro",
+        "psdb": "partido da social democracia brasileira",
+    }
+
+    # Known names that should never be filtered by the sentence-start heuristic
+    _ENTITY_KNOWN_NAMES = {
+        "lula", "bolsonaro", "musk", "trump", "biden", "neymar", "mbappe",
+        "putin", "zelensky", "macron", "haddad", "campos", "tarcisio",
     }
 
     def _extract_entities_regex(self, text: str) -> set:
@@ -867,19 +1092,66 @@ IMPORTANTE - REGRAS DE CLASSIFICACAO:
         Extract named entities using regex patterns.
 
         Captures: proper nouns, organizations, numbers, dates, acronyms.
-        Filters out Portuguese stopwords that match capitalized patterns.
+        Filters out Portuguese stopwords, sentence starters, and fragments.
         """
         entities = set()
+
+        # Split text into sentences for sentence-start detection
+        sentences = re.split(r'[.!?]\s+', text)
+        sentence_starters = set()
+        for sentence in sentences:
+            sentence = sentence.strip()
+            if sentence:
+                first_word = sentence.split()[0] if sentence.split() else ""
+                if first_word:
+                    sentence_starters.add(self._normalize(first_word))
 
         # Capitalized multi-word names (e.g., "Jair Bolsonaro", "Supremo Tribunal Federal")
         for match in re.finditer(r'\b([A-ZÁÀÂÃÉÈÊÍÓÒÔÕÚÇ][a-záàâãéèêíóòôõúç]+(?:\s+(?:de|da|do|dos|das|e|para|em|com|por)?\s*[A-ZÁÀÂÃÉÈÊÍÓÒÔÕÚÇ][a-záàâãéèêíóòôõúç]+)*)\b', text):
             name = match.group(1).strip()
-            # Filter out sentence starters (require 2+ words or be specific)
-            if len(name.split()) >= 2 or len(name) >= 4:
-                # Filter out stopwords (case-insensitive, accent-stripped)
-                name_lower = self._normalize(name)
-                if name_lower not in self._ENTITY_STOPWORDS:
-                    entities.add(name)
+            name_normalized = self._normalize(name)
+
+            # Filter: reject fragments < 3 chars
+            if len(name) < 3:
+                continue
+
+            # Filter: require 2+ words or be specific (4+ chars)
+            if len(name.split()) < 2 and len(name) < 4:
+                continue
+
+            # Filter: stopwords
+            if name_normalized in self._ENTITY_STOPWORDS:
+                continue
+
+            # Filter: single-word entities that are sentence starters
+            # (likely generic nouns capitalized at start of sentence)
+            # Skip filter for known names (e.g., "Lula", "Trump")
+            if len(name.split()) == 1 and name_normalized in sentence_starters:
+                if name_normalized not in self._ENTITY_KNOWN_NAMES:
+                    # Only filter if the word doesn't also appear capitalized mid-sentence
+                    mid_sentence_pattern = r'[a-záàâãéèêíóòôõúç]\s+' + re.escape(name) + r'\b'
+                    if not re.search(mid_sentence_pattern, text):
+                        continue
+
+            entities.add(name)
+
+        # Hyphenated proper nouns: "Al-Assad", "Minas-Gerais"
+        for match in re.finditer(r'\b([A-ZÁÀÂÃÉÈÊÍÓÒÔÕÚÇ][a-záàâãéèêíóòôõúç]*(?:-[A-ZÁÀÂÃÉÈÊÍÓÒÔÕÚÇ][a-záàâãéèêíóòôõúç]+)+)\b', text):
+            name = match.group(1)
+            if len(name) >= 4 and self._normalize(name) not in self._ENTITY_STOPWORDS:
+                entities.add(name)
+
+        # All-caps multi-word: "VINI JR", "NATO OTAN"
+        for match in re.finditer(r'\b([A-ZÁÀÂÃÉÈÊÍÓÒÔÕÚÇ]{2,}(?:\s+[A-ZÁÀÂÃÉÈÊÍÓÒÔÕÚÇ]{2,})+)\b', text):
+            name = match.group(1)
+            if len(name) >= 4 and self._normalize(name) not in self._ENTITY_STOPWORDS:
+                entities.add(name)
+
+        # Names with particles: "Mohammed bin Salman", "Ludwig van Beethoven"
+        for match in re.finditer(r'\b([A-ZÁÀÂÃÉÈÊÍÓÒÔÕÚÇ][a-záàâãéèêíóòôõúç]+(?:\s+(?:bin|van|von|al|el|ibn|ben|di|du|de|da)\s+[A-ZÁÀÂÃÉÈÊÍÓÒÔÕÚÇ][a-záàâãéèêíóòôõúç]+)+)\b', text):
+            name = match.group(1)
+            if len(name) >= 4 and self._normalize(name) not in self._ENTITY_STOPWORDS:
+                entities.add(name)
 
         # Acronyms (PF, STF, PIB, etc.)
         for match in re.finditer(r'\b([A-Z]{2,6})\b', text):
@@ -900,13 +1172,100 @@ IMPORTANTE - REGRAS DE CLASSIFICACAO:
         return entities
 
     def _normalize(self, entity: str) -> str:
-        """Normalize entity for comparison."""
+        """Normalize entity for comparison (lowercase, strip accents)."""
         import unicodedata
         text = entity.lower().strip()
         text = unicodedata.normalize('NFD', text)
         text = ''.join(c for c in text if unicodedata.category(c) != 'Mn')
         text = re.sub(r'\s+', ' ', text)
         return text
+
+    # =========================================================================
+    # TF-IDF Claim-Source Similarity (pure computation, no API calls)
+    # =========================================================================
+
+    @staticmethod
+    def _compute_claim_source_similarity(
+        claims: list,
+        source_text: str,
+        enrichment_text: str = ""
+    ) -> list:
+        """
+        Compute TF-IDF cosine similarity between each claim and best source sentence.
+
+        Pure computation, zero API calls. Returns list of floats [0,1].
+        """
+        if not claims or not source_text:
+            return []
+
+        # Combine sources
+        full_source = source_text
+        if enrichment_text:
+            full_source += " " + enrichment_text
+
+        # Split source into sentences
+        sentences = re.split(r'[.!?]\s+', full_source)
+        sentences = [s.strip().lower() for s in sentences if len(s.strip()) > 10]
+        if not sentences:
+            return [0.0] * len(claims)
+
+        # Tokenize
+        def tokenize(text):
+            return re.findall(r'\b\w{2,}\b', text.lower())
+
+        sentence_tokens = [tokenize(s) for s in sentences]
+
+        # Build vocabulary and IDF
+        all_docs = sentence_tokens[:]
+        vocab = set()
+        for doc in all_docs:
+            vocab.update(doc)
+
+        doc_count = len(all_docs)
+        df = Counter()
+        for doc in all_docs:
+            for word in set(doc):
+                df[word] += 1
+
+        idf = {}
+        for word in vocab:
+            idf[word] = math.log((doc_count + 1) / (df[word] + 1)) + 1
+
+        def tfidf_vector(tokens):
+            tf = Counter(tokens)
+            total = len(tokens) if tokens else 1
+            vec = {}
+            for word in set(tokens):
+                vec[word] = (tf[word] / total) * idf.get(word, 1.0)
+            return vec
+
+        def cosine_sim(v1, v2):
+            common = set(v1.keys()) & set(v2.keys())
+            if not common:
+                return 0.0
+            dot = sum(v1[w] * v2[w] for w in common)
+            norm1 = math.sqrt(sum(v ** 2 for v in v1.values()))
+            norm2 = math.sqrt(sum(v ** 2 for v in v2.values()))
+            if norm1 == 0 or norm2 == 0:
+                return 0.0
+            return dot / (norm1 * norm2)
+
+        # Pre-compute sentence vectors
+        sent_vectors = [tfidf_vector(tokens) for tokens in sentence_tokens]
+
+        # For each claim, compute max similarity with any sentence
+        similarities = []
+        for claim in claims:
+            claim_text = claim.text if isinstance(claim, ExtractedClaim) else claim.get("text", "")
+            claim_tokens = tokenize(claim_text)
+            if not claim_tokens:
+                similarities.append(0.0)
+                continue
+            claim_vec = tfidf_vector(claim_tokens)
+            max_sim = max(cosine_sim(claim_vec, sv) for sv in sent_vectors) if sent_vectors else 0.0
+            similarities.append(round(max_sim, 4))
+
+        return similarities
 
     # =========================================================================
     # Quote Verification (string matching, no API calls)
@@ -921,12 +1280,12 @@ IMPORTANTE - REGRAS DE CLASSIFICACAO:
         """
         Verify quoted text in generated article against sources.
 
-        Uses string matching - no API calls needed.
+        Uses dynamic thresholds, LCS matching, and position-aware search.
+        No API calls needed.
         """
         result = QuoteVerificationResult()
 
         # Extract quotes from generated article
-        # Matches text between various quote styles
         quote_patterns = [
             r'"([^"]{10,})"',           # "quoted text"
             r'\u201c([^\u201d]{10,})\u201d',  # "quoted text" (smart quotes)
@@ -940,7 +1299,8 @@ IMPORTANTE - REGRAS DE CLASSIFICACAO:
 
         result.total_quotes = len(generated_quotes)
         if result.total_quotes == 0:
-            result.verification_rate = 1.0  # No quotes = no problem
+            # Neutral default: no quotes = not a problem, score 0.5 (not 1.0 or 0.0)
+            result.verification_rate = 0.5
             return result
 
         # Build reference text pool
@@ -948,25 +1308,60 @@ IMPORTANTE - REGRAS DE CLASSIFICACAO:
         if citacoes:
             reference_text += " " + " ".join(c.lower() for c in citacoes)
 
+        # Split reference into paragraphs for position-aware matching
+        ref_paragraphs = [p.lower() for p in texto_base.split("\n") if p.strip()]
+
         verified = 0
         for quote in generated_quotes:
             quote_lower = quote.lower()
-            # Check for substantial overlap (at least 50% of words match)
-            quote_words = set(quote_lower.split())
-            ref_words = set(reference_text.split())
-            if len(quote_words) > 0:
-                word_overlap = len(quote_words & ref_words) / len(quote_words)
-                if word_overlap >= 0.5:
+            quote_words = quote_lower.split()
+            num_words = len(quote_words)
+
+            # Dynamic threshold: shorter quotes need higher overlap
+            if num_words <= 8:
+                word_threshold = 0.70  # Short quotes: strict
+            elif num_words <= 20:
+                word_threshold = 0.50  # Medium quotes: moderate
+            else:
+                word_threshold = 0.40  # Long quotes: relaxed
+
+            # Method 1: Word overlap with dynamic threshold
+            if num_words > 0:
+                ref_words = set(reference_text.split())
+                word_overlap = len(set(quote_words) & ref_words) / num_words
+                if word_overlap >= word_threshold:
                     verified += 1
                     continue
 
-            # Check for substring match (at least 60% of quote found in source)
+            # Method 2: Position-aware paragraph search
+            para_matched = False
+            for para in ref_paragraphs:
+                if len(para) > 10:
+                    para_words = set(para.split())
+                    if num_words > 0:
+                        overlap = len(set(quote_words) & para_words) / num_words
+                        if overlap >= word_threshold + 0.1:  # Slightly stricter for paragraph match
+                            para_matched = True
+                            break
+            if para_matched:
+                verified += 1
+                continue
+
+            # Method 3: LCS (Longest Common Subsequence) matching for paraphrases
+            lcs_ratio = self._lcs_ratio(quote_lower, reference_text)
+            if lcs_ratio >= 0.50:
+                verified += 1
+                continue
+
+            # Method 4: Substring chunk matching (original fallback)
             found = False
-            for i in range(0, len(quote_lower) - 10, 5):
-                chunk = quote_lower[i:i+20]
-                if chunk in reference_text:
-                    found = True
-                    break
+            chunk_size = min(20, len(quote_lower) - 5)
+            if chunk_size > 10:
+                for i in range(0, len(quote_lower) - chunk_size, 5):
+                    chunk = quote_lower[i:i + chunk_size]
+                    if chunk in reference_text:
+                        found = True
+                        break
             if found:
                 verified += 1
             else:
@@ -974,6 +1369,223 @@ IMPORTANTE - REGRAS DE CLASSIFICACAO:
 
         result.verified_quotes = verified
         result.verification_rate = verified / max(result.total_quotes, 1)
+
+        return result
+
+    @staticmethod
+    def _lcs_ratio(s1: str, s2: str) -> float:
+        """
+        Compute LCS length ratio between s1 and the best matching window in s2.
+
+        For efficiency, uses a sliding window approach: checks s2 windows of
+        len(s1)*2 and computes LCS against s1. Returns ratio = LCS / len(s1).
+        """
+        if not s1 or not s2:
+            return 0.0
+
+        s1_words = s1.split()
+        s2_words = s2.split()
+        n = len(s1_words)
+
+        if n == 0:
+            return 0.0
+
+        # Sliding window on s2 for efficiency
+        window_size = min(n * 3, len(s2_words))
+        best_ratio = 0.0
+
+        step = max(1, n // 2)
+        for start in range(0, max(1, len(s2_words) - window_size + 1), step):
+            window = s2_words[start:start + window_size]
+            lcs_len = _lcs_length(s1_words, window)
+            ratio = lcs_len / n
+            if ratio > best_ratio:
+                best_ratio = ratio
+                if best_ratio >= 0.7:  # Early exit for strong matches
+                    break
+
+        return best_ratio
+
+    # =========================================================================
+    # Chain-of-Verification (CoVe) - Phase 2
+    # =========================================================================
+
+    async def _cove_verify_claims(
+        self,
+        claims: list,
+        source_text: str,
+        enrichment: Optional[EnrichmentContext] = None
+    ) -> tuple:
+        """
+        Apply Chain-of-Verification to fabricated claims.
+
+        Only processes claims with verdict "fabricated" to minimize LLM costs.
+        For each fabricated claim, generates verification questions, answers
+        them from source material, and re-classifies.
+
+        Returns:
+            Tuple of (updated_claims, cove_results, reclassified_count)
+        """
+        if not COVE_ENABLED:
+            return claims, [], 0
+
+        fabricated = [
+            (i, c) for i, c in enumerate(claims)
+            if (isinstance(c, ExtractedClaim) and c.verdict == "fabricated")
+            or (isinstance(c, dict) and c.get("verdict") == "fabricated")
+        ]
+
+        if not fabricated:
+            logger.info("CoVe: no fabricated claims, skipping (0 LLM calls)")
+            return claims, [], 0
+
+        # Limit to COVE_MAX_CLAIMS to control cost
+        fabricated = fabricated[:COVE_MAX_CLAIMS]
+        logger.info(f"CoVe: verifying {len(fabricated)} fabricated claims")
+
+        # Build enrichment context
+        enrichment_text = ""
+        if enrichment and enrichment.success:
+            if enrichment.key_facts:
+                enrichment_text = "\n".join(f"- {f}" for f in enrichment.key_facts)
+            elif enrichment.context_text:
+                enrichment_text = enrichment.context_text[:3000]
+
+        cove_results = []
+        reclassified = 0
+
+        for idx, claim in fabricated:
+            try:
+                result = await self._cove_single_claim(
+                    claim, source_text, enrichment_text
+                )
+                cove_results.append(result)
+
+                if result.final_verdict != "fabricated":
+                    # Reclassify the claim
+                    reclassified += 1
+                    if isinstance(claim, ExtractedClaim):
+                        claims[idx] = ExtractedClaim(
+                            text=claim.text,
+                            verdict=result.final_verdict,
+                            source_evidence=claim.source_evidence + " [CoVe reclassified]",
+                            category=claim.category,
+                        )
+                    elif isinstance(claim, dict):
+                        claims[idx] = {
+                            **claim,
+                            "verdict": result.final_verdict,
+                            "source_evidence": claim.get("source_evidence", "") + " [CoVe reclassified]",
+                        }
+                    logger.info(
+                        f"CoVe reclassified: '{claim.text[:60] if isinstance(claim, ExtractedClaim) else claim.get('text', '')[:60]}...' "
+                        f"fabricated -> {result.final_verdict}"
+                    )
+            except Exception as e:
+                logger.warning(f"CoVe failed for claim (non-blocking): {e}")
+
+        logger.info(f"CoVe complete: {reclassified}/{len(fabricated)} reclassified")
+        return claims, cove_results, reclassified
+
+    async def _cove_single_claim(
+        self,
+        claim,
+        source_text: str,
+        enrichment_text: str
+    ) -> CoVeVerification:
+        """
+        Apply CoVe to a single fabricated claim using 2 isolated LLM calls.
+
+        Call 1: Generate verification questions and answer from source material only.
+        Call 2: Re-classify the claim based on Q&A (does not see the source directly,
+                preventing confirmation bias).
+        """
+        claim_text = claim.text if isinstance(claim, ExtractedClaim) else claim.get("text", "")
+
+        result = CoVeVerification(
+            original_claim=claim_text,
+            original_verdict="fabricated",
+        )
+
+        llm = self._get_llm()
+
+        # ---- Call 1: Q&A only (no verdict) ----
+        system_qa = (
+            "Voce e um verificador factual. Gere perguntas de verificacao "
+            "e responda APENAS com base no material fornecido."
+        )
+        prompt_qa = f"""Gere {COVE_QUESTIONS_PER_CLAIM} perguntas de verificacao sobre a seguinte afirmacao e responda cada uma usando APENAS o material abaixo.
+
+AFIRMACAO:
+"{claim_text}"
+
+TEXTO-FONTE:
+{source_text[:4000]}
+
+{f"CONTEXTO VERIFICADO:{chr(10)}{enrichment_text[:2000]}" if enrichment_text else ""}
+
+Responda em JSON:
+```json
+{{
+  "questions": ["Pergunta 1?", "Pergunta 2?", "Pergunta 3?"],
+  "answers": ["Resposta baseada no material 1", "Resposta 2", "Resposta 3"]
+}}
+```
+
+NAO classifique. Apenas gere perguntas e respostas factuais."""
+
+        qa_response = await llm.call_api(system_qa, prompt_qa, 768)
+        qa_data = self._parse_json_response(qa_response)
+
+        if qa_data:
+            result.questions = qa_data.get("questions", [])
+            result.answers = qa_data.get("answers", [])
+
+        # ---- Call 2: Verdict only (receives Q&A, does not see source directly) ----
+        qa_summary = ""
+        for i, (q, a) in enumerate(zip(result.questions, result.answers), 1):
+            qa_summary += f"P{i}: {q}\nR{i}: {a}\n"
+
+        system_verdict = (
+            "Voce e um classificador factual. Re-classifique a afirmacao "
+            "com base APENAS nas perguntas e respostas fornecidas."
+        )
+        prompt_verdict = f"""Re-classifique a seguinte afirmacao com base nas perguntas e respostas de verificacao.
+
+AFIRMACAO SUSPEITA:
+"{claim_text}"
+
+PERGUNTAS E RESPOSTAS DE VERIFICACAO:
+{qa_summary}
+
+Responda em JSON:
+```json
+{{
+  "final_verdict": "grounded|editorial|unverifiable|fabricated",
+  "reasoning": "Breve explicacao da decisao",
+  "evidence_strength": "strong|moderate|weak"
+}}
+```
+
+Regras:
+- **grounded**: Respostas confirmam que a informacao esta nas fontes
+- **editorial**: Contexto factual correto que enriquece a materia
+- **unverifiable**: Impossivel confirmar nem negar
+- **fabricated**: Respostas confirmam que a informacao e INCORRETA ou DESCONEXA"""
+
+        verdict_response = await llm.call_api(system_verdict, prompt_verdict, 512)
+        verdict_data = self._parse_json_response(verdict_response)
+
+        if verdict_data:
+            result.final_verdict = verdict_data.get("final_verdict", "fabricated")
+            result.evidence_strength = verdict_data.get("evidence_strength", "weak")
+            # Proportional confidence delta based on evidence strength
+            if result.final_verdict != "fabricated":
+                result.confidence_delta = self._EVIDENCE_DELTA_MAP.get(
+                    result.evidence_strength, 0.02
+                )
+            else:
+                result.confidence_delta = 0.0
 
         return result
 
@@ -985,17 +1597,19 @@ IMPORTANTE - REGRAS DE CLASSIFICACAO:
         self,
         metadata: VerificationMetadata,
         entity_result: EntityComparisonResult,
-        quote_result: QuoteVerificationResult
+        quote_result: QuoteVerificationResult,
+        claim_similarities: list = None
     ) -> float:
         """
         Compute composite confidence score (0-1).
 
         Weights:
-        - Claim grounding: 50%
+        - Claim grounding: 40%
         - Entity overlap: 25%
         - Expansion ratio: 10%
-        - Quote verification: 5%
+        - Quote verification: 10%
         - Material sufficiency: 10%
+        - Claim-source similarity: 5% (TF-IDF, non-LLM signal)
         """
         # Claim grounding score (excluding editorial claims)
         factual_claims = [c for c in metadata.claims
@@ -1032,8 +1646,11 @@ IMPORTANTE - REGRAS DE CLASSIFICACAO:
         else:
             expansion_score = 0.0
 
-        # Quote verification score
-        quote_score = quote_result.verification_rate
+        # Quote verification score - neutral default when no quotes
+        if quote_result.total_quotes == 0:
+            quote_score = 0.5  # No quotes = neutral (not 0.0 which penalizes)
+        else:
+            quote_score = quote_result.verification_rate
 
         # Material sufficiency score
         if metadata.source_sufficiency == "sufficient":
@@ -1043,6 +1660,12 @@ IMPORTANTE - REGRAS DE CLASSIFICACAO:
         else:
             sufficiency_score = 0.2
 
+        # Claim-source TF-IDF similarity score
+        if claim_similarities and len(claim_similarities) > 0:
+            similarity_score = sum(claim_similarities) / len(claim_similarities)
+        else:
+            similarity_score = 0.5  # Neutral when unavailable
+
         # Weighted composite
         confidence = (
             WEIGHT_CLAIM_GROUNDING * claim_score
@@ -1050,7 +1673,22 @@ IMPORTANTE - REGRAS DE CLASSIFICACAO:
             + WEIGHT_EXPANSION_RATIO * expansion_score
             + WEIGHT_QUOTE_VERIFICATION * quote_score
             + WEIGHT_MATERIAL_SUFFICIENCY * sufficiency_score
+            + WEIGHT_CLAIM_SIMILARITY * similarity_score
         )
+
+        # CoVe bonus: proportional to evidence strength of each reclassified claim
+        if metadata.cove_applied and metadata.cove_reclassified > 0:
+            cove_bonus = 0.0
+            for cove_result in metadata.cove_results:
+                if isinstance(cove_result, CoVeVerification) and cove_result.final_verdict != "fabricated":
+                    cove_bonus += self._EVIDENCE_DELTA_MAP.get(
+                        cove_result.evidence_strength, 0.02
+                    )
+            if cove_bonus == 0.0:
+                # Fallback: flat bonus if no cove_results available
+                cove_bonus = 0.05 * metadata.cove_reclassified
+            confidence = min(confidence + cove_bonus, 1.0)
+            logger.info(f"CoVe bonus: +{cove_bonus:.2f} ({metadata.cove_reclassified} reclassified)")
 
         # P2-10: Expansion ratio guard - cap confidence for extreme expansion
         if ratio > 10:

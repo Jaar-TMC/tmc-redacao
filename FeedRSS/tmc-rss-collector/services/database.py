@@ -2625,6 +2625,76 @@ class DatabaseService:
             'extracted_at': row[11]
         }
 
+    # ========================================
+    # GENERATION AUDIT TRAIL
+    # ========================================
+
+    def insert_generation_audit(self, audit_data: dict) -> bool:
+        """
+        Insert a generation audit trail record.
+
+        Non-blocking: errors are logged but never propagated.
+        Long fields are truncated to prevent DB overflow.
+
+        Args:
+            audit_data: Dict with audit fields (see migration 004)
+
+        Returns:
+            True if inserted successfully, False otherwise
+        """
+        try:
+            # Truncate long fields to prevent overflow
+            def _trunc(val, max_len):
+                if val and isinstance(val, str) and len(val) > max_len:
+                    return val[:max_len]
+                return val
+
+            def _json_trunc(val, max_len):
+                if val is None:
+                    return None
+                s = json.dumps(val, ensure_ascii=False) if not isinstance(val, str) else val
+                return _trunc(s, max_len)
+
+            query = """
+                INSERT INTO generation_audit_trail
+                (article_id, theme_id, request_payload, system_prompt_hash,
+                 user_prompt_text, enrichment_result, raw_llm_response,
+                 verification_result, cove_applied, cove_reclassified,
+                 safety_gate_decision, confidence_score, risk_level,
+                 publish_blocked, block_reason, phase_timings, total_duration_ms)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            """
+
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(query, (
+                    audit_data.get('article_id'),
+                    audit_data.get('theme_id'),
+                    _json_trunc(audit_data.get('request_payload'), 5000),
+                    _trunc(audit_data.get('system_prompt_hash'), 64),
+                    _trunc(audit_data.get('user_prompt_text'), 5000),
+                    _json_trunc(audit_data.get('enrichment_result'), 5000),
+                    _trunc(audit_data.get('raw_llm_response'), 10000),
+                    _json_trunc(audit_data.get('verification_result'), 10000),
+                    1 if audit_data.get('cove_applied') else 0,
+                    audit_data.get('cove_reclassified', 0),
+                    _trunc(audit_data.get('safety_gate_decision'), 20),
+                    audit_data.get('confidence_score'),
+                    _trunc(audit_data.get('risk_level'), 20),
+                    1 if audit_data.get('publish_blocked') else 0,
+                    _trunc(audit_data.get('block_reason'), 500),
+                    _json_trunc(audit_data.get('phase_timings'), 500),
+                    audit_data.get('total_duration_ms'),
+                ))
+                conn.commit()
+
+            logger.debug("Generation audit trail inserted successfully")
+            return True
+
+        except Exception as e:
+            logger.warning(f"Failed to insert generation audit (non-blocking): {e}")
+            return False
+
 
 # Singleton para uso global
 _db_service: Optional[DatabaseService] = None

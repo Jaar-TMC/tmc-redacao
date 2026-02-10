@@ -2,17 +2,23 @@
 Generation API - Azure Functions endpoints for AI article generation.
 
 Endpoints:
-- POST /api/generate - Generate article from source text (3-phase anti-hallucination pipeline)
+- POST /api/generate - Generate article from source text (4-phase anti-hallucination pipeline)
 - POST /api/extract-topics - Extract topics from text
 - POST /api/generate-tags - Generate tags for content
 """
 
 import logging
 import json
+import re
 import time
+import hashlib
+import asyncio
+import uuid
 from typing import Optional
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
 import azure.functions as func
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 logger = logging.getLogger(__name__)
 
@@ -36,6 +42,16 @@ class GenerateRequest(BaseModel):
     titulo_fonte: Optional[str] = Field(default=None, description="Source article title (for better enrichment search)")
     skip_verification: bool = Field(default=False, description="Skip post-generation verification")
     skip_enrichment: bool = Field(default=False, description="Skip pre-generation enrichment")
+
+    @field_validator('texto_base', 'orientacao_lide', 'contexto', 'creditos', mode='before')
+    @classmethod
+    def sanitize_input(cls, v):
+        """Strip HTML tags and control characters from text inputs."""
+        if not isinstance(v, str):
+            return v
+        v = re.sub(r'<[^>]+>', '', v)  # Strip HTML tags
+        v = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f]', '', v)  # Strip control chars
+        return v
 
 
 class ExtractTopicsRequest(BaseModel):
@@ -81,6 +97,121 @@ def create_success_response(data: dict, status_code: int = 200) -> func.HttpResp
     )
 
 
+# Safety Gate Models
+
+@dataclass
+class SafetyDecision:
+    """Result of evaluating publish safety gates."""
+    publish_blocked: bool = False
+    block_reasons: list = field(default_factory=list)
+    human_review_required: bool = False
+    review_reasons: list = field(default_factory=list)
+
+
+def evaluate_safety_gates(
+    verification_data: dict,
+    content_length: int,
+    effective_source_len: int,
+    prior_human_review: bool = False,
+    prior_review_reasons: list = None,
+) -> SafetyDecision:
+    """
+    Evaluate publish safety gates based on verification results.
+
+    Pure function - no side effects. Determines whether an article should be
+    blocked, sent for human review, or allowed to publish.
+
+    Args:
+        verification_data: Verification result dict from fact_check_service
+        content_length: Length of generated article in chars
+        effective_source_len: Effective source length (enrichment-adjusted)
+        prior_human_review: Whether human review was already flagged (e.g. verification failure)
+        prior_review_reasons: Existing review reasons to carry forward
+
+    Returns:
+        SafetyDecision with publish_blocked, block_reasons, human_review_required, review_reasons
+    """
+    decision = SafetyDecision()
+
+    risk_level = verification_data.get("risk_level", "high")
+    confidence_score = verification_data.get("confidence_score", 0.0)
+    fabricated_claims = verification_data.get("fabricated_claims", 0)
+    unverifiable_claims = verification_data.get("unverifiable_claims", 0)
+    total_claims = verification_data.get("total_claims", 0)
+    expansion_ratio = verification_data.get("expansion_ratio", 0.0)
+
+    # Carry over prior review flags
+    if prior_human_review:
+        decision.human_review_required = True
+    if prior_review_reasons:
+        decision.review_reasons = list(prior_review_reasons)
+
+    # --- HARD BLOCKS ---
+    if risk_level == "critical":
+        decision.publish_blocked = True
+        decision.block_reasons.append("Nivel de risco CRITICO detectado")
+
+    if confidence_score < 0.4 and verification_data.get("is_verified", False):
+        decision.publish_blocked = True
+        decision.block_reasons.append(f"Confianca muito baixa ({confidence_score:.0%})")
+
+    if fabricated_claims >= 3:
+        decision.publish_blocked = True
+        decision.block_reasons.append(f"{fabricated_claims} afirmacoes fabricadas")
+    elif fabricated_claims == 2 and confidence_score < 0.40:
+        decision.publish_blocked = True
+        decision.block_reasons.append(f"2 afirmacoes fabricadas com confianca baixa ({confidence_score:.0%})")
+
+    if total_claims > 0 and unverifiable_claims >= 3:
+        if unverifiable_claims / total_claims > 0.40:
+            decision.publish_blocked = True
+            decision.block_reasons.append(
+                f"{unverifiable_claims}/{total_claims} afirmacoes inverificaveis"
+            )
+
+    # Recalculate expansion ratio with effective source
+    if effective_source_len > 0:
+        effective_expansion = content_length / effective_source_len
+    else:
+        effective_expansion = expansion_ratio
+
+    if effective_expansion > 15:
+        decision.publish_blocked = True
+        decision.block_reasons.append(f"Expansao extrema: {effective_expansion:.1f}x")
+
+    # --- SOFT GATES (human review) ---
+    if fabricated_claims == 2 and confidence_score >= 0.40 and not decision.publish_blocked:
+        decision.human_review_required = True
+        decision.review_reasons.append("2 afirmacoes possivelmente fabricadas")
+
+    if total_claims > 0 and unverifiable_claims >= 2:
+        if unverifiable_claims / total_claims > 0.30:
+            decision.human_review_required = True
+            decision.review_reasons.append(
+                f"{unverifiable_claims} afirmacoes inverificaveis"
+            )
+
+    entity_comparison = verification_data.get("entity_comparison", {})
+    novel_entities = entity_comparison.get("novel_entities", [])
+    output_entities = entity_comparison.get("output_entities", [])
+    if output_entities and len(novel_entities) >= 3:
+        if len(novel_entities) / len(output_entities) > 0.50:
+            decision.human_review_required = True
+            decision.review_reasons.append(
+                f"{len(novel_entities)} entidades novas nao presentes na fonte"
+            )
+
+    if 10 < effective_expansion <= 15:
+        decision.human_review_required = True
+        decision.review_reasons.append(f"Expansao elevada: {effective_expansion:.1f}x")
+
+    if risk_level == "high" and not decision.publish_blocked:
+        decision.human_review_required = True
+        decision.review_reasons.append("Nivel de risco ALTO")
+
+    return decision
+
+
 # Azure Function Handlers
 
 async def generate_article_handler(req: func.HttpRequest) -> func.HttpResponse:
@@ -95,8 +226,10 @@ async def generate_article_handler(req: func.HttpRequest) -> func.HttpResponse:
     Body: GenerateRequest JSON
     Returns: {titulo, linha_fina, conteudo, tags_sugeridas, verification?: {...}}
     """
-    logger.info("Generate article request received")
+    correlation_id = str(uuid.uuid4())[:8]
+    logger.info(f"[{correlation_id}] Generate article request received")
     pipeline_start = time.time()
+    phase_timings = {}
 
     try:
         # Parse request body
@@ -120,7 +253,7 @@ async def generate_article_handler(req: func.HttpRequest) -> func.HttpResponse:
         try:
             llm = get_llm_service()
         except ValueError as e:
-            logger.error(f"LLM service not configured: {e}")
+            logger.error(f"[{correlation_id}] LLM service not configured: {e}")
             return create_error_response(
                 "AI service not configured. Please set AZURE_AI_API_KEY or ANTHROPIC_API_KEY.",
                 503
@@ -135,6 +268,7 @@ async def generate_article_handler(req: func.HttpRequest) -> func.HttpResponse:
         verified_chars = len(request_data.texto_base.strip())
 
         if is_fact_check_enabled() and not request_data.skip_enrichment:
+            enrichment_start = time.time()
             try:
                 fact_checker = get_fact_check_service()
                 enrichment = await fact_checker.enrich_context(
@@ -147,22 +281,24 @@ async def generate_article_handler(req: func.HttpRequest) -> func.HttpResponse:
                     enrichment_key_facts = enrichment.key_facts if enrichment.key_facts else None
                     verified_chars = enrichment.verified_chars
                     logger.info(
-                        f"Phase 1 complete: {len(enrichment.key_facts or [])} facts, "
+                        f"[{correlation_id}] Phase 1 complete: {len(enrichment.key_facts or [])} facts, "
                         f"{len(enrichment.source_urls)} sources, "
                         f"verified_chars={verified_chars}, "
                         f"context_only={'yes' if not enrichment.key_facts else 'no'}"
                     )
                 else:
                     logger.info(
-                        f"Phase 1: no enrichment (urls={len(enrichment.source_urls)}, "
+                        f"[{correlation_id}] Phase 1: no enrichment (urls={len(enrichment.source_urls)}, "
                         f"context_len={len(enrichment.context_text)})"
                     )
             except Exception as e:
-                logger.warning(f"Phase 1 enrichment failed (non-blocking): {e}")
+                logger.warning(f"[{correlation_id}] Phase 1 enrichment failed (non-blocking): {e}")
+            phase_timings["enrichment_ms"] = int((time.time() - enrichment_start) * 1000)
 
         # ==============================================================
         # Phase 2: Generation (blocking - same core as before)
         # ==============================================================
+        generation_start = time.time()
         try:
             result = await llm.generate_article(
                 texto_base=request_data.texto_base,
@@ -181,7 +317,7 @@ async def generate_article_handler(req: func.HttpRequest) -> func.HttpResponse:
                 verified_chars=verified_chars,
             )
         except Exception as e:
-            logger.error(f"Phase 2 generation failed: {e}")
+            logger.error(f"[{correlation_id}] Phase 2 generation failed: {e}")
             return func.HttpResponse(
                 json.dumps({
                     "error": "Falha na geracao do artigo",
@@ -191,7 +327,8 @@ async def generate_article_handler(req: func.HttpRequest) -> func.HttpResponse:
                 mimetype="application/json",
             )
 
-        logger.info("Phase 2 complete: article generated")
+        phase_timings["generation_ms"] = int((time.time() - generation_start) * 1000)
+        logger.info(f"[{correlation_id}] Phase 2 complete: article generated")
 
         # ==============================================================
         # Sufficiency check: flag if material was insufficient for 2000+
@@ -224,7 +361,7 @@ async def generate_article_handler(req: func.HttpRequest) -> func.HttpResponse:
                 "similar_articles": similar_articles,
             }
             logger.info(
-                f"Material insufficient: source={source_len}, "
+                f"[{correlation_id}] Material insufficient: source={source_len}, "
                 f"verified={verified_chars}, generated={content_len}, "
                 f"similar_found={len(similar_articles)}"
             )
@@ -240,6 +377,7 @@ async def generate_article_handler(req: func.HttpRequest) -> func.HttpResponse:
         # Phase 3: Verification (non-blocking, try/except)
         # ==============================================================
         if is_fact_check_enabled() and not request_data.skip_verification:
+            verification_start = time.time()
             try:
                 fact_checker = get_fact_check_service()
                 verification = await fact_checker.verify_article(
@@ -250,11 +388,11 @@ async def generate_article_handler(req: func.HttpRequest) -> func.HttpResponse:
                 )
                 result["verification"] = verification.to_dict()
                 logger.info(
-                    f"Phase 3 complete: confidence={verification.confidence_score:.3f}, "
+                    f"[{correlation_id}] Phase 3 complete: confidence={verification.confidence_score:.3f}, "
                     f"risk={verification.risk_level}"
                 )
             except Exception as e:
-                logger.warning(f"Phase 3 verification failed (non-blocking): {e}")
+                logger.warning(f"[{correlation_id}] Phase 3 verification failed (non-blocking): {e}")
                 result["verification"] = {
                     "is_verified": False,
                     "risk_level": "high",
@@ -267,50 +405,11 @@ async def generate_article_handler(req: func.HttpRequest) -> func.HttpResponse:
                 result["review_reasons"] = [
                     "Verificacao automatica falhou - revisao manual necessaria"
                 ]
+            phase_timings["verification_ms"] = int((time.time() - verification_start) * 1000)
 
         # ==============================================================
         # Publish safety gate: block critical-risk articles
         # ==============================================================
-        verification_data = result.get("verification", {})
-        risk_level = verification_data.get("risk_level", "high")
-        confidence_score = verification_data.get("confidence_score", 0.0)
-        fabricated_claims = verification_data.get("fabricated_claims", 0)
-        unverifiable_claims = verification_data.get("unverifiable_claims", 0)
-        total_claims = verification_data.get("total_claims", 0)
-        expansion_ratio = verification_data.get("expansion_ratio", 0.0)
-
-        publish_blocked = False
-        block_reasons = []
-        # Carry over human_review flags from verification failure (if set)
-        human_review_required = result.get("human_review_required", False)
-        review_reasons = list(result.get("review_reasons", []))
-
-        # --- HARD BLOCKS ---
-        if risk_level == "critical":
-            publish_blocked = True
-            block_reasons.append("Nivel de risco CRITICO detectado")
-
-        if confidence_score < 0.4 and verification_data.get("is_verified", False):
-            publish_blocked = True
-            block_reasons.append(f"Confianca muito baixa ({confidence_score:.0%})")
-
-        # Fabricated claims: block on 3+ fabricated, or 2 fabricated with low confidence
-        # NOTE: With the updated classifier, "fabricated" means genuinely incorrect info
-        # (not factually correct editorial context), so thresholds are higher.
-        if fabricated_claims >= 3:
-            publish_blocked = True
-            block_reasons.append(f"{fabricated_claims} afirmacoes fabricadas")
-        elif fabricated_claims == 2 and confidence_score < 0.40:
-            publish_blocked = True
-            block_reasons.append(f"2 afirmacoes fabricadas com confianca baixa ({confidence_score:.0%})")
-
-        if total_claims > 0 and unverifiable_claims >= 3:
-            if unverifiable_claims / total_claims > 0.40:
-                publish_blocked = True
-                block_reasons.append(
-                    f"{unverifiable_claims}/{total_claims} afirmacoes inverificaveis"
-                )
-
         # Use enrichment-adjusted source length for expansion ratio if available
         effective_source_len = source_len  # default to raw source length
         if enrichment and hasattr(enrichment, 'verified_chars') and enrichment.verified_chars > 0:
@@ -318,59 +417,70 @@ async def generate_article_handler(req: func.HttpRequest) -> func.HttpResponse:
         elif enrichment and isinstance(enrichment, dict) and enrichment.get('verified_chars', 0) > 0:
             effective_source_len = enrichment['verified_chars']
 
-        # Recalculate expansion ratio with effective source
-        if effective_source_len > 0:
-            effective_expansion = len(result.get("conteudo", "")) / effective_source_len
-        else:
-            effective_expansion = expansion_ratio  # fallback to verification-reported ratio
+        safety = evaluate_safety_gates(
+            verification_data=result.get("verification", {}),
+            content_length=len(result.get("conteudo", "")),
+            effective_source_len=effective_source_len,
+            prior_human_review=result.get("human_review_required", False),
+            prior_review_reasons=list(result.get("review_reasons", [])),
+        )
+        result["publish_blocked"] = safety.publish_blocked
+        result["block_reason"] = "; ".join(safety.block_reasons) if safety.publish_blocked else ""
+        result["human_review_required"] = safety.human_review_required
+        result["review_reasons"] = safety.review_reasons
+        if safety.publish_blocked:
+            logger.warning(f"[{correlation_id}] PUBLISH BLOCKED: {result['block_reason']}")
+        elif safety.human_review_required:
+            logger.info(f"[{correlation_id}] HUMAN REVIEW: {'; '.join(safety.review_reasons)}")
 
-        # Use effective_expansion for the block decision
-        if effective_expansion > 15:
-            publish_blocked = True
-            block_reasons.append(f"Expansao extrema: {effective_expansion:.1f}x")
+        # ==============================================================
+        # Entity-Informed Tags (enrich tags from verified entities)
+        # ==============================================================
+        if result.get("verification", {}).get("entity_comparison"):
+            entity_data = result["verification"]["entity_comparison"]
+            entity_tags = _extract_entity_tags(
+                entity_data.get("source_entities", []),
+                entity_data.get("common_entities", []),
+                result.get("tags_sugeridas", []),
+            )
+            result["tags_sugeridas"] = _merge_tags(
+                result.get("tags_sugeridas", []), entity_tags
+            )
 
-        # --- SOFT GATES (human review) ---
-        # 2 fabricated claims with reasonable confidence → review, not block
-        if fabricated_claims == 2 and confidence_score >= 0.40 and not publish_blocked:
-            human_review_required = True
-            review_reasons.append(f"2 afirmacoes possivelmente fabricadas")
+        # ==============================================================
+        # Schema.org / JSON-LD structured data
+        # ==============================================================
+        result["structured_data"] = _build_schema_org(
+            titulo=result.get("titulo", ""),
+            linha_fina=result.get("linha_fina", ""),
+            tags=result.get("tags_sugeridas", []),
+            conteudo=result.get("conteudo", ""),
+            categoria=request_data.categoria,
+        )
 
-        if total_claims > 0 and unverifiable_claims >= 2:
-            if unverifiable_claims / total_claims > 0.30:
-                human_review_required = True
-                review_reasons.append(
-                    f"{unverifiable_claims} afirmacoes inverificaveis"
-                )
-
-        entity_comparison = verification_data.get("entity_comparison", {})
-        novel_entities = entity_comparison.get("novel_entities", [])
-        output_entities = entity_comparison.get("output_entities", [])
-        if output_entities and len(novel_entities) >= 3:
-            if len(novel_entities) / len(output_entities) > 0.50:
-                human_review_required = True
-                review_reasons.append(
-                    f"{len(novel_entities)} entidades novas nao presentes na fonte"
-                )
-
-        if 10 < effective_expansion <= 15:
-            human_review_required = True
-            review_reasons.append(f"Expansao elevada: {effective_expansion:.1f}x")
-
-        if risk_level == "high" and not publish_blocked:
-            human_review_required = True
-            review_reasons.append("Nivel de risco ALTO")
-
-        result["publish_blocked"] = publish_blocked
-        result["human_review_required"] = human_review_required
-        if publish_blocked:
-            result["block_reason"] = "; ".join(block_reasons)
-            logger.warning(f"PUBLISH BLOCKED: {result['block_reason']}")
-        elif human_review_required:
-            result["review_reasons"] = review_reasons
-            logger.info(f"HUMAN REVIEW: {'; '.join(review_reasons)}")
+        # Add correlation_id to result
+        result["correlation_id"] = correlation_id
 
         total_ms = int((time.time() - pipeline_start) * 1000)
-        logger.info(f"Full pipeline complete in {total_ms}ms")
+        phase_timings["total_ms"] = total_ms
+        logger.info(f"[{correlation_id}] Full pipeline complete in {total_ms}ms")
+
+        # ==============================================================
+        # Audit Trail (fire-and-forget, non-blocking)
+        # ==============================================================
+        try:
+            audit_data = _build_audit_data(
+                request_data=request_data,
+                result=result,
+                enrichment=enrichment,
+                phase_timings=phase_timings,
+                total_ms=total_ms,
+            )
+            # Fire and forget - run in background thread
+            asyncio.create_task(_persist_audit(audit_data))
+        except Exception as e:
+            logger.warning(f"[{correlation_id}] Audit trail prep failed (non-blocking): {e}")
+
         return create_success_response(result)
 
     except RuntimeError as e:
@@ -470,6 +580,235 @@ async def generate_tags_handler(req: func.HttpRequest) -> func.HttpResponse:
     except Exception as e:
         logger.exception(f"Error in generate_tags: {e}")
         return create_error_response("Internal server error", 500)
+
+
+def _extract_entity_tags(
+    source_entities: list,
+    common_entities: list,
+    existing_tags: list,
+) -> list:
+    """
+    Extract tags from verified entities (common between source and output).
+
+    Prioritizes common_entities (verified in both source AND output).
+    Normalizes, filters numbers/percentages, deduplicates vs existing.
+
+    Returns up to 8 entity-derived tags.
+    """
+    existing_lower = {t.lower().strip() for t in existing_tags}
+    entity_tags = []
+    seen = set()
+
+    # Prioritize common entities (verified)
+    for entity in common_entities:
+        tag = entity.strip()
+        tag_lower = tag.lower()
+        # Skip numbers, percentages, monetary values, dates
+        if re.match(r'^[\d.,\s%R$]+$', tag):
+            continue
+        if re.match(r'^\d', tag):
+            continue
+        if len(tag) < 3:
+            continue
+        if tag_lower in existing_lower or tag_lower in seen:
+            continue
+        seen.add(tag_lower)
+        entity_tags.append(tag)
+
+    # Then source entities not yet included
+    for entity in source_entities:
+        if len(entity_tags) >= 8:
+            break
+        tag = entity.strip()
+        tag_lower = tag.lower()
+        if re.match(r'^[\d.,\s%R$]+$', tag):
+            continue
+        if re.match(r'^\d', tag):
+            continue
+        if len(tag) < 3:
+            continue
+        if tag_lower in existing_lower or tag_lower in seen:
+            continue
+        seen.add(tag_lower)
+        entity_tags.append(tag)
+
+    return entity_tags[:8]
+
+
+def _merge_tags(existing: list, entity_tags: list, max_tags: int = 12) -> list:
+    """
+    Merge existing tags with entity-derived tags.
+
+    Preserves order (existing first), deduplicates, respects max.
+    """
+    merged = list(existing)
+    existing_lower = {t.lower().strip() for t in merged}
+
+    for tag in entity_tags:
+        if len(merged) >= max_tags:
+            break
+        if tag.lower().strip() not in existing_lower:
+            merged.append(tag)
+            existing_lower.add(tag.lower().strip())
+
+    return merged
+
+
+def _build_schema_org(
+    titulo: str,
+    linha_fina: str,
+    tags: list = None,
+    conteudo: str = "",
+    categoria: str = None,
+    image_url: str = None,
+) -> dict:
+    """
+    Build Schema.org/JSON-LD NewsArticle structured data.
+
+    Frontend/WP plugin can inject this into <head> when publishing.
+    The @id in mainEntityOfPage and image URL are typically filled by
+    the WP plugin at publish time.
+
+    Includes Google News 2026 recommended fields:
+    - dateCreated, isAccessibleForFree
+    - publisher.url, publisher.sameAs, publisher.logo dimensions
+    - speakable (SpeakableSpecification)
+    - image as ImageObject with dimensions
+    """
+    now_iso = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    schema = {
+        "@context": "https://schema.org",
+        "@type": "NewsArticle",
+        "headline": titulo[:110] if titulo else "",
+        "description": linha_fina[:200] if linha_fina else "",
+        "mainEntityOfPage": {
+            "@type": "WebPage",
+            "@id": "",
+        },
+        "datePublished": now_iso,
+        "dateModified": now_iso,
+        "dateCreated": now_iso,
+        "isAccessibleForFree": True,
+        "author": {
+            "@type": "Organization",
+            "name": "TMC",
+            "url": "https://tmc.com.br",
+        },
+        "publisher": {
+            "@type": "Organization",
+            "name": "TMC",
+            "url": "https://tmc.com.br",
+            "sameAs": [
+                "https://twitter.com/tmcnoticias",
+                "https://instagram.com/tmcnoticias",
+            ],
+            "logo": {
+                "@type": "ImageObject",
+                "url": "https://tmc.com.br/logo.png",
+                "width": 600,
+                "height": 60,
+            },
+        },
+        "inLanguage": "pt-BR",
+        "articleSection": categoria or "Geral",
+    }
+    if conteudo:
+        schema["articleBody"] = conteudo[:5000]
+        schema["wordCount"] = len(conteudo.split())
+        # SpeakableSpecification for voice assistants
+        schema["speakable"] = {
+            "@type": "SpeakableSpecification",
+            "cssSelector": ["article", ".article-body", ".entry-content"],
+        }
+    if tags:
+        schema["keywords"] = ", ".join(tags[:10])
+    if image_url:
+        schema["image"] = {
+            "@type": "ImageObject",
+            "url": image_url,
+            "width": 1200,
+            "height": 630,
+        }
+    return schema
+
+
+def _build_audit_data(
+    request_data,
+    result: dict,
+    enrichment,
+    phase_timings: dict,
+    total_ms: int,
+) -> dict:
+    """Build audit trail data dict from generation pipeline results."""
+    verification = result.get("verification", {})
+
+    # Hash system prompt for tracking prompt version changes
+    prompt_hash = ""
+    try:
+        from services.llm_service import get_system_prompt
+        sys_prompt = get_system_prompt(
+            persona=request_data.persona,
+            tom=request_data.tom,
+            tipo_materia=request_data.tipo_materia,
+            categoria=request_data.categoria,
+        )
+        prompt_hash = hashlib.sha256(sys_prompt.encode()).hexdigest()[:16]
+    except Exception:
+        pass
+
+    # Determine safety gate decision
+    if result.get("publish_blocked"):
+        safety_decision = "blocked"
+    elif result.get("human_review_required"):
+        safety_decision = "human_review"
+    else:
+        safety_decision = "allowed"
+
+    # Build enrichment summary (not full text, just metadata)
+    enrichment_summary = None
+    if enrichment:
+        enrichment_summary = {
+            "success": getattr(enrichment, "success", False),
+            "key_facts_count": len(getattr(enrichment, "key_facts", []) or []),
+            "source_urls_count": len(getattr(enrichment, "source_urls", []) or []),
+            "verified_chars": getattr(enrichment, "verified_chars", 0),
+        }
+
+    return {
+        "correlation_id": result.get("correlation_id"),
+        "request_payload": {
+            "categoria": request_data.categoria,
+            "tom": request_data.tom,
+            "tipo_materia": request_data.tipo_materia,
+            "persona": request_data.persona,
+            "source_len": len(request_data.texto_base.strip()),
+            "titulo_fonte": request_data.titulo_fonte,
+        },
+        "system_prompt_hash": prompt_hash,
+        "user_prompt_text": result.pop("_user_prompt", None),
+        "raw_llm_response": result.pop("_raw_response", None),
+        "enrichment_result": enrichment_summary,
+        "verification_result": verification,
+        "cove_applied": verification.get("cove_applied", False),
+        "cove_reclassified": verification.get("cove_reclassified", 0),
+        "safety_gate_decision": safety_decision,
+        "confidence_score": verification.get("confidence_score", 0.0),
+        "risk_level": verification.get("risk_level", "unknown"),
+        "publish_blocked": result.get("publish_blocked", False),
+        "block_reason": result.get("block_reason"),
+        "phase_timings": phase_timings,
+        "total_duration_ms": total_ms,
+    }
+
+
+async def _persist_audit(audit_data: dict):
+    """Persist audit data to database (fire-and-forget)."""
+    try:
+        from services.database import DatabaseService
+        db = DatabaseService()
+        await asyncio.to_thread(db.insert_generation_audit, audit_data)
+    except Exception as e:
+        logger.warning(f"Audit trail persist failed (non-blocking): {e}")
 
 
 async def _find_similar_articles(

@@ -507,11 +507,16 @@ KeywordsPanel.propTypes = {
 
 // Manual Tasks Panel - shows what user needs to do manually
 const ManualTasksPanel = ({ manualTasks, manualPotential }) => {
+  const [isExpanded, setIsExpanded] = useState(false);
+
   if (!manualTasks || manualTasks.length === 0) return null;
 
   return (
-    <div className="p-3 border-t border-light-gray bg-amber-50/30">
-      <div className="flex items-center gap-1.5 mb-2">
+    <div className="border-t border-light-gray bg-amber-50/30">
+      <button
+        onClick={() => setIsExpanded(!isExpanded)}
+        className="w-full flex items-center gap-1.5 p-3 hover:bg-amber-50/50 transition-colors"
+      >
         <AlertTriangle size={12} className="text-amber-600" />
         <p className="text-[10px] font-semibold text-amber-800 uppercase tracking-wider">
           Ações Manuais Necessárias
@@ -519,34 +524,43 @@ const ManualTasksPanel = ({ manualTasks, manualPotential }) => {
         <span className="text-[9px] bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded-full ml-auto">
           +{manualPotential} pts
         </span>
-      </div>
-      <p className="text-[9px] text-amber-700 mb-2">
-        A IA não pode otimizar estes itens automaticamente:
-      </p>
-      <div className="space-y-1.5">
-        {manualTasks.map((task, index) => (
-          <div
-            key={index}
-            className="flex items-start gap-2 p-2 bg-white/80 rounded text-[10px]"
-          >
-            <div className="mt-0.5 w-4 h-4 rounded bg-amber-100 flex items-center justify-center flex-shrink-0">
-              {task.metric === 'Links Internos' && <Link2 size={10} className="text-amber-700" />}
-              {task.metric === 'Links Externos' && <ExternalLink size={10} className="text-amber-700" />}
-              {task.metric === 'Mídia' && <Image size={10} className="text-amber-700" />}
-              {task.metric === 'URL/Slug' && <Hash size={10} className="text-amber-700" />}
-              {!['Links Internos', 'Links Externos', 'Mídia', 'URL/Slug'].includes(task.metric) &&
-                <AlertTriangle size={10} className="text-amber-700" />}
-            </div>
-            <div className="flex-1">
-              <div className="flex items-center justify-between">
-                <span className="font-medium text-dark-gray">{task.metric}</span>
-                <span className="text-[9px] text-amber-600">+{task.points} pts</span>
+        {isExpanded ? (
+          <ChevronDown size={14} className="text-amber-600" />
+        ) : (
+          <ChevronRight size={14} className="text-amber-600" />
+        )}
+      </button>
+      {isExpanded && (
+        <div className="px-3 pb-3">
+          <p className="text-[9px] text-amber-700 mb-2">
+            A IA não pode otimizar estes itens automaticamente:
+          </p>
+          <div className="space-y-1.5">
+            {manualTasks.map((task, index) => (
+              <div
+                key={index}
+                className="flex items-start gap-2 p-2 bg-white/80 rounded text-[10px]"
+              >
+                <div className="mt-0.5 w-4 h-4 rounded bg-amber-100 flex items-center justify-center flex-shrink-0">
+                  {task.metric === 'Links Internos' && <Link2 size={10} className="text-amber-700" />}
+                  {task.metric === 'Links Externos' && <ExternalLink size={10} className="text-amber-700" />}
+                  {task.metric === 'Mídia' && <Image size={10} className="text-amber-700" />}
+                  {task.metric === 'URL/Slug' && <Hash size={10} className="text-amber-700" />}
+                  {!['Links Internos', 'Links Externos', 'Mídia', 'URL/Slug'].includes(task.metric) &&
+                    <AlertTriangle size={10} className="text-amber-700" />}
+                </div>
+                <div className="flex-1">
+                  <div className="flex items-center justify-between">
+                    <span className="font-medium text-dark-gray">{task.metric}</span>
+                    <span className="text-[9px] text-amber-600">+{task.points} pts</span>
+                  </div>
+                  <p className="text-medium-gray">{task.action}</p>
+                </div>
               </div>
-              <p className="text-medium-gray">{task.action}</p>
-            </div>
+            ))}
           </div>
-        ))}
-      </div>
+        </div>
+      )}
     </div>
   );
 };
