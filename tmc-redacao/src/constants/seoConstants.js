@@ -387,11 +387,11 @@ export const CATEGORY_WEIGHTS = {
     }
   },
   technicalExcellence: {
-    total: 15,
+    total: 5,
     metrics: {
-      internalLinks: 5,
+      internalLinks: 0,       // Manual action only - not scored (feature not available)
       externalLinks: 5,
-      mediaOptimization: 5
+      mediaOptimization: 0    // Manual action only - not scored (feature not available)
     }
   },
   aiSerpOptimization: {

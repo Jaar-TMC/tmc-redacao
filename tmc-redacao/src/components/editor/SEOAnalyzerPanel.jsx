@@ -35,11 +35,11 @@ import { generateOptimizationSummary, extractPrimaryKeyword } from '../../utils/
  * Based on Google's 2025-2026 ranking factors, E-E-A-T principles,
  * and AI Overview optimization guidelines.
  *
- * 5 Categories (100 pts total):
+ * 5 Categories (90 pts raw, normalized to 0-100):
  * 1. Content Quality (30 pts)
  * 2. On-Page Optimization (25 pts)
  * 3. E-E-A-T Signals (20 pts)
- * 4. Technical Excellence (15 pts)
+ * 4. Technical Excellence (5 pts scored + links internos/mídia as manual actions)
  * 5. AI & SERP Optimization (10 pts)
  */
 
@@ -371,13 +371,19 @@ const MetricItem = ({ metricKey, metric, explanation }) => {
         )}
       </div>
       <div className="flex items-center gap-1.5">
-        <span className={`text-[10px] font-medium ${
-          metric.status === 'success' ? 'text-success' :
-          metric.status === 'warning' ? 'text-warning' :
-          metric.status === 'error' ? 'text-error' : 'text-medium-gray'
-        }`}>
-          {metric.score}/{metric.maxScore}
-        </span>
+        {metricKey === 'internalLinks' || metricKey === 'mediaOptimization' ? (
+          <span className="text-[10px] font-medium text-amber-600">
+            ação manual
+          </span>
+        ) : (
+          <span className={`text-[10px] font-medium ${
+            metric.status === 'success' ? 'text-success' :
+            metric.status === 'warning' ? 'text-warning' :
+            metric.status === 'error' ? 'text-error' : 'text-medium-gray'
+          }`}>
+            {metric.score}/{metric.maxScore}
+          </span>
+        )}
       </div>
     </div>
   );

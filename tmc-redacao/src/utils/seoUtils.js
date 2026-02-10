@@ -1577,16 +1577,18 @@ export const performSEOAnalysis = ({
     }
   };
 
-  // 4. Technical Excellence (15 pts)
+  // 4. Technical Excellence (5 pts scored + manual actions)
+  // internalLinks and mediaOptimization are analyzed but NOT scored
+  // (features not yet available in the tool) - shown as manual tasks only
   const internalLinks = analyzeInternalLinks(content);
   const externalLinks = analyzeExternalLinks(content);
   const mediaOptimization = analyzeMediaOptimization(content);
 
-  const technicalScore = internalLinks.score + externalLinks.score + mediaOptimization.score;
+  const technicalScore = externalLinks.score; // Only external links count in score
   const technicalExcellence = {
     score: technicalScore,
     maxScore: CATEGORY_WEIGHTS.technicalExcellence.total,
-    status: technicalScore >= 12 ? 'success' : technicalScore >= 7 ? 'warning' : 'error',
+    status: technicalScore >= 4 ? 'success' : technicalScore >= 2 ? 'warning' : 'error',
     metrics: {
       internalLinks,
       externalLinks,
@@ -1609,8 +1611,11 @@ export const performSEOAnalysis = ({
     }
   };
 
-  // Total Score
-  const totalScore = contentQualityScore + onPageScore + eeatScore + technicalScore + aiSerpScore;
+  // Total Score (raw max is 90 since internalLinks and mediaOptimization are excluded)
+  // Normalize to 0-100 scale for consistent display
+  const rawScore = contentQualityScore + onPageScore + eeatScore + technicalScore + aiSerpScore;
+  const maxRawScore = 90;
+  const totalScore = Math.round((rawScore / maxRawScore) * 100);
 
   // Generate priority recommendations
   const recommendations = generateRecommendations({
