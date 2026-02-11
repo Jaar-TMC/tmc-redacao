@@ -308,6 +308,16 @@ const RevisarPage = () => {
           readability: result.readability || null,
           enrichmentDegraded: result.enrichment_degraded || false,
           slugSugerido: result.slug_sugerido || null,
+          // v7.1: additional pipeline fields
+          schemaOrg: result.schema_org || null,
+          aiDisclosure: result.ai_disclosure || null,
+          sensitiveTopicsDetected: result.sensitive_topics_detected || false,
+          sensitiveInstructions: result.sensitive_instructions || [],
+          notaForced: result.nota_forced || false,
+          notaDisclaimer: result.nota_disclaimer || null,
+          regenerated: result.regenerated || false,
+          regenerationImprovement: result.regeneration_improvement || null,
+          correlationId: result.correlation_id || null,
         });
       }
 

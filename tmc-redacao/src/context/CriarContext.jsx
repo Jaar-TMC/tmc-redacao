@@ -95,6 +95,16 @@ const initialState = {
       readability: null,
       enrichmentDegraded: false,
       slugSugerido: null,
+      // v7.1: additional pipeline fields
+      schemaOrg: null,
+      aiDisclosure: null,
+      sensitiveTopicsDetected: false,
+      sensitiveInstructions: [],
+      notaForced: false,
+      notaDisclaimer: null,
+      regenerated: false,
+      regenerationImprovement: null,
+      correlationId: null,
     };
     try {
       const saved = sessionStorage.getItem('tmc_resultado');

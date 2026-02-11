@@ -12,6 +12,7 @@ import {
   Trash2,
   Bot,
   ChevronDown,
+  ChevronUp,
   Newspaper,
   Flame,
   X,
@@ -72,6 +73,16 @@ const CriarPostPage = () => {
   const [showPublishConfirm, setShowPublishConfirm] = useState(false);
   const [slugValue, setSlugValue] = useState(slugSugerido || '');
   const [slugCopied, setSlugCopied] = useState(false);
+  // v7.1: additional pipeline fields
+  const sensitiveTopicsDetected = resultado?.sensitiveTopicsDetected || false;
+  const sensitiveInstructions = resultado?.sensitiveInstructions || [];
+  const schemaOrg = resultado?.schemaOrg || null;
+  const notaForced = resultado?.notaForced || false;
+  const notaDisclaimer = resultado?.notaDisclaimer || null;
+  const regenerated = resultado?.regenerated || false;
+  const correlationId = resultado?.correlationId || null;
+  const [showSchemaOrg, setShowSchemaOrg] = useState(false);
+  const [schemaCopied, setSchemaCopied] = useState(false);
 
   // State for loading existing article
   const [isLoadingArticle, setIsLoadingArticle] = useState(false);
@@ -952,6 +963,87 @@ Com esse desempenho, o Brasil reafirma sua posição estratégica no cenário gl
             <div className="text-xs px-3 py-2 rounded border bg-amber-50 border-amber-200 text-amber-700 flex items-center gap-2">
               <AlertTriangle size={14} />
               <span>Verificacao sem enriquecimento externo - confianca pode ser menor</span>
+            </div>
+          </div>
+        )}
+
+        {/* v7.1: Sensitive topics warning (CRITICAL) */}
+        {sensitiveTopicsDetected && (
+          <div className="px-4 pb-1">
+            <div className="text-xs px-3 py-2 rounded border bg-red-100 border-red-300 text-red-800">
+              <div className="flex items-center gap-2 font-bold mb-1">
+                <AlertTriangle size={14} />
+                <span>CONTEUDO SENSIVEL DETECTADO</span>
+              </div>
+              {sensitiveInstructions.length > 0 && (
+                <ul className="list-disc list-inside space-y-1 mt-1">
+                  {sensitiveInstructions.map((instruction, i) => (
+                    <li key={i}>{instruction}</li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* v7.1: Nota forced notice */}
+        {notaForced && (
+          <div className="px-4 pb-1">
+            <div className="text-xs px-3 py-2 rounded border bg-blue-50 border-blue-200 text-blue-700 flex items-center gap-2">
+              <FileText size={14} />
+              <span>{notaDisclaimer || 'Material insuficiente - tipo forçado para nota curta'}</span>
+            </div>
+          </div>
+        )}
+
+        {/* v7.1: Auto-regeneration notice */}
+        {regenerated && (
+          <div className="px-4 pb-1">
+            <div className="text-xs px-3 py-2 rounded border bg-purple-50 border-purple-200 text-purple-700 flex items-center gap-2">
+              <Sparkles size={14} />
+              <span>Materia foi regenerada automaticamente para corrigir fabricacoes detectadas</span>
+            </div>
+          </div>
+        )}
+
+        {/* v7.1: Schema.org preview */}
+        {schemaOrg && (
+          <div className="px-4 pb-1">
+            <div className="text-xs px-3 py-2 rounded border bg-gray-50 border-gray-200 text-gray-700">
+              <div className="flex items-center justify-between">
+                <button
+                  onClick={() => setShowSchemaOrg(!showSchemaOrg)}
+                  className="flex items-center gap-1 hover:text-gray-900 font-medium"
+                >
+                  <Code size={14} />
+                  <span>Schema.org (JSON-LD)</span>
+                  {showSchemaOrg ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+                </button>
+                <button
+                  onClick={() => {
+                    navigator.clipboard.writeText(JSON.stringify(schemaOrg, null, 2));
+                    setSchemaCopied(true);
+                    setTimeout(() => setSchemaCopied(false), 2000);
+                  }}
+                  className="text-xs px-2 py-0.5 rounded bg-gray-200 hover:bg-gray-300"
+                >
+                  {schemaCopied ? 'Copiado!' : 'Copiar'}
+                </button>
+              </div>
+              {showSchemaOrg && (
+                <pre className="mt-2 text-[10px] bg-gray-100 p-2 rounded overflow-x-auto max-h-48 overflow-y-auto">
+                  {JSON.stringify(schemaOrg, null, 2)}
+                </pre>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* v7.1: Correlation ID for support */}
+        {correlationId && (
+          <div className="px-4 pb-1">
+            <div className="text-[10px] text-gray-400 text-right">
+              ID: {correlationId}
             </div>
           </div>
         )}
