@@ -180,9 +180,9 @@ const FilterBar = ({ urgencyCounts }) => {
 
   return (
     <div className="bg-white rounded-xl border border-light-gray p-4 pb-3 mb-6" role="search" aria-label="Filtros de matérias">
-      <div className="flex items-center gap-4">
+      <div className="flex flex-wrap items-center gap-4">
         {/* Search Input */}
-        <div className="flex-1 relative">
+        <div className="flex-1 min-w-[200px] relative">
           <label htmlFor="search-articles" className="sr-only">Buscar matérias</label>
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-medium-gray" style={{ width: '20px', height: '20px' }} aria-hidden="true" />
           <input
@@ -218,7 +218,7 @@ const FilterBar = ({ urgencyCounts }) => {
               }`}
             >
               <Tag style={{ width: '18px', height: '18px' }} aria-hidden="true" />
-              <span>{addAccents(filters.category) || 'Tema'}</span>
+              <span className="hidden xl:inline">{addAccents(filters.category) || 'Tema'}</span>
               <ChevronDown style={{ width: '14px', height: '14px' }} aria-hidden="true" />
             </button>
 
@@ -290,7 +290,7 @@ const FilterBar = ({ urgencyCounts }) => {
               }`}
             >
               <Hash style={{ width: '18px', height: '18px' }} aria-hidden="true" />
-              <span className="hidden sm:inline">{formatTagDisplay(filters.tag) || 'Tag'}</span>
+              <span className="hidden xl:inline">{formatTagDisplay(filters.tag) || 'Tag'}</span>
               <ChevronDown style={{ width: '14px', height: '14px' }} aria-hidden="true" />
             </button>
 
@@ -365,12 +365,12 @@ const FilterBar = ({ urgencyCounts }) => {
               }`}
             >
               <Building2 style={{ width: '18px', height: '18px' }} aria-hidden="true" />
-              <span>{addAccents(filters.source) || 'Origem'}</span>
+              <span className="hidden xl:inline">{addAccents(filters.source) || 'Origem'}</span>
               <ChevronDown style={{ width: '14px', height: '14px' }} aria-hidden="true" />
             </button>
 
             {openDropdown === 'source' && (
-              <div className="absolute top-full left-0 mt-2 w-56 bg-white rounded-lg border border-light-gray py-2 z-20" role="listbox" aria-label="Origens disponíveis">
+              <div className="absolute top-full right-0 mt-2 w-56 bg-white rounded-lg border border-light-gray py-2 z-20" role="listbox" aria-label="Origens disponíveis">
                 <div className="max-h-64 overflow-y-auto">
                   <button
                     type="button"

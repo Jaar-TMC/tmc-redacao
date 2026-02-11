@@ -299,7 +299,7 @@ const RedacaoPage = () => {
 
       <div className="flex">
         {/* Left Sidebar - Trends (Desktop sticky, Mobile slideover) */}
-        <div className="hidden lg:block w-72 sticky top-16 h-[calc(100vh-4rem)]" data-tour="trends-sidebar">
+        <div className="hidden lg:block w-72 shrink-0 sticky top-16 h-[calc(100vh-4rem)]" data-tour="trends-sidebar">
           <TrendsSidebar isOpen={true} onClose={() => {}} />
         </div>
 
@@ -312,7 +312,7 @@ const RedacaoPage = () => {
         </div>
 
         {/* Main Content - Articles Grid */}
-        <div className="flex-1 p-4 md:p-6 mt-16 lg:mt-0">
+        <div className="flex-1 min-w-0 p-4 md:p-6 mt-16 lg:mt-0">
           <div data-tour="filter-bar">
             <FilterBar urgencyCounts={urgencyCounts} />
           </div>
@@ -389,7 +389,7 @@ const RedacaoPage = () => {
         </div>
 
         {/* Right Sidebar - Action Panel (Desktop sticky, Mobile bottom sheet) */}
-        <div className="hidden lg:block w-80 p-4 sticky top-16 h-[calc(100vh-4rem)]">
+        <div className="hidden lg:block w-72 xl:w-80 shrink-0 p-4 sticky top-16 h-[calc(100vh-4rem)]">
           <ActionPanel
             selectedArticles={selectedArticles}
             onRemove={handleRemoveArticle}

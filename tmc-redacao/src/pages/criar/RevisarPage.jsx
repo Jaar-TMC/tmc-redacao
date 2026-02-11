@@ -303,6 +303,11 @@ const RevisarPage = () => {
           materialSufficiency: result.material_sufficiency || null,
           humanReviewRequired: result.human_review_required || false,
           reviewReasons: result.review_reasons || [],
+          // v7: editorial gates
+          publicationStatus: result.publication_status || null,
+          readability: result.readability || null,
+          enrichmentDegraded: result.enrichment_degraded || false,
+          slugSugerido: result.slug_sugerido || null,
         });
       }
 

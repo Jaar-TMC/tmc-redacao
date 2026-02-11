@@ -64,6 +64,14 @@ const CriarPostPage = () => {
   const riskLevel = resultado?.riskLevel || null;
   const humanReviewRequired = resultado?.humanReviewRequired || false;
   const reviewReasons = resultado?.reviewReasons || [];
+  // v7: editorial gates
+  const publicationStatus = resultado?.publicationStatus || null;
+  const readabilityData = resultado?.readability || null;
+  const enrichmentDegraded = resultado?.enrichmentDegraded || false;
+  const slugSugerido = resultado?.slugSugerido || null;
+  const [showPublishConfirm, setShowPublishConfirm] = useState(false);
+  const [slugValue, setSlugValue] = useState(slugSugerido || '');
+  const [slugCopied, setSlugCopied] = useState(false);
 
   // State for loading existing article
   const [isLoadingArticle, setIsLoadingArticle] = useState(false);
@@ -555,17 +563,30 @@ Com esse desempenho, o Brasil reafirma sua posição estratégica no cenário gl
     }
   }, [title, content, articleId, buildArticleData]);
 
-  // Publish handler
+  // Publish handler with editorial gate enforcement
   const handlePublish = useCallback(async () => {
     if (!title.trim()) {
-      setSaveError('Título é obrigatório para publicar');
+      setSaveError('Titulo e obrigatorio para publicar');
       return;
     }
     if (!content.trim()) {
-      setSaveError('Conteúdo é obrigatório para publicar');
+      setSaveError('Conteudo e obrigatorio para publicar');
       return;
     }
 
+    // v7: block publish if publication_status === "blocked"
+    if (publicationStatus === 'blocked') {
+      setSaveError(`Publicacao bloqueada: ${blockReason || 'Verificacao automatica detectou problemas criticos.'}`);
+      return;
+    }
+
+    // v7: require confirmation for draft_review
+    if (publicationStatus === 'draft_review' && !showPublishConfirm) {
+      setShowPublishConfirm(true);
+      return;
+    }
+
+    setShowPublishConfirm(false);
     setIsPublishing(true);
     setSaveError(null);
 
@@ -574,24 +595,20 @@ Com esse desempenho, o Brasil reafirma sua posição estratégica no cenário gl
 
       let savedArticle;
       if (articleId) {
-        // Update existing article
         savedArticle = await updateUserArticle(articleId, articleData);
       } else {
-        // Create new article
         savedArticle = await createUserArticle(articleData);
       }
 
       console.log('Article published:', savedArticle.id);
-
-      // Navigate to Minhas Matérias on success
       navigate('/minhas-materias');
     } catch (err) {
       console.error('Error publishing:', err);
-      setSaveError(err.message || 'Erro ao publicar matéria');
+      setSaveError(err.message || 'Erro ao publicar materia');
     } finally {
       setIsPublishing(false);
     }
-  }, [title, content, articleId, buildArticleData, navigate]);
+  }, [title, content, articleId, buildArticleData, navigate, publicationStatus, blockReason, showPublishConfirm]);
 
   // Inline Version Dropdown component
   const VersionDropdown = ({ versions: versionsList, currentIdx, onSelect, onClose }) => {
@@ -795,21 +812,48 @@ Com esse desempenho, o Brasil reafirma sua posição estratégica no cenário gl
                 )}
               </button>
             </Tooltip>
-            <button
-              onClick={handlePublish}
-              disabled={!title.trim() || !content.trim() || isPublishing}
-              className={`flex items-center gap-2 px-3 md:px-4 py-2 text-sm font-semibold text-white rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed bg-tmc-orange hover:bg-tmc-orange/90`}
-              title=""
-            >
-              {isPublishing ? (
-                <>
-                  <Loader2 size={16} className="animate-spin" />
-                  <span>Publicando...</span>
-                </>
-              ) : (
-                <span>Publicar</span>
+            <div className="flex items-center gap-2">
+              {/* v7: Publication status badge */}
+              {publicationStatus === 'blocked' && (
+                <span className="text-xs px-2 py-1 rounded-full bg-red-100 text-red-700 font-medium flex items-center gap-1">
+                  <ShieldAlert size={12} />
+                  Bloqueado
+                </span>
               )}
-            </button>
+              {publicationStatus === 'draft_review' && (
+                <span className="text-xs px-2 py-1 rounded-full bg-amber-100 text-amber-700 font-medium flex items-center gap-1">
+                  <AlertTriangle size={12} />
+                  Revisao necessaria
+                </span>
+              )}
+              {publicationStatus === 'ready_for_review' && (
+                <span className="text-xs px-2 py-1 rounded-full bg-green-100 text-green-700 font-medium flex items-center gap-1">
+                  <ShieldCheck size={12} />
+                  Verificado
+                </span>
+              )}
+              <button
+                onClick={handlePublish}
+                disabled={!title.trim() || !content.trim() || isPublishing || publicationStatus === 'blocked'}
+                className={`flex items-center gap-2 px-3 md:px-4 py-2 text-sm font-semibold text-white rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
+                  publicationStatus === 'blocked'
+                    ? 'bg-red-400 cursor-not-allowed'
+                    : publicationStatus === 'draft_review'
+                    ? 'bg-amber-500 hover:bg-amber-600'
+                    : 'bg-tmc-orange hover:bg-tmc-orange/90'
+                }`}
+                title={publicationStatus === 'blocked' ? (blockReason || 'Publicacao bloqueada') : ''}
+              >
+                {isPublishing ? (
+                  <>
+                    <Loader2 size={16} className="animate-spin" />
+                    <span>Publicando...</span>
+                  </>
+                ) : (
+                  <span>Publicar</span>
+                )}
+              </button>
+            </div>
           </div>
         </div>
 
@@ -827,7 +871,90 @@ Com esse desempenho, o Brasil reafirma sua posição estratégica no cenário gl
           </div>
         )}
 
-        {/* Verification UI temporarily hidden */}
+        {/* v7: Publish confirmation dialog for draft_review */}
+        {showPublishConfirm && publicationStatus === 'draft_review' && (
+          <div className="bg-amber-50 border-t border-amber-200 px-4 py-3">
+            <div className="flex items-start gap-3">
+              <AlertTriangle size={18} className="text-amber-500 mt-0.5 flex-shrink-0" />
+              <div className="flex-1">
+                <p className="text-sm font-medium text-amber-800">Revisao humana recomendada</p>
+                {reviewReasons.length > 0 && (
+                  <ul className="text-xs text-amber-700 mt-1 space-y-0.5">
+                    {reviewReasons.map((reason, i) => (
+                      <li key={i}>- {reason}</li>
+                    ))}
+                  </ul>
+                )}
+                <div className="flex gap-2 mt-2">
+                  <button
+                    onClick={handlePublish}
+                    className="text-xs px-3 py-1.5 bg-amber-500 text-white rounded font-medium hover:bg-amber-600"
+                  >
+                    Publicar mesmo assim
+                  </button>
+                  <button
+                    onClick={() => setShowPublishConfirm(false)}
+                    className="text-xs px-3 py-1.5 bg-white text-amber-700 border border-amber-300 rounded font-medium hover:bg-amber-50"
+                  >
+                    Cancelar
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* v7: Blocked publish banner */}
+        {publicationStatus === 'blocked' && blockReason && (
+          <div className="bg-red-50 border-t border-red-200 px-4 py-3">
+            <div className="flex items-center gap-2">
+              <ShieldAlert size={16} className="text-red-500" />
+              <span className="text-sm font-medium text-red-800">Publicacao bloqueada: {blockReason}</span>
+            </div>
+          </div>
+        )}
+
+        {/* v7: Verification Banner (now active) */}
+        {verificationData && (
+          <div className="px-4 pt-3">
+            <VerificationBanner
+              verification={verificationData}
+              publishBlocked={publishBlocked}
+              blockReason={blockReason}
+              humanReviewRequired={humanReviewRequired}
+              reviewReasons={reviewReasons}
+            />
+          </div>
+        )}
+
+        {/* v7: Readability display */}
+        {readabilityData && (
+          <div className="px-4 pb-1">
+            <div className={`text-xs flex items-center gap-3 px-3 py-2 rounded border ${
+              readabilityData.flesch_score >= 60 ? 'bg-green-50 border-green-200 text-green-700' :
+              readabilityData.flesch_score >= 50 ? 'bg-amber-50 border-amber-200 text-amber-700' :
+              'bg-red-50 border-red-200 text-red-700'
+            }`}>
+              <span className="font-medium">Legibilidade: Flesch {readabilityData.flesch_score}</span>
+              {readabilityData.avg_sentence_length && (
+                <span>Frase media: {readabilityData.avg_sentence_length} palavras</span>
+              )}
+              {readabilityData.long_sentence_pct != null && (
+                <span>Frases longas: {Math.round(readabilityData.long_sentence_pct)}%</span>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* v7: Enrichment degradation warning */}
+        {enrichmentDegraded && (
+          <div className="px-4 pb-1">
+            <div className="text-xs px-3 py-2 rounded border bg-amber-50 border-amber-200 text-amber-700 flex items-center gap-2">
+              <AlertTriangle size={14} />
+              <span>Verificacao sem enriquecimento externo - confianca pode ser menor</span>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Banner de Contexto do Tema */}
@@ -1067,7 +1194,6 @@ Com esse desempenho, o Brasil reafirma sua posição estratégica no cenário gl
 
           {/* Editor */}
           <div className="flex-1 p-4 md:p-8 overflow-y-auto bg-white">
-            {/* Verification Banner temporarily hidden */}
             <RichTextEditor
               ref={editorRef}
               content={content}
@@ -1163,6 +1289,33 @@ Com esse desempenho, o Brasil reafirma sua posição estratégica no cenário gl
               </p>
             )}
           </div>
+
+          {/* v7: Slug field */}
+          {slugSugerido && (
+            <div className="bg-white border-t border-light-gray px-4 md:px-6 py-2">
+              <div className="flex items-center gap-2">
+                <Link2 size={14} className="text-medium-gray flex-shrink-0" />
+                <span className="text-xs text-medium-gray flex-shrink-0">Slug:</span>
+                <input
+                  type="text"
+                  value={slugValue}
+                  onChange={(e) => setSlugValue(e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, '-'))}
+                  className="flex-1 text-xs px-2 py-1 border border-light-gray rounded bg-off-white text-dark-gray font-mono"
+                />
+                <button
+                  onClick={() => {
+                    navigator.clipboard.writeText(slugValue);
+                    setSlugCopied(true);
+                    setTimeout(() => setSlugCopied(false), 2000);
+                  }}
+                  className="text-xs px-2 py-1 rounded border border-light-gray text-medium-gray hover:text-dark-gray hover:border-dark-gray transition-colors flex items-center gap-1"
+                >
+                  {slugCopied ? <Check size={12} /> : <Copy size={12} />}
+                  {slugCopied ? 'Copiado' : 'Copiar'}
+                </button>
+              </div>
+            </div>
+          )}
 
           {/* Footer Stats */}
           <div className="bg-white border-t border-light-gray px-4 md:px-6 py-2 flex items-center justify-between">

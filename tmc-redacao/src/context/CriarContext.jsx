@@ -90,6 +90,11 @@ const initialState = {
       materialSufficiency: null,
       humanReviewRequired: false,
       reviewReasons: [],
+      // v7: editorial gates
+      publicationStatus: null,
+      readability: null,
+      enrichmentDegraded: false,
+      slugSugerido: null,
     };
     try {
       const saved = sessionStorage.getItem('tmc_resultado');
