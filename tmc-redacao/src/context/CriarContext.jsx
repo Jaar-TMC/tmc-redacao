@@ -190,7 +190,10 @@ export const CriarProvider = ({ children }) => {
       ...prev,
       textoBase: {
         ...prev.textoBase,
-        variantSelections: selections,
+        variantSelections: {
+          ...prev.textoBase.variantSelections,
+          ...selections,
+        },
       },
     }));
   }, []);

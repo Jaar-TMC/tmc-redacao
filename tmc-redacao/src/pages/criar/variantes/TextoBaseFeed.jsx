@@ -102,6 +102,20 @@ const TextoBaseFeed = ({
 
   // Initialize materias when fonte changes (with fallback topics)
   useEffect(() => {
+    // If returning from another step with cached materias, restore instantly
+    if (savedSelections?.cachedMaterias?.length > 0) {
+      setMaterias(savedSelections.cachedMaterias);
+      setActiveMateria(savedSelections.cachedMaterias[0].id);
+      if (savedSelections.selectedTopics?.length > 0) {
+        setSelectedTopics(new Set(savedSelections.selectedTopics));
+      }
+      if (savedSelections.editedTexts) {
+        setEditedTexts(savedSelections.editedTexts);
+      }
+      return;
+    }
+
+    // First visit - transform articles with fallback topics, then AI will extract
     if (fonte?.dados && fonte.dados.length > 0) {
       const initialMaterias = transformArticlesToMateriasInitial(fonte.dados);
       setMaterias(initialMaterias);
@@ -109,20 +123,12 @@ const TextoBaseFeed = ({
       if (initialMaterias.length > 0) {
         setActiveMateria(initialMaterias[0].id);
 
-        // Restore saved selections if returning from another step
-        if (savedSelections?.selectedTopics?.length > 0) {
-          setSelectedTopics(new Set(savedSelections.selectedTopics));
-          if (savedSelections.editedTexts) {
-            setEditedTexts(savedSelections.editedTexts);
-          }
-        } else {
-          // First visit: select all topics by default
-          const allTopics = new Set();
-          initialMaterias.forEach(m => {
-            m.topics.forEach(t => allTopics.add(t.id));
-          });
-          setSelectedTopics(allTopics);
-        }
+        // First visit: select all topics by default
+        const allTopics = new Set();
+        initialMaterias.forEach(m => {
+          m.topics.forEach(t => allTopics.add(t.id));
+        });
+        setSelectedTopics(allTopics);
       }
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -291,12 +297,19 @@ const TextoBaseFeed = ({
         });
       });
 
-      onDataChange({
+      const data = {
         selectedTopics: Array.from(selectedTopics),
         editedTexts,
         topicTexts, // Include the actual texts
         wordCount: stats.words
-      });
+      };
+
+      // Cache materias once AI extraction is complete (for instant restore on return)
+      if (materias.length > 0 && materias.every(m => !m.isLoadingTopics)) {
+        data.cachedMaterias = materias;
+      }
+
+      onDataChange(data);
     }
   }, [selectedTopics, editedTexts, stats.words, materias, onDataChange]);
 

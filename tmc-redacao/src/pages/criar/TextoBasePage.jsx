@@ -63,11 +63,16 @@ const TextoBasePage = () => {
 
     // Persist selections to context so they survive navigation
     if (data && (data.selectedTopics || data.editedTexts)) {
-      setVariantSelections({
+      const selections = {
         selectedTopics: data.selectedTopics || [],
         editedTexts: data.editedTexts || {},
         topicTexts: data.topicTexts || {},
-      });
+      };
+      // Cache extracted materias for instant restore on return
+      if (data.cachedMaterias) {
+        selections.cachedMaterias = data.cachedMaterias;
+      }
+      setVariantSelections(selections);
     }
 
     // Verificar se pode prosseguir baseado nos dados
