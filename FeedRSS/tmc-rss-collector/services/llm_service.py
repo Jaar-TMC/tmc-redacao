@@ -11,6 +11,7 @@ import logging
 import re
 from typing import Optional
 import httpx
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
 logger = logging.getLogger(__name__)
 
@@ -192,29 +193,187 @@ Estes sao erros COMUNS que voce DEVE evitar:
 7. **Inferencias causais**: NAO adicione relacoes de causa e efeito que nao estejam explicitas nas fontes ("isso ocorreu porque", "em consequencia de").
 8. **Expansao de citacoes**: NAO parafrase citacoes adicionando palavras ou sentido que NAO estao no original."""
 
+ATRIBUICAO_INLINE = """
+## ATRIBUICAO DE FONTES (OBRIGATORIO - SUBORDINADO A FIDELIDADE)
+Cada dado facutal (nome, numero, data, resultado, declaracao) DEVE ter atribuicao visivel:
+- Use "segundo [Fonte]", "conforme [Fonte]", "de acordo com [Fonte]"
+- Use verbos de reporte: "disse", "afirmou", "declarou", "informou", "anunciou"
+- MINIMO 3 atribuicoes por materia (exceto notas curtas: minimo 1)
+- Se a fonte original diz "Haddad afirmou", MANTENHA a atribuicao: "Segundo Haddad, ..."
+- NAO abstraia fontes: "O Ministerio da Fazenda" em vez de "o governo"
+- NAO invente fontes ou especialistas para dar atribuicao
+- Quando citar orgaos oficiais, use nome completo na primeira mencao: "Banco Central do Brasil"
+"""
+
+EEAT_ENFORCEMENT = """
+## E-E-A-T - SINAIS DE AUTORIDADE (OBRIGATORIO - SUBORDINADO A FIDELIDADE)
+Para cada materia, inclua os sinais abaixo usando APENAS dados das fontes:
+
+### ATRIBUICOES DE FONTE (MINIMO 3 por materia, 1 para notas curtas)
+- Use "segundo [Fonte Nomeada]", "conforme [Fonte]", "de acordo com [Fonte]"
+- EXEMPLOS: "segundo o Ministerio da Fazenda", "conforme dados do IBGE", "de acordo com o governo federal"
+- NAO use atribuicoes genericas: "segundo especialistas" ou "dados mostram" sem nomear a fonte
+- Se a fonte original nomeia um cargo ou instituicao, PRESERVE na saida
+
+### DECLARACOES COM VERBOS DE REPORTE (MINIMO 2 por materia)
+- Use: disse, afirmou, declarou, informou, anunciou, explicou, destacou
+- EXEMPLO: "Haddad afirmou que as medidas devem gerar 500 mil empregos"
+- NAO abstraia: se a fonte diz "Haddad afirmou", NAO mude para "o governo espera"
+
+### TITULOS E CREDENCIAIS (quando disponiveis na fonte)
+- Use titulo profissional na primeira mencao: "o economista Jose Silva", "a ministra Maria"
+- Instituicao completa: "Banco Central do Brasil" (primeira vez), "BC" (seguintes)
+
+### DADOS VERIFICAVEIS (MINIMO 2 quando presentes nas fontes)
+- Padroes: "segundo dados do IBGE", "conforme pesquisa da FGV", "de acordo com o balanco"
+- NAO invente dados, fontes ou especialistas para cumprir este requisito
+"""
+
+LEGIBILIDADE_ALVO = """
+## REGRAS DE LEGIBILIDADE (OBRIGATORIO - PRIORIDADE ALTA)
+Meta: Flesch Reading Ease ACIMA de 60 (leitura facil para publico geral).
+Escreva como se explicasse a noticia para um jovem de 16 anos inteligente.
+Estas regras tem PRIORIDADE sobre estilo e tom - mesmo em textos formais, a legibilidade vem primeiro.
+
+### FRASES CURTAS (regra mais importante para Flesch)
+- Media de 12-15 palavras por frase. MAXIMO ABSOLUTO: 20 palavras (exceto citacoes diretas).
+- ZERO frases com mais de 25 palavras. Se escreveu uma frase longa, QUEBRE em duas.
+- Uma ideia por frase. Duas ideias = duas frases. Sempre.
+- Prefira ponto final. Evite ponto e virgula, travessao longo e parenteses que alongam a frase.
+- NAO encadeie oracoes com "que", "o qual", "sendo que", "uma vez que". Faca frases separadas.
+
+### PALAVRAS CURTAS E SIMPLES (segunda regra mais importante para Flesch)
+- Prefira palavras de 1-3 silabas. Palavras longas derrubam o Flesch.
+- SUBSTITUICOES OBRIGATORIAS (sempre use a versao curta):
+  implementar/implementacao → usar/uso | significativo → grande | consequentemente → por isso
+  atualmente → agora | subsequentemente → depois | viabilizar → permitir | no entanto → mas/porem
+  estrategia → plano | perspectiva → visao | infraestrutura → estrutura | ademais → alem disso
+  impactar → afetar | potencializar → aumentar | demanda → procura | recursos → meios/verbas
+  protagonizar → liderar | movimentacao → movimento | disponibilizar → oferecer | ocasionar → causar
+  procedimento → processo | regulamentacao → regra | reivindicacao → pedido | desempenho → resultado
+  abrangencia → alcance | mensurar → medir | conjuntura → cenario | deliberacao → decisao
+  problematica → problema | operacionalizar → operar | parametro → limite | metodologia → metodo
+- Explique termos tecnicos na mesma frase com palavras simples: "a Selic (taxa basica de juros)"
+- NAO use palavras eruditas quando existe sinonimo popular: "outrossim" → "alem disso", "destarte" → "assim"
+
+### VOZ ATIVA (terceira regra mais importante)
+- SEMPRE prefira voz ativa. "O governo anunciou" em vez de "Foi anunciado pelo governo".
+- Evite construcoes passivas: "foi decidido", "sera implementado", "tem sido discutido".
+- Reescreva: "A medida foi aprovada pelo Senado" → "O Senado aprovou a medida".
+
+### PARAGRAFOS CURTOS
+- Maximo 3 frases por paragrafo (ideal: 2-3 frases)
+- Primeiro paragrafo: 40-60 palavras (lide completo)
+- Paragrafos de 1 frase sao permitidos para dar ritmo
+
+### ESTRUTURA QUE FACILITA LEITURA
+- Use subtitulos ## a cada 2-3 paragrafos para quebrar blocos de texto
+- Listas com bullet points quando houver 3+ itens relacionados
+- Frases de transicao curtas: "Alem disso,", "Por outro lado,", "Na pratica,"
+
+### EXEMPLOS DE REESCRITA
+
+RUIM - Flesch ~30 (24 palavras, vocabulario complexo):
+"O governo federal, atraves da Secretaria do Tesouro Nacional e apos consulta ao IPEA, decidiu implementar novas diretrizes economicas para o proximo semestre."
+
+BOM - Flesch ~65 (12 + 10 palavras, vocabulario simples):
+"O governo anunciou novas regras para a economia. A decisao veio apos consulta ao IPEA e ao Tesouro Nacional."
+
+RUIM - Flesch ~25 (voz passiva, palavras longas):
+"A regulamentacao foi disponibilizada pelo Ministerio, ocasionando significativa movimentacao no setor, que busca operacionalizar as novas metodologias estabelecidas."
+
+BOM - Flesch ~70 (voz ativa, palavras curtas):
+"O Ministerio publicou a nova regra. O setor ja comecou a se adaptar. As empresas agora precisam seguir o novo metodo."
+
+### AUTOAVALIACAO ANTES DE FINALIZAR
+Releia cada frase do texto e pergunte:
+1. Tem mais de 20 palavras? Se sim, QUEBRE.
+2. Tem palavra de 4+ silabas? Se sim, troque por sinonimo menor.
+3. Esta na voz passiva? Se sim, reescreva na ativa.
+"""
+
+SEO_OTIMIZACAO = """
+## OTIMIZACAO SEO (IMPORTANTE - SUBORDINADO A PRECISAO FACTUAL)
+
+Se houver conflito entre SEO e precisao factual, SEMPRE priorize a precisao.
+
+### TITULO (7 a 10 palavras | EXATAMENTE 50-60 caracteres)
+- Coloque a palavra-chave principal nas PRIMEIRAS 3 PALAVRAS
+- Inclua uma power word jornalistica: confirma, revela, decide, anuncia, recusa, proibe
+- Inclua um numero quando o tema permitir (numeros aumentam CTR)
+- CONTE os caracteres ANTES de finalizar. Se >60, CORTE.
+- EXEMPLO CALIBRADO (8 palavras, 56 caracteres):
+  "Governo revela novo plano para conter inflacao em 2026"
+
+### LINHA FINA (20 a 25 palavras | EXATAMENTE 150-160 caracteres)
+- COMPLEMENTE o titulo - nao repita as mesmas palavras
+- Inclua a palavra-chave principal
+- DEVE terminar com CTA + pontuacao: "Confira.", "Entenda.", "Saiba mais.", "Veja."
+- CONTE os caracteres ANTES de finalizar. Se >160, CORTE.
+- EXEMPLO CALIBRADO (23 palavras, 155 caracteres):
+  "Medida inclui reducao de impostos e novos incentivos fiscais para pequenas empresas; especialistas avaliam impacto no bolso do consumidor. Confira."
+
+### PRIMEIRO PARAGRAFO (40 a 60 palavras)
+- Responda O QUE, QUEM, QUANDO, ONDE em 40-60 palavras
+- Inclua a palavra-chave principal
+- Este paragrafo sera usado pelo Google como featured snippet
+- Comece com a informacao mais importante (BLUF)
+
+### ESTRUTURA DO CORPO
+- **Subtitulos**: Use ## a cada 2-3 paragrafos (minimo 2 subtitulos em materias > 500 palavras)
+- **Paragrafos**: Maximo 3 frases cada (ideal 2-3)
+- **Frases**: Media 12-15 palavras, MAXIMO 20 palavras. Flesch 60+ e obrigatorio.
+- **Palavras**: Prefira palavras curtas (1-3 silabas). Troque palavras longas por sinonimos curtos.
+- **Transicoes**: Use em 30%+ das frases: alem disso, por isso, mas, porem, por outro lado, na pratica, dessa forma, por fim
+- **Voz ativa**: OBRIGATORIO. "O governo aprovou" em vez de "Foi aprovado pelo governo"
+- **Densidade keyword**: A palavra-chave principal deve aparecer entre 1-2.5% do texto
+
+### SLUG SUGERIDO
+- Gere um slug com 3-6 palavras separadas por hifen
+- Sem acentos, tudo minusculo
+- EXEMPLO: "governo-revela-plano-inflacao"
+"""
+
 # Dynamic length tiers based on TOTAL VERIFIED material (source + enrichment)
 # (max_verified_chars, min_output, max_output, format_label)
 SOURCE_LENGTH_TIERS = [
     (150, 200, 400, "nota curta"),
-    (500, 400, 1000, "materia curta"),
-    (1500, 800, 2000, "materia media"),
-    (3000, 1500, 3500, "materia longa"),
+    (500, 600, 1200, "materia curta"),
+    (1500, 1200, 2500, "materia media"),
+    (3000, 1800, 3500, "materia longa"),
     (float('inf'), 2000, 4000, "materia completa"),
 ]
 
+# Minimum output chars per article type — ensures editorial adequacy
+# regardless of source length tier. "nota" is exempt (short by design).
+ARTICLE_TYPE_MIN_CHARS = {
+    "destaque": 2000,
+    "coluna": 2000,
+    "analise": 2500,
+    "reportagem": 3000,
+    "servico": 1800,
+    "nota": 200,   # notas are intentionally short
+}
 
-def get_dynamic_length_requirement(texto_base: str, verified_chars: int = 0) -> tuple:
+
+def get_dynamic_length_requirement(texto_base: str, verified_chars: int = 0, tipo_materia: str = "") -> tuple:
     """
-    Get dynamic min/max length based on total verified material.
+    Get dynamic min/max length based on total verified material AND article type.
 
     Uses the LARGER of source text length or total verified chars
     (source + enrichment from Exa). This allows short sources that were
     enriched with verified external content to produce full articles.
 
+    After computing the tier-based range, applies an article-type floor
+    so that structured types (destaque, analise, reportagem) never fall
+    below their editorial minimum even when the source is short.
+
     Args:
         texto_base: Source text content
         verified_chars: Total verified material chars (source + enrichment).
                        If 0, uses source length only.
+        tipo_materia: Article type key (destaque|coluna|servico|analise|reportagem|nota).
+                     When provided, enforces per-type minimum floors.
 
     Returns:
         Tuple of (min_chars, max_chars, format_label)
@@ -222,16 +381,51 @@ def get_dynamic_length_requirement(texto_base: str, verified_chars: int = 0) -> 
     source_len = len(texto_base.strip())
     # Use the larger of source alone or total verified material
     effective_len = max(source_len, verified_chars)
+
+    # Phase 2.5: Enrichment inflation guard (v7: allow enriched material to contribute)
+    # If raw source is very short but enrichment inflated verified_chars,
+    # cap output proportionally: allow enriched material to drive output length
+    inflation_capped = False
+    if source_len < 300 and verified_chars > source_len * 2:
+        # v7 fix: cap based on max(source*5, verified*0.5) instead of just source*5
+        # This prevents a 75-char source enriched to 6000 chars from being capped at 375
+        raw_cap = max(source_len * 5, int(verified_chars * 0.5))
+        inflation_capped = True
+
+    tier_min = 0
+    tier_max = 0
+    tier_label = ""
     for max_source, min_output, max_output, label in SOURCE_LENGTH_TIERS:
         if effective_len <= max_source:
+            tier_min = min_output
+            tier_max = max_output
+            tier_label = label
             # Safety: cap max_output at 3x verified material
             if effective_len > 0:
                 expansion_cap = int(effective_len * 3)
-                capped_max = min(max_output, max(expansion_cap, min_output))
-                return min_output, capped_max, label
-            return min_output, max_output, label
-    # Fallback
-    return 2000, 4000, "materia completa"
+                tier_max = min(max_output, max(expansion_cap, tier_min))
+                # Apply inflation guard
+                if inflation_capped:
+                    tier_max = min(tier_max, max(raw_cap, tier_min))
+            break
+    else:
+        # Fallback (no tier matched)
+        tier_min, tier_max, tier_label = 2000, 4000, "materia completa"
+
+    # Apply article-type minimum floor (skip for nota or empty type)
+    if tipo_materia and tipo_materia != "nota":
+        type_floor = ARTICLE_TYPE_MIN_CHARS.get(tipo_materia, 0)
+        if type_floor > 0 and effective_len >= 200:
+            # Only enforce type floor when we have at least 200 chars of material
+            # (below 200 chars, it's truly too little to expand safely)
+            if tier_min < type_floor:
+                tier_min = type_floor
+                tier_label = f"materia {tipo_materia}"
+            # Ensure max is at least min + 500 for editorial breathing room
+            if tier_max < tier_min + 500:
+                tier_max = tier_min + 500
+
+    return tier_min, tier_max, tier_label
 
 
 # =============================================================================
@@ -524,7 +718,7 @@ TONS_POR_CATEGORIA = {
                 "Que jogaço! O goleiro fez milagres, mas não deu pro time da casa.",
             ],
             "proibido": "Não use 'senhoras e senhores', tom de narração de rádio, ou formalidade excessiva.",
-            "tamanho_frase": "Frases curtas e médias, máx 25 palavras. Ritmo rápido.",
+            "tamanho_frase": "Frases curtas, max 18 palavras (media 12-14). Ritmo rapido.",
             "vocabulario": "coloquial",
         },
         "emocional": {
@@ -534,7 +728,7 @@ TONS_POR_CATEGORIA = {
                 "O gol no último minuto explodiu a torcida e selou uma noite inesquecível.",
             ],
             "proibido": "Não use em coberturas de violência ou acidentes. Evite hipérboles vazias.",
-            "tamanho_frase": "Frases curtas e impactantes, máx 20 palavras. Exclamações com moderação.",
+            "tamanho_frase": "Frases curtas e impactantes, max 18 palavras (media 12-14). Exclamacoes com moderacao.",
             "vocabulario": "coloquial",
         },
         "sobrio": {
@@ -544,7 +738,7 @@ TONS_POR_CATEGORIA = {
                 "A confederação abriu investigação sobre os incidentes ocorridos durante a partida.",
             ],
             "proibido": "Nenhuma gíria, piada, trocadilho ou emojis. Zero humor.",
-            "tamanho_frase": "Frases medidas e factuais, máx 20 palavras.",
+            "tamanho_frase": "Frases medidas e factuais, max 18 palavras (media 12-14).",
             "vocabulario": "formal",
         },
     },
@@ -556,7 +750,7 @@ TONS_POR_CATEGORIA = {
                 "Se você ainda não viu, corre que vale cada minuto.",
             ],
             "proibido": "Não use jargão técnico da indústria. Evite parecer um press release.",
-            "tamanho_frase": "Frases curtas e diretas, máx 20 palavras. Tom de conversa.",
+            "tamanho_frase": "Frases curtas e diretas, max 18 palavras (media 12-14). Tom de conversa.",
             "vocabulario": "coloquial",
         },
         "leve": {
@@ -566,7 +760,7 @@ TONS_POR_CATEGORIA = {
                 "O figurino do red carpet deu o que falar, e com razão.",
             ],
             "proibido": "Não use sarcasmo ácido ou ironia que possa ser ofensiva.",
-            "tamanho_frase": "Frases médias, máx 25 palavras. Fluidez é essencial.",
+            "tamanho_frase": "Frases medias, max 18 palavras (media 12-15). Fluidez e essencial.",
             "vocabulario": "coloquial",
         },
         "criativo": {
@@ -576,7 +770,7 @@ TONS_POR_CATEGORIA = {
                 "No melhor estilo 'expectativa vs realidade', o show entregou tudo que prometeu e mais.",
             ],
             "proibido": "Não force trocadilhos. Se não ficou bom, prefira ser direto.",
-            "tamanho_frase": "Frases mais elaboradas, máx 30 palavras. Permita-se ser criativo.",
+            "tamanho_frase": "Frases criativas, max 20 palavras (media 12-15). Criatividade com frases curtas.",
             "vocabulario": "coloquial",
         },
     },
@@ -588,7 +782,7 @@ TONS_POR_CATEGORIA = {
                 "A votação foi adiada após impasse entre governo e oposição sobre o texto-base.",
             ],
             "proibido": "Zero opinião, zero adjetivos valorativos, zero ironia. Apenas fatos.",
-            "tamanho_frase": "Frases curtas e informativas, máx 20 palavras.",
+            "tamanho_frase": "Frases curtas e informativas, max 18 palavras (media 12-14).",
             "vocabulario": "formal",
         },
         "didatico": {
@@ -598,7 +792,7 @@ TONS_POR_CATEGORIA = {
                 "Para entender: a PEC precisa de 308 votos para ser aprovada na Câmara — até agora, o governo conta com cerca de 280.",
             ],
             "proibido": "Não simplifique ao ponto de distorcer. Evite parecer condescendente.",
-            "tamanho_frase": "Frases médias com explicações integradas, máx 30 palavras.",
+            "tamanho_frase": "Frases medias com explicacoes integradas, max 20 palavras (media 12-15).",
             "vocabulario": "formal",
         },
     },
@@ -610,7 +804,7 @@ TONS_POR_CATEGORIA = {
                 "O IPCA mede a inflação oficial. Se ele sobe, o dinheiro no seu bolso compra menos.",
             ],
             "proibido": "Não use siglas sem explicar. Evite jargão financeiro não traduzido.",
-            "tamanho_frase": "Frases médias com exemplos concretos, máx 25 palavras.",
+            "tamanho_frase": "Frases medias com exemplos concretos, max 18 palavras (media 12-14).",
             "vocabulario": "formal",
         },
         "analitico": {
@@ -620,8 +814,8 @@ TONS_POR_CATEGORIA = {
                 "Três fatores explicam a alta do dólar: o diferencial de juros, a incerteza fiscal e a fuga de capitais emergentes.",
             ],
             "proibido": "Não apresente cenários especulativos como certeza. Sempre use 'pode', 'tende', 'aponta'.",
-            "tamanho_frase": "Frases mais longas permitidas para análise, máx 30 palavras.",
-            "vocabulario": "tecnico",
+            "tamanho_frase": "Frases analiticas, max 20 palavras (media 12-15). Quebre analises longas em frases curtas.",
+            "vocabulario": "formal",
         },
     },
     "geral": {
@@ -632,7 +826,7 @@ TONS_POR_CATEGORIA = {
                 "Se você é do tipo que adora uma curiosidade, essa vai te surpreender.",
             ],
             "proibido": "Não seja infantil. Evite 'querido leitor' ou 'amiguinhos'.",
-            "tamanho_frase": "Frases curtas e diretas, máx 22 palavras. Use perguntas retóricas.",
+            "tamanho_frase": "Frases curtas e diretas, max 18 palavras (media 12-14). Use perguntas retoricas.",
             "vocabulario": "coloquial",
         },
         "informativo": {
@@ -642,7 +836,7 @@ TONS_POR_CATEGORIA = {
                 "Pesquisadores da USP identificaram uma nova espécie de sapo na Mata Atlântica.",
             ],
             "proibido": "Não seja seco demais. Mantenha acessibilidade mesmo sendo objetivo.",
-            "tamanho_frase": "Frases curtas e factuais, máx 20 palavras.",
+            "tamanho_frase": "Frases curtas e factuais, max 18 palavras (media 12-14).",
             "vocabulario": "formal",
         },
     },
@@ -702,7 +896,7 @@ Cria conexão emocional com o leitor."""
 TONES = {
     "formal": "Use linguagem formal e profissional, adequada para veículos tradicionais.",
     "informal": "Use linguagem acessível e conversacional, mantendo credibilidade jornalística.",
-    "tecnico": "Use vocabulário técnico especializado, com explicações quando necessário.",
+    "tecnico": "Use vocabulário técnico quando necessário, mas SEMPRE explique termos na mesma frase. Mantenha frases curtas mesmo em textos técnicos.",
     "persuasivo": "Use recursos retóricos para engajar e convencer o leitor.",
     "neutro": "Mantenha tom equilibrado e objetivo, sem posicionamento claro."
 }
@@ -733,8 +927,9 @@ ARTICLE_TYPES = {
         "paragraphs": "5-8 parágrafos, pode usar bullet points",
         "opening": "Comece explicando o que mudou ou o que o leitor precisa saber agora.",
         "closing": "Termine com links, telefones ou recursos onde o leitor pode buscar mais informações.",
-        "include": "Passos práticos, prazos, valores, requisitos. Use bullet points para listas.",
+        "include": "Passos praticos, prazos, valores, requisitos. Use bullet points para listas. Inclua secao 'Perguntas Frequentes' com 3-5 Q&A quando aplicavel.",
         "exclude": "Nunca assuma conhecimento prévio do leitor. Evite jargões sem explicação.",
+        "faq": "Inclua 3-5 perguntas frequentes com respostas curtas quando o tema permitir. Use formato Q: / R: para clareza.",
     },
     "analise": {
         "description": "Análise aprofundada com contexto e perspectivas.",
@@ -744,6 +939,7 @@ ARTICLE_TYPES = {
         "closing": "Termine com cenários possíveis ou perspectivas de especialistas sobre o futuro.",
         "include": "Dados comparativos, contexto histórico, múltiplas perspectivas, fontes especializadas.",
         "exclude": "Nunca apresente opinião pessoal como fato. Evite conclusões absolutas sem evidência.",
+        "flow": "fato gerador → dados de contexto → multiplas perspectivas → cenarios → conclusao equilibrada",
     },
     "reportagem": {
         "description": "Reportagem completa com múltiplas fontes e ângulos.",
@@ -753,6 +949,16 @@ ARTICLE_TYPES = {
         "closing": "Termine com uma cena de fechamento, uma reflexão ou uma projeção que amarre a narrativa.",
         "include": "Múltiplas fontes, dados, citações diretas, contextualização ampla.",
         "exclude": "Nunca invente cenários ou diálogos. Evite generalizações sem dados.",
+        "flow": "abra com cena concreta → expanda com dados → insira vozes/citacoes → contextualize → feche com projecao",
+    },
+    "nota": {
+        "description": "Nota curta e objetiva para noticias rapidas ou factuais simples.",
+        "structure": "lide → contexto breve → fonte/creditos",
+        "paragraphs": "2-4 paragrafos",
+        "opening": "Va direto ao fato principal em uma unica frase clara e completa.",
+        "closing": "Encerre com a fonte da informacao ou proximo passo esperado.",
+        "include": "Fato principal, fonte, contexto minimo necessario.",
+        "exclude": "Nao use analise, opiniao, historico extenso. Nao desenvolva alem do fato.",
     },
 }
 
@@ -762,13 +968,18 @@ def _format_article_type(tipo_materia: str) -> str:
     type_info = ARTICLE_TYPES.get(tipo_materia, ARTICLE_TYPES["destaque"])
     if isinstance(type_info, str):
         return type_info  # Legacy string format
-    return f"""{type_info['description']}
+    result = f"""{type_info['description']}
 - **Estrutura**: {type_info['structure']}
 - **Parágrafos**: {type_info['paragraphs']}
 - **Abertura**: {type_info['opening']}
 - **Fechamento**: {type_info['closing']}
 - **Incluir**: {type_info['include']}
 - **Evitar**: {type_info['exclude']}"""
+    if type_info.get('flow'):
+        result += f"\n- **Fluxo narrativo**: {type_info['flow']}"
+    if type_info.get('faq'):
+        result += f"\n- **FAQ**: {type_info['faq']}"
+    return result
 
 
 # Patterns that indicate prompt leakage in LLM output
@@ -883,12 +1094,12 @@ def get_system_prompt(
 ## REGRAS OBRIGATÓRIAS
 
 1. **Estrutura da Matéria:**
-   - Título: Claro, informativo, 50-60 caracteres para SEO
-   - Linha Fina: Resumo que complementa o título, 150-160 caracteres
+   - Título: 7-10 palavras, 50-60 caracteres (veja regras SEO abaixo)
+   - Linha Fina: 20-25 palavras, 150-160 caracteres (veja regras SEO abaixo)
    - Corpo: Tamanho proporcional ao texto-base (veja instrucoes no prompt do usuario)
 
 2. **Formatação:**
-   - Use parágrafos curtos (3-4 linhas)
+   - Use parágrafos curtos (2-3 frases, maximo 4)
    - Inclua subtítulos quando apropriado (use ## para subtítulos)
    - Destaque citações importantes
    - Mantenha fluidez entre parágrafos
@@ -922,20 +1133,18 @@ def get_system_prompt(
    - Evite repetições de palavras
    - Use verbos na voz ativa
    - Mantenha coerência e coesão
-
-4. **SEO:**
-   - Inclua palavras-chave naturalmente no texto
-   - Use variações semânticas dos termos principais
-   - Estruture para escaneabilidade
-
-5. **Formato de Resposta:**
+{ATRIBUICAO_INLINE}
+{SEO_OTIMIZACAO}
+{LEGIBILIDADE_ALVO}
+4. **Formato de Resposta:**
    Responda SEMPRE no seguinte formato JSON:
    ```json
    {{
      "titulo": "Título da matéria",
      "linha_fina": "Linha fina descritiva",
      "conteudo": "Corpo completo da matéria com **negritos** para destaques...",
-     "tags_sugeridas": ["tag1", "tag2", "tag3"]
+     "tags_sugeridas": ["tag1", "tag2", "tag3"],
+     "slug_sugerido": "palavras-chave-separadas-por-hifen"
    }}
    ```"""
 
@@ -1030,16 +1239,18 @@ Mantenha os vetos universais (sem preconceito, ataques pessoais, etc.)"""
 ## TIPO DE MATÉRIA
 {type_info_str}
 {opinion_section}
+{EEAT_ENFORCEMENT}
+{LEGIBILIDADE_ALVO}
 
 ## REGRAS OBRIGATÓRIAS DE FORMATO
 
 1. **Estrutura da Matéria:**
-   - Título: Claro, informativo, 50-60 caracteres para SEO
-   - Linha Fina: Resumo que complementa o título, 150-160 caracteres
+   - Título: 7-10 palavras, 50-60 caracteres (veja regras SEO abaixo)
+   - Linha Fina: 20-25 palavras, 150-160 caracteres (veja regras SEO abaixo)
    - Corpo: Tamanho proporcional ao texto-base (veja instrucoes no prompt do usuario)
 
 2. **Formatação:**
-   - Use parágrafos curtos (3-4 linhas)
+   - Use parágrafos curtos (2-3 frases, maximo 4)
    - Inclua subtítulos quando apropriado (use ## para subtítulos)
    - Destaque citações importantes
    - Mantenha fluidez entre parágrafos
@@ -1073,20 +1284,17 @@ Mantenha os vetos universais (sem preconceito, ataques pessoais, etc.)"""
    - Evite repetições de palavras
    - Use verbos na voz ativa
    - Mantenha coerência e coesão
-
-4. **SEO:**
-   - Inclua palavras-chave naturalmente no texto
-   - Use variações semânticas dos termos principais
-   - Estruture para escaneabilidade
-
-5. **Formato de Resposta:**
+{ATRIBUICAO_INLINE}
+{SEO_OTIMIZACAO}
+4. **Formato de Resposta:**
    Responda SEMPRE no seguinte formato JSON:
    ```json
    {{
      "titulo": "Título da matéria",
      "linha_fina": "Linha fina descritiva",
      "conteudo": "Corpo completo da matéria com **negritos** para destaques...",
-     "tags_sugeridas": ["tag1", "tag2", "tag3"]
+     "tags_sugeridas": ["tag1", "tag2", "tag3"],
+     "slug_sugerido": "palavras-chave-separadas-por-hifen"
    }}
    ```"""
 
@@ -1100,7 +1308,8 @@ def build_user_prompt(
     tags: Optional[list] = None,
     enrichment_context: Optional[str] = None,
     enrichment_key_facts: Optional[list] = None,
-    verified_chars: int = 0
+    verified_chars: int = 0,
+    tipo_materia: str = "destaque"
 ) -> str:
     """
     Build the user prompt with all provided content.
@@ -1115,6 +1324,7 @@ def build_user_prompt(
         enrichment_context: Verified context from external search (Exa)
         enrichment_key_facts: List of verified key facts from enrichment
         verified_chars: Total verified material chars (source + enrichment)
+        tipo_materia: Article type key for type-aware length floors
 
     Returns:
         Complete user prompt string
@@ -1176,28 +1386,79 @@ Inclua essas citações naturalmente no texto.""")
 Inclua a atribuição de créditos apropriadamente.""")
 
     if tags and len(tags) > 0:
+        primary_keyword = tags[0]
+        secondary_keywords = tags[1:5] if len(tags) > 1 else []
         tags_text = ", ".join(tags)
+
         prompt_parts.append(f"""
-## TAGS/PALAVRAS-CHAVE
-{tags_text}
+## PALAVRAS-CHAVE PARA SEO
+- **Keyword principal**: "{primary_keyword}"
+  - Coloque nas primeiras 3 palavras do titulo
+  - Inclua na linha fina
+  - Use no primeiro paragrafo
+  - Densidade: 1-2.5% do texto total
+- **Keywords secundarias**: {", ".join(secondary_keywords) if secondary_keywords else "use variacoes semanticas"}
+  - Distribua naturalmente pelo corpo do texto""")
 
-Incorpore esses termos naturalmente no texto para SEO.""")
-
-    # Dynamic length based on total verified material (source + enrichment)
+    # Dynamic length based on total verified material (source + enrichment) + article type
     min_chars, max_chars, format_label = get_dynamic_length_requirement(
-        texto_base, verified_chars=verified_chars
+        texto_base, verified_chars=verified_chars, tipo_materia=tipo_materia
     )
+
+    # SEO + readability validation checklist (recency effect - last thing before JSON)
+    if tags and len(tags) > 0:
+        kw = tags[0]
+        seo_checklist = f"""
+- CHECKLIST SEO + LEGIBILIDADE (valide antes de finalizar):
+  [ ] Titulo tem 7-10 palavras, 50-60 caracteres, e contem "{kw}" no inicio?
+  [ ] Linha fina tem 20-25 palavras, 150-160 caracteres, inclui "{kw}" e termina com CTA?
+  [ ] Primeiro paragrafo tem 40-60 palavras com a informacao principal?
+  [ ] Corpo tem subtitulos ## a cada 2-3 paragrafos?
+  [ ] FLESCH 60+: Media de frases <= 15 palavras? NENHUMA frase > 20 palavras (exceto citacoes)?
+  [ ] FLESCH 60+: Palavras de 1-3 silabas predominam? Trocou palavras longas por curtas?
+  [ ] FLESCH 60+: Todas as frases estao na voz ativa? Reescreveu passivas?
+  [ ] Paragrafos tem maximo 3 frases?
+  [ ] Usa transicoes curtas em 30%+ das frases (alem disso, por isso, mas, porem...)?
+  [ ] Minimo 3 atribuicoes de fonte ("segundo X", "conforme Y")?
+  [ ] Minimo 2 verbos de reporte ("disse", "afirmou", "declarou")?
+  [ ] Slug sugerido com 3-6 palavras, sem acentos, minusculas?
+  [ ] >>> CORPO TEM NO MINIMO {min_chars} CARACTERES? (conte antes de responder!) <<<"""
+    else:
+        seo_checklist = f"""
+- CHECKLIST SEO + LEGIBILIDADE (valide antes de finalizar):
+  [ ] Titulo tem 7-10 palavras, 50-60 caracteres, com power word jornalistica?
+  [ ] Linha fina tem 20-25 palavras, 150-160 caracteres, e termina com CTA?
+  [ ] Primeiro paragrafo tem 40-60 palavras com a informacao principal?
+  [ ] Corpo tem subtitulos ## e paragrafos curtos (max 3 frases)?
+  [ ] FLESCH 60+: Media de frases <= 15 palavras? NENHUMA frase > 20 palavras?
+  [ ] FLESCH 60+: Palavras curtas (1-3 silabas)? Voz ativa em todas as frases?
+  [ ] Minimo 3 atribuicoes de fonte e 2 verbos de reporte?
+  [ ] >>> CORPO TEM NO MINIMO {min_chars} CARACTERES? (conte antes de responder!) <<<"""
+
+    # Build the "write less" caveat — only for "nota" type where brevity is acceptable
+    if tipo_materia == "nota":
+        length_caveat = f"- Se o material disponivel nao e suficiente para {min_chars} caracteres, escreva MENOS. Precisao > tamanho."
+    else:
+        length_caveat = (
+            f"- IMPORTANTE: O corpo DEVE ter no minimo {min_chars} caracteres. "
+            f"Use todo o material disponivel (texto-base + contexto verificado) para desenvolver "
+            f"paragrafos completos com subtitulos, contexto e desdobramentos. "
+            f"Artigos curtos demais serao AUTOMATICAMENTE REJEITADOS pelo sistema de validacao."
+        )
 
     prompt_parts.append(f"""
 ---
 
-## INSTRUCOES FINAIS (LEIA COM ATENCAO)
-- Tamanho do corpo: entre {min_chars} e {max_chars} caracteres ({format_label})
+## INSTRUCOES FINAIS — TAMANHO MINIMO OBRIGATORIO
+**>>> ATENCAO: O corpo da materia DEVE ter entre {min_chars} e {max_chars} caracteres ({format_label}). <<<**
+**>>> Artigos com menos de {min_chars} caracteres serao AUTOMATICAMENTE REJEITADOS. <<<**
+
+{length_caveat}
 - REGRA INVIOLAVEL: cada fato, nome, numero, data, resultado e citacao no seu texto DEVE existir no TEXTO-BASE ou CONTEXTO VERIFICADO acima. Se nao existe la, NAO inclua.
 - NAO faca afirmacoes negativas ("X nao se pronunciou", "nao ha informacoes sobre", "ainda nao divulgou") - se algo nao esta na fonte, simplesmente OMITA
 - NAO adicione dias da semana ("nesta quinta-feira"), horarios ou datas que NAO estejam explicitamente nas fontes
 - NAO use conhecimento geral para preencher lacunas - mesmo fatos verdadeiros sao PROIBIDOS se nao estao nas fontes
-- Se o material disponivel nao e suficiente para {min_chars} caracteres, escreva MENOS. Precisao > tamanho.
+{seo_checklist}
 - Responda APENAS com o JSON no formato especificado
 - Nao inclua explicacoes fora do JSON""")
 
@@ -1233,6 +1494,10 @@ class LLMService:
 
         self.model = ANTHROPIC_MODEL
         self.http_client = httpx.AsyncClient(timeout=120.0)
+        # Circuit breaker state for LLM API
+        self._llm_failures = 0
+        self._llm_circuit_open = False
+        self._llm_circuit_open_until = 0
 
     async def __aenter__(self):
         return self
@@ -1260,8 +1525,26 @@ class LLMService:
                 "anthropic-version": "2023-06-01"
             }
 
-    async def _call_api(self, system: str, user_content: str, max_tokens: int = MAX_TOKENS) -> str:
-        """Make API call and return response text."""
+    @retry(
+        stop=stop_after_attempt(2),
+        wait=wait_exponential(multiplier=1, min=1, max=8),
+        retry=retry_if_exception_type((httpx.ConnectError, httpx.ConnectTimeout)),
+        reraise=True,
+    )
+    async def _call_api(self, system: str, user_content: str, max_tokens: int = MAX_TOKENS, correlation_id: str = "") -> str:
+        """Make API call and return response text. Retries on connection errors."""
+        import time as _time
+        _cid = f"[{correlation_id}] " if correlation_id else ""
+
+        # Circuit breaker check
+        if self._llm_circuit_open:
+            if _time.time() < self._llm_circuit_open_until:
+                logger.warning(f"{_cid}LLM circuit breaker OPEN - skipping API call")
+                raise RuntimeError("LLM API circuit breaker is open")
+            else:
+                self._llm_circuit_open = False
+                logger.info(f"{_cid}LLM circuit breaker half-open - allowing probe request")
+
         headers = self._get_headers()
 
         payload = {
@@ -1273,25 +1556,41 @@ class LLMService:
             ]
         }
 
-        logger.info(f"Calling API: {self.endpoint} with model {self.model}")
+        logger.info(f"{_cid}Calling API: {self.endpoint} with model {self.model}")
 
-        response = await self.http_client.post(
-            self.endpoint,
-            headers=headers,
-            json=payload
-        )
+        try:
+            response = await self.http_client.post(
+                self.endpoint,
+                headers=headers,
+                json=payload
+            )
+        except (httpx.ConnectError, httpx.ConnectTimeout) as e:
+            self._llm_failures += 1
+            if self._llm_failures >= 5:
+                self._llm_circuit_open = True
+                self._llm_circuit_open_until = _time.time() + 120
+                logger.warning(f"LLM circuit breaker OPENED after {self._llm_failures} failures")
+            raise
 
         if response.status_code != 200:
             error_text = response.text
             logger.error(f"API error {response.status_code}: {error_text}")
+            self._llm_failures += 1
+            if self._llm_failures >= 5:
+                self._llm_circuit_open = True
+                self._llm_circuit_open_until = _time.time() + 120
+                logger.warning(f"LLM circuit breaker OPENED after {self._llm_failures} consecutive errors")
             raise RuntimeError(f"AI service error: {error_text}")
+
+        # Success: reset circuit breaker
+        self._llm_failures = 0
 
         result = response.json()
         return result["content"][0]["text"]
 
-    async def call_api(self, system: str, user_content: str, max_tokens: int = MAX_TOKENS) -> str:
+    async def call_api(self, system: str, user_content: str, max_tokens: int = MAX_TOKENS, correlation_id: str = "") -> str:
         """Public interface for LLM API calls."""
-        return await self._call_api(system, user_content, max_tokens)
+        return await self._call_api(system, user_content, max_tokens, correlation_id=correlation_id)
 
     async def generate_article(
         self,
@@ -1308,7 +1607,9 @@ class LLMService:
         modo_opinativo: bool = False,
         enrichment_context: Optional[str] = None,
         enrichment_key_facts: Optional[list] = None,
-        verified_chars: int = 0
+        verified_chars: int = 0,
+        sensitive_instructions: Optional[list] = None,
+        correlation_id: str = "",
     ) -> dict:
         """
         Generate a journalistic article using Claude.
@@ -1348,6 +1649,8 @@ class LLMService:
             has_enrichment=bool(enrichment_context),
             verified_chars=verified_chars,
         )
+        if sensitive_instructions:
+            system_prompt += "\n\n## TOPICOS SENSIVEIS DETECTADOS\n" + "\n".join(sensitive_instructions)
         user_prompt = build_user_prompt(
             texto_base=texto_base,
             orientacao_lide=orientacao_lide,
@@ -1358,10 +1661,11 @@ class LLMService:
             enrichment_context=enrichment_context,
             enrichment_key_facts=enrichment_key_facts,
             verified_chars=verified_chars,
+            tipo_materia=tipo_materia,
         )
 
         try:
-            response_text = await self._call_api(system_prompt, user_prompt, MAX_TOKENS)
+            response_text = await self._call_api(system_prompt, user_prompt, MAX_TOKENS, correlation_id=correlation_id)
             logger.debug(f"Raw LLM response: {response_text[:500]}...")
 
             # Try to extract JSON from response
@@ -1380,14 +1684,25 @@ class LLMService:
                 if "tags_sugeridas" not in result:
                     result["tags_sugeridas"] = []
 
+                # Phase 3.6: Slug generation - ensure slug_sugerido exists
+                if "slug_sugerido" not in result or not result["slug_sugerido"]:
+                    # Auto-generate from title
+                    import unicodedata
+                    slug_base = result.get("titulo", "artigo")
+                    slug_base = unicodedata.normalize("NFKD", slug_base)
+                    slug_base = slug_base.encode("ascii", "ignore").decode("ascii")
+                    slug_base = re.sub(r'[^a-z0-9\s-]', '', slug_base.lower())
+                    slug_words = slug_base.split()[:6]
+                    result["slug_sugerido"] = "-".join(slug_words) if slug_words else "artigo"
+
                 # Output validation: remove prompt leakage and script injection
                 result = _validate_llm_output(result)
 
-                # Validate minimum length (dynamic based on verified material)
+                # Validate minimum length (dynamic based on verified material + article type)
                 content_length = len(result["conteudo"])
-                min_chars, _, _ = get_dynamic_length_requirement(texto_base, verified_chars)
+                min_chars, _, _ = get_dynamic_length_requirement(texto_base, verified_chars, tipo_materia=tipo_materia)
                 if content_length < min_chars:
-                    logger.warning(f"Article length {content_length} below dynamic minimum {min_chars}")
+                    logger.warning(f"Article length {content_length} below dynamic minimum {min_chars} for tipo={tipo_materia}")
 
                 # Attach internal fields for audit trail (popped by generation_api)
                 result["_user_prompt"] = user_prompt[:5000]
@@ -1723,13 +2038,15 @@ Responda em JSON:
             raise
 
 
-# Singleton instance for easy import
+# Singleton instance for easy import (thread-safe)
+import threading
 _llm_service: Optional[LLMService] = None
+_llm_service_lock = threading.Lock()
 
 
 def get_llm_service() -> LLMService:
     """
-    Get or create the LLM service singleton.
+    Get or create the LLM service singleton (thread-safe).
 
     Returns:
         LLMService instance
@@ -1739,8 +2056,26 @@ def get_llm_service() -> LLMService:
     """
     global _llm_service
     if _llm_service is None:
-        _llm_service = LLMService()
+        with _llm_service_lock:
+            if _llm_service is None:
+                import atexit
+                _llm_service = LLMService()
+                atexit.register(_cleanup_llm_service)
     return _llm_service
+
+
+def _cleanup_llm_service():
+    """Cleanup LLM service HTTP client on process exit."""
+    global _llm_service
+    if _llm_service:
+        try:
+            import asyncio
+            loop = asyncio.new_event_loop()
+            loop.run_until_complete(_llm_service.close())
+            loop.close()
+        except Exception:
+            pass
+        _llm_service = None
 
 
 def is_llm_configured() -> bool:

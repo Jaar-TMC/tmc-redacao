@@ -20,11 +20,7 @@
   },
   "extensions": {
     "http": {
-      "routePrefix": "api",
-      "cors": {
-        "allowedOrigins": ["*"],
-        "supportCredentials": false
-      }
+      "routePrefix": "api"
     }
   }
 }

@@ -67,7 +67,10 @@ def sample_article_same_event() -> Dict[str, Any]:
 def sample_article_different_event() -> Dict[str, Any]:
     """
     Fixture providing an article about a DIFFERENT event (different person detained).
+    Uses orthogonal embedding to ensure no cosine similarity match.
     """
+    # Orthogonal embedding: first half positive, second half negative
+    embedding = [0.1] * 768 + [-0.1] * 768
     return {
         'id': uuid4(),
         'title': 'Outro brasileiro e detido pelo ICE em operacao na Florida',
@@ -76,7 +79,7 @@ def sample_article_different_event() -> Dict[str, Any]:
         'content': 'Uma enfermeira brasileira de 38 anos...',
         'published_at': datetime.utcnow(),
         'source_name': 'UOL',
-        'embedding': [0.15] * 1536
+        'embedding': embedding
     }
 
 
@@ -336,11 +339,12 @@ class TestEventSignatureServiceExtract:
         """
         service = EventSignatureService(llm_service=mock_llm_service)
 
-        signature = await service.extract(
-            title=sample_article_data['title'],
-            content=sample_article_data['preview'],
-            article_id=sample_article_data['id']
-        )
+        with patch('services.event_signature_service.is_llm_configured', return_value=True):
+            signature = await service.extract(
+                title=sample_article_data['title'],
+                content=sample_article_data['preview'],
+                article_id=sample_article_data['id']
+            )
 
         assert signature is not None
         assert isinstance(signature, EventSignatureCreate)
@@ -384,19 +388,20 @@ class TestEventSignatureServiceExtract:
         """
         service = EventSignatureService(llm_service=mock_llm_service)
 
-        # First extraction
-        signature1 = await service.extract(
-            title=sample_article_data['title'],
-            content=sample_article_data['preview'],
-            article_id=sample_article_data['id']
-        )
+        with patch('services.event_signature_service.is_llm_configured', return_value=True):
+            # First extraction
+            signature1 = await service.extract(
+                title=sample_article_data['title'],
+                content=sample_article_data['preview'],
+                article_id=sample_article_data['id']
+            )
 
-        # Second extraction with same content
-        signature2 = await service.extract(
-            title=sample_article_data['title'],
-            content=sample_article_data['preview'],
-            article_id=uuid4()  # Different article ID
-        )
+            # Second extraction with same content
+            signature2 = await service.extract(
+                title=sample_article_data['title'],
+                content=sample_article_data['preview'],
+                article_id=uuid4()  # Different article ID
+            )
 
         # Should return cached result - LLM called only once
         assert mock_llm_service._call_api.call_count == 1
@@ -552,11 +557,13 @@ class TestEventMatchingServiceFindMatchingTheme:
         """
         Test that find_matching_theme() returns None when no theme matches.
         """
-        # Create theme about different event
+        # Create theme about different event with orthogonal centroid
+        theme_centroid = [0.0] * 1536
+        theme_centroid[0] = 1.0  # Only first dimension
         theme = mock_database_service.create_theme(
             name='Eleicoes 2026',
             slug='eleicoes-2026',
-            centroid=[0.9] * 1536  # Very different centroid
+            centroid=theme_centroid
         )
         mock_database_service.update_theme_event_data(
             theme_id=theme['id'],
@@ -584,10 +591,14 @@ class TestEventMatchingServiceFindMatchingTheme:
             confidence=0.9
         )
 
+        # Use orthogonal embedding (only second dimension) to ensure no match
+        article_embedding = [0.0] * 1536
+        article_embedding[1] = 1.0
+
         match = await service.find_matching_theme(
             article={'id': uuid4(), 'title': 'Test', 'preview': 'Test'},
             signature=signature,
-            embedding=[0.1] * 1536
+            embedding=article_embedding
         )
 
         assert match is None
@@ -635,16 +646,17 @@ class TestLLMVerificationServiceVerifySameEvent:
             'reasoning': 'Mesma pessoa detida pelo ICE em Miami'
         }))
 
-        result = await service.verify_same_event(
-            article1={
-                'title': sample_article_data['title'],
-                'preview': sample_article_data['preview']
-            },
-            article2={
-                'title': sample_article_same_event['title'],
-                'preview': sample_article_same_event['preview']
-            }
-        )
+        with patch('services.llm_verification_service.is_llm_configured', return_value=True):
+            result = await service.verify_same_event(
+                article1={
+                    'title': sample_article_data['title'],
+                    'preview': sample_article_data['preview']
+                },
+                article2={
+                    'title': sample_article_same_event['title'],
+                    'preview': sample_article_same_event['preview']
+                }
+            )
 
         assert result['is_same_event'] is True
         assert result['confidence'] >= 0.9
@@ -698,13 +710,14 @@ class TestLLMVerificationServiceVerifySameEvent:
         article1 = {'title': 'Article A', 'preview': 'Preview A'}
         article2 = {'title': 'Article B', 'preview': 'Preview B'}
 
-        # First call
-        result1 = await service.verify_same_event(article1, article2)
-        assert result1['from_cache'] is False
+        with patch('services.llm_verification_service.is_llm_configured', return_value=True):
+            # First call
+            result1 = await service.verify_same_event(article1, article2)
+            assert result1['from_cache'] is False
 
-        # Second call - should be from cache
-        result2 = await service.verify_same_event(article1, article2)
-        assert result2['from_cache'] is True
+            # Second call - should be from cache
+            result2 = await service.verify_same_event(article1, article2)
+            assert result2['from_cache'] is True
 
         # LLM should only be called once
         assert mock_llm_service._call_api.call_count == 1
@@ -791,9 +804,7 @@ class TestClusteringServiceProcessPendingArticles:
             llm_service=mock_llm_service
         )
 
-        with patch('services.clustering_service.is_event_extraction_enabled', return_value=True), \
-             patch('services.clustering_service.is_event_matching_enabled', return_value=True), \
-             patch('services.event_signature_service.is_llm_configured', return_value=True), \
+        with patch('services.event_signature_service.is_llm_configured', return_value=True), \
              patch('services.event_signature_service.EVENT_EXTRACTION_ENABLED', True), \
              patch('services.event_matching_service.EVENT_MATCHING_ENABLED', True):
 
@@ -845,9 +856,7 @@ class TestClusteringServiceProcessPendingArticles:
             llm_service=mock_llm_service
         )
 
-        with patch('services.clustering_service.is_event_extraction_enabled', return_value=True), \
-             patch('services.clustering_service.is_event_matching_enabled', return_value=True), \
-             patch('services.event_signature_service.is_llm_configured', return_value=True), \
+        with patch('services.event_signature_service.is_llm_configured', return_value=True), \
              patch('services.event_signature_service.EVENT_EXTRACTION_ENABLED', True), \
              patch('services.event_matching_service.EVENT_MATCHING_ENABLED', True):
 
@@ -905,10 +914,10 @@ class TestClusteringServiceProcessPendingArticles:
                 sig.canonical_key = sig.generate_canonical_key(reference_date)
                 return sig
 
-        with patch('services.clustering_service.get_event_signature_service') as mock_sig_service, \
-             patch('services.clustering_service.get_event_matching_service') as mock_match_service, \
-             patch('services.clustering_service.is_event_extraction_enabled', return_value=True), \
-             patch('services.clustering_service.is_event_matching_enabled', return_value=True):
+        with patch('services.event_signature_service.get_event_signature_service') as mock_sig_service, \
+             patch('services.event_matching_service.get_event_matching_service') as mock_match_service, \
+             patch('services.event_signature_service.EVENT_EXTRACTION_ENABLED', True), \
+             patch('services.event_matching_service.EVENT_MATCHING_ENABLED', True):
 
             mock_sig_service.return_value.extract = mock_extract_different_events
             mock_match_service.return_value.find_matching_theme = AsyncMock(return_value=None)
@@ -936,8 +945,8 @@ class TestClusteringServiceProcessPendingArticles:
             llm_service=mock_llm_service
         )
 
-        with patch('services.clustering_service.is_event_extraction_enabled', return_value=False), \
-             patch('services.clustering_service.is_event_matching_enabled', return_value=False):
+        with patch('services.event_signature_service.EVENT_EXTRACTION_ENABLED', False), \
+             patch('services.event_matching_service.EVENT_MATCHING_ENABLED', False):
 
             processed = await service.process_pending_articles(limit=10)
 
@@ -995,7 +1004,7 @@ class TestClusteringServiceProcessPendingArticles:
             llm_service=mock_llm_service
         )
 
-        with patch('services.clustering_service.is_event_extraction_enabled', return_value=False):
+        with patch('services.event_signature_service.EVENT_EXTRACTION_ENABLED', False):
             # Should not raise exception
             processed = await service.process_pending_articles(limit=10)
 

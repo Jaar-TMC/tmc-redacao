@@ -22,6 +22,7 @@ from dataclasses import dataclass, field
 from collections import Counter
 
 import httpx
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
 logger = logging.getLogger(__name__)
 
@@ -46,12 +47,13 @@ EXA_SEARCH_DAYS = int(os.environ.get("EXA_SEARCH_DAYS", "7"))
 EXA_TIMEOUT = int(os.environ.get("EXA_TIMEOUT_SECONDS", "15"))
 
 # Confidence scoring weights (calibrated for journalism safety)
-WEIGHT_CLAIM_GROUNDING = 0.40
-WEIGHT_ENTITY_OVERLAP = 0.25
+# v7: Entities 20% → 15% to reduce false positive rate (30% FP from novel entities)
+WEIGHT_CLAIM_GROUNDING = 0.45
+WEIGHT_ENTITY_OVERLAP = 0.15
 WEIGHT_EXPANSION_RATIO = 0.10
 WEIGHT_QUOTE_VERIFICATION = 0.10
 WEIGHT_MATERIAL_SUFFICIENCY = 0.10
-WEIGHT_CLAIM_SIMILARITY = 0.05  # TF-IDF claim-source similarity (non-LLM signal)
+WEIGHT_CLAIM_SIMILARITY = 0.10  # v7: raised from 0.05 to absorb entity weight reduction
 
 
 # =============================================================================
@@ -62,8 +64,9 @@ WEIGHT_CLAIM_SIMILARITY = 0.05  # TF-IDF claim-source similarity (non-LLM signal
 class ExtractedClaim:
     """Individual factual claim extracted from generated article."""
     text: str
-    verdict: str = "unverifiable"  # grounded | fabricated | unverifiable | inaccurate | editorial
+    verdict: str = "unverifiable"  # grounded | fabricated | unverifiable | inaccurate | opinion | context
     source_evidence: str = ""
+    source_reference: str = ""  # Best matching source sentence
     category: str = "fact"  # fact | statistic | quote | outcome | attribution | opinion
 
 
@@ -132,6 +135,8 @@ class VerificationMetadata:
     cove_applied: bool = False
     cove_reclassified: int = 0
     cove_results: list = field(default_factory=list)  # List[CoVeVerification]
+    truncation: dict = field(default_factory=dict)  # Truncation metadata (4A)
+    claim_extraction_failed: bool = False  # Empty claims fallback (4B)
 
     def to_dict(self) -> dict:
         """Convert to JSON-serializable dict."""
@@ -142,6 +147,7 @@ class VerificationMetadata:
                     "text": c.text,
                     "verdict": c.verdict,
                     "source_evidence": c.source_evidence,
+                    "source_reference": c.source_reference,
                     "category": c.category,
                 })
             elif isinstance(c, dict):
@@ -167,6 +173,8 @@ class VerificationMetadata:
             "enrichment_used": self.enrichment_used,
             "cove_applied": self.cove_applied,
             "cove_reclassified": self.cove_reclassified,
+            "truncation": self.truncation,
+            "claim_extraction_failed": self.claim_extraction_failed,
         }
 
 
@@ -193,6 +201,144 @@ def _lcs_length(a: list, b: list) -> int:
 
 
 # =============================================================================
+# Phase 2.3: Temporal Decontamination Patterns
+# =============================================================================
+
+# Temporal patterns NOT typically found in wire/source text
+_TEMPORAL_DECONTAMINATION_PATTERNS = [
+    # Days of the week (nesta segunda-feira, nesta terca, etc.)
+    re.compile(r'\b(?:nesta|nesse|naquele|na)\s+(?:segunda|terca|quarta|quinta|sexta|sabado|domingo)(?:-feira)?\b', re.IGNORECASE),
+    # Specific times (às 14h, às 10h30, por volta das 15h)
+    re.compile(r'\b(?:as|por volta das|desde as|ate as)\s+\d{1,2}h\d{0,2}\b', re.IGNORECASE),
+    # "na manhã/tarde/noite de hoje"
+    re.compile(r'\b(?:na|pela)\s+(?:manha|tarde|noite)\s+de\s+(?:hoje|ontem)\b', re.IGNORECASE),
+    # "nesta madrugada"
+    re.compile(r'\bnesta\s+madrugada\b', re.IGNORECASE),
+]
+
+
+def decontaminate_article(article_text: str, source_text: str, enrichment_text: str = "") -> tuple:
+    """
+    Remove temporal specifics from article that don't appear in any source.
+
+    Phase 2.3: Post-generation regex pass removing invented temporal details.
+    Runs between generation and verification.
+
+    Args:
+        article_text: Generated article content
+        source_text: Original source text
+        enrichment_text: Enrichment context text (optional)
+
+    Returns:
+        Tuple of (cleaned_text, removals_count, removed_patterns)
+    """
+    all_source = (source_text + " " + enrichment_text).lower()
+    cleaned = article_text
+    removals = []
+
+    for pattern in _TEMPORAL_DECONTAMINATION_PATTERNS:
+        for match in pattern.finditer(article_text):
+            matched_text = match.group().lower().strip()
+            # Check if this temporal reference appears in ANY source
+            if matched_text not in all_source:
+                # Replace with empty string, clean up double spaces
+                cleaned = cleaned[:match.start()] + cleaned[match.end():]
+                removals.append(matched_text)
+                # Re-run on cleaned text to handle shifted positions
+                break  # One removal at a time due to position shifts
+
+    # Second pass for any remaining patterns (after first pass shifts)
+    if removals:
+        for pattern in _TEMPORAL_DECONTAMINATION_PATTERNS:
+            for match in pattern.finditer(cleaned):
+                matched_text = match.group().lower().strip()
+                if matched_text not in all_source:
+                    cleaned = pattern.sub("", cleaned, count=1)
+                    removals.append(matched_text)
+
+    # Clean up double spaces and leading spaces after removal
+    cleaned = re.sub(r'  +', ' ', cleaned)
+    cleaned = re.sub(r'\n +', '\n', cleaned)
+
+    return cleaned, len(removals), removals
+
+
+# =============================================================================
+# Phase 3.3: Readability Measurement
+# =============================================================================
+
+def compute_readability(text: str) -> dict:
+    """
+    Compute Flesch readability score for Brazilian Portuguese text.
+
+    Formula: 248.835 - 1.015 * ASL - 84.6 * ASY
+    Where ASL = average sentence length, ASY = average syllables per word.
+
+    Returns dict with flesch_score, avg_sentence_length, long_sentence_pct, readability_level.
+    """
+    # Split into sentences
+    sentences = re.split(r'[.!?]+', text)
+    sentences = [s.strip() for s in sentences if len(s.strip()) > 5]
+
+    if not sentences:
+        return {"flesch_score": 0, "avg_sentence_length": 0, "long_sentence_pct": 0, "readability_level": "unknown"}
+
+    # Count words per sentence
+    word_counts = [len(s.split()) for s in sentences]
+    total_words = sum(word_counts)
+    avg_sentence_length = total_words / len(sentences) if sentences else 0
+
+    # Long sentence percentage (>20 words)
+    long_sentences = sum(1 for wc in word_counts if wc > 20)
+    long_sentence_pct = long_sentences / len(sentences) if sentences else 0
+
+    # Count syllables (Portuguese approximation)
+    all_words = text.split()
+    total_syllables = sum(_count_syllables_pt(w) for w in all_words if len(w) > 0)
+    avg_syllables_per_word = total_syllables / total_words if total_words > 0 else 0
+
+    # Flesch-PT formula
+    flesch_score = 248.835 - (1.015 * avg_sentence_length) - (84.6 * avg_syllables_per_word)
+    flesch_score = max(0, min(100, flesch_score))
+
+    # Readability level
+    if flesch_score >= 75:
+        level = "muito_facil"
+    elif flesch_score >= 60:
+        level = "facil"
+    elif flesch_score >= 50:
+        level = "medio"
+    elif flesch_score >= 30:
+        level = "dificil"
+    else:
+        level = "muito_dificil"
+
+    return {
+        "flesch_score": round(flesch_score, 1),
+        "avg_sentence_length": round(avg_sentence_length, 1),
+        "long_sentence_pct": round(long_sentence_pct * 100, 1),
+        "readability_level": level,
+    }
+
+
+def _count_syllables_pt(word: str) -> int:
+    """Approximate syllable count for Portuguese words."""
+    word = word.lower().strip(".,;:!?\"'()[]{}—–-")
+    if not word:
+        return 1
+    # Count vowel groups as syllables
+    vowels = "aeiouáéíóúâêîôûãõàü"
+    count = 0
+    prev_was_vowel = False
+    for char in word:
+        is_vowel = char in vowels
+        if is_vowel and not prev_was_vowel:
+            count += 1
+        prev_was_vowel = is_vowel
+    return max(1, count)
+
+
+# =============================================================================
 # FactCheckService
 # =============================================================================
 
@@ -207,6 +353,10 @@ class FactCheckService:
     def __init__(self):
         self.http_client = httpx.AsyncClient(timeout=float(EXA_TIMEOUT))
         self._llm_service = None
+        # Circuit breaker state for Exa API
+        self._exa_failures = 0
+        self._exa_circuit_open = False
+        self._exa_circuit_open_until = 0
 
     async def __aenter__(self):
         return self
@@ -248,7 +398,8 @@ class FactCheckService:
         self,
         texto_base: str,
         titulo_fonte: Optional[str] = None,
-        tags: Optional[list] = None
+        tags: Optional[list] = None,
+        correlation_id: str = "",
     ) -> EnrichmentContext:
         """
         Search for verified external context to enrich article generation.
@@ -302,9 +453,11 @@ class FactCheckService:
             ]
             search_results = await asyncio.gather(*search_tasks, return_exceptions=True)
 
-            # Collect all results, deduplicate by URL, filter non-article pages
+            # Collect all results, deduplicate by URL and domain, filter non-article pages
+            from urllib.parse import urlparse
             all_texts = []
             all_urls = set()
+            seen_domains = set()
             filtered_count = 0
             for sr in search_results:
                 if isinstance(sr, Exception):
@@ -316,7 +469,11 @@ class FactCheckService:
                         url = item.get("url", "")
                         title = item.get("title", "")
                         if url in all_urls:
-                            continue  # Skip duplicates
+                            continue  # Skip exact URL duplicates
+                        # Deduplicate by domain (keep first per domain)
+                        domain = urlparse(url).netloc if url else ""
+                        if domain and domain in seen_domains:
+                            continue
                         if not self._is_quality_url(url, text):
                             logger.debug(f"Filtered non-article URL: {url[:80]}")
                             filtered_count += 1
@@ -325,6 +482,8 @@ class FactCheckService:
                             all_texts.append(f"[{title}] {text[:max_text_chars]}")
                         if url:
                             all_urls.add(url)
+                        if domain:
+                            seen_domains.add(domain)
 
             result.source_urls = list(all_urls)[:15]
             logger.info(f"Exa quality filter: {len(all_urls)} quality URLs kept, {filtered_count} filtered out")
@@ -399,6 +558,12 @@ class FactCheckService:
 
         return queries[:3]
 
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=0.5, min=0.5, max=4),
+        retry=retry_if_exception_type((httpx.ConnectError, httpx.ConnectTimeout)),
+        reraise=True,
+    )
     async def _search_exa(
         self,
         query: str,
@@ -406,7 +571,10 @@ class FactCheckService:
         max_text: int = 2000
     ) -> list:
         """
-        Execute a single Exa search.
+        Execute a single Exa search with retry and circuit breaker.
+
+        Retries on connection errors (up to 3 attempts with exponential backoff).
+        Circuit breaker opens after 3 consecutive failures, stays open for 60s.
 
         Args:
             query: Search query string
@@ -415,6 +583,16 @@ class FactCheckService:
 
         Returns list of {title, url, text, publishedDate} dicts.
         """
+        # Circuit breaker check
+        if self._exa_circuit_open:
+            if time.time() < self._exa_circuit_open_until:
+                logger.warning("Exa circuit breaker OPEN, skipping search")
+                return []
+            else:
+                # Half-open: allow one attempt
+                logger.info("Exa circuit breaker half-open, attempting request")
+                self._exa_circuit_open = False
+
         headers = {
             "Content-Type": "application/json",
             "x-api-key": EXA_API_KEY,
@@ -433,15 +611,31 @@ class FactCheckService:
             }
         }
 
-        response = await self.http_client.post(
-            EXA_ENDPOINT,
-            headers=headers,
-            json=payload,
-        )
+        try:
+            response = await self.http_client.post(
+                EXA_ENDPOINT,
+                headers=headers,
+                json=payload,
+            )
+        except (httpx.ConnectError, httpx.ConnectTimeout) as e:
+            self._exa_failures += 1
+            if self._exa_failures >= 3:
+                self._exa_circuit_open = True
+                self._exa_circuit_open_until = time.time() + 60
+                logger.warning(f"Exa circuit breaker OPENED after {self._exa_failures} failures")
+            raise  # Let tenacity handle retry
 
         if response.status_code != 200:
             logger.warning(f"Exa API returned {response.status_code}: {response.text[:200]}")
+            self._exa_failures += 1
+            if self._exa_failures >= 3:
+                self._exa_circuit_open = True
+                self._exa_circuit_open_until = time.time() + 60
+                logger.warning(f"Exa circuit breaker OPENED after {self._exa_failures} consecutive errors")
             return []
+
+        # Success: reset circuit breaker
+        self._exa_failures = 0
 
         data = response.json()
         results = []
@@ -470,15 +664,54 @@ class FactCheckService:
         "/index.php", "/index.html",
         "/c/mundo/", "/c/brasil/",
         "blogspot.com",
-        ".gov.br/",
         "/docs/", "/developers/", "/api/",
         "/acompanhamento-", "/orcamento-cidadao",
         "/transparencia.",
     ]
 
+    # Whitelisted .gov.br domains (quality official sources)
+    _GOV_BR_WHITELIST = [
+        "agenciabrasil.ebc.com.br",
+        "gov.br/planalto",
+        "gov.br/saude",
+        "gov.br/economia",
+        "bcb.gov.br",
+        "ibge.gov.br",
+        "inpe.br",
+        "anatel.gov.br",
+        # v7: expanded high-authority government domains
+        "tse.jus.br",
+        "stf.jus.br",
+        "stj.jus.br",
+        "camara.leg.br",
+        "senado.leg.br",
+        "planalto.gov.br",
+        "gov.br/defesa",
+        "gov.br/justica",
+        "gov.br/educacao",
+        "gov.br/trabalho",
+        "gov.br/mre",
+        "gov.br/fazenda",
+        "bndes.gov.br",
+        "cvm.gov.br",
+        "susep.gov.br",
+        "anvisa.gov.br",
+        "ans.gov.br",
+    ]
+
     def _is_quality_url(self, url: str, text: str) -> bool:
         """Filter out non-article URLs (topic pages, portals, indexes)."""
         url_lower = url.lower()
+
+        # .gov.br / .leg.br / .jus.br: whitelist known quality sources
+        # Also accept any .gov.br, .leg.br, .jus.br URL with article-like paths
+        if ".gov.br" in url_lower or ".leg.br" in url_lower or ".jus.br" in url_lower:
+            # Always allow explicitly whitelisted domains
+            if any(domain in url_lower for domain in self._GOV_BR_WHITELIST):
+                pass  # allowed
+            # Block generic portal/index pages from .gov.br
+            elif url_lower.rstrip("/").endswith(".gov.br") or url_lower.count("/") <= 3:
+                return False
 
         for pattern in self._BAD_URL_PATTERNS:
             if pattern in url_lower:
@@ -579,7 +812,9 @@ Regras:
             if json_start != -1 and json_end > json_start:
                 try:
                     data = json.loads(response_text[json_start:json_end])
-                    return data.get("key_facts", [])[:max_facts]
+                    raw_facts = data.get("key_facts", [])[:max_facts]
+                    # Phase 2.4: Cross-contamination guard
+                    return self._filter_cross_contaminated_facts(raw_facts, texto_base)
                 except json.JSONDecodeError:
                     logger.warning("JSON parse failed, trying text fallback")
 
@@ -605,6 +840,47 @@ Regras:
             logger.warning(f"Key fact extraction failed: {e}")
             return []
 
+    def _filter_cross_contaminated_facts(self, facts: list, source_text: str) -> list:
+        """
+        Phase 2.4: Filter enrichment facts that have zero entity overlap with source.
+
+        Prevents enrichment from injecting data about SIMILAR but DIFFERENT events.
+        A fact must share at least one proper noun (capitalized word > 3 chars)
+        with the source text to be kept.
+        """
+        if not facts:
+            return facts
+
+        # Extract proper nouns from source
+        source_words = set()
+        for word in source_text.split():
+            clean = word.strip(".,;:!?\"'()[]{}—–-")
+            if len(clean) > 3 and clean[0].isupper():
+                source_words.add(clean.lower())
+
+        if not source_words:
+            return facts  # Can't filter without entity reference
+
+        filtered = []
+        removed = 0
+        for fact in facts:
+            fact_words = set()
+            for word in fact.split():
+                clean = word.strip(".,;:!?\"'()[]{}—–-")
+                if len(clean) > 3 and clean[0].isupper():
+                    fact_words.add(clean.lower())
+
+            # Require at least one overlapping proper noun
+            if fact_words & source_words:
+                filtered.append(fact)
+            else:
+                removed += 1
+
+        if removed > 0:
+            logger.info(f"Cross-contamination guard: removed {removed}/{len(facts)} enrichment facts")
+
+        return filtered
+
     # =========================================================================
     # Phase 3: Post-Generation Verification
     # =========================================================================
@@ -614,7 +890,8 @@ Regras:
         texto_base: str,
         generated_article: str,
         citacoes: Optional[list] = None,
-        enrichment: Optional[EnrichmentContext] = None
+        enrichment: Optional[EnrichmentContext] = None,
+        correlation_id: str = "",
     ) -> VerificationMetadata:
         """
         Verify a generated article against source material.
@@ -686,7 +963,12 @@ Regras:
                 claims = results[0]
                 metadata.claims = claims
                 metadata.total_claims = len(claims)
-                # Editorial claims don't count toward factual accuracy metrics
+                # Empty claims fallback (4B)
+                if not claims:
+                    logger.warning("Claim extraction returned 0 claims — article passes with reduced confidence")
+                    metadata.claim_extraction_failed = True
+                # Opinion claims don't count toward factual accuracy metrics
+                # Context claims DO count (they must be factually correct)
                 metadata.grounded_claims = sum(
                     1 for c in claims if c.verdict == "grounded"
                 )
@@ -696,11 +978,20 @@ Regras:
                 metadata.unverifiable_claims = sum(
                     1 for c in claims if c.verdict == "unverifiable"
                 )
+                opinion_count = sum(
+                    1 for c in claims if c.verdict == "opinion"
+                )
+                context_count = sum(
+                    1 for c in claims if c.verdict == "context"
+                )
+                # Backwards compat: also count legacy "editorial" as opinion
                 editorial_count = sum(
                     1 for c in claims if c.verdict == "editorial"
                 )
-                if editorial_count > 0:
-                    logger.info(f"Editorial claims excluded from scoring: {editorial_count}")
+                if opinion_count + editorial_count > 0:
+                    logger.info(f"Opinion claims excluded from scoring: {opinion_count + editorial_count}")
+                if context_count > 0:
+                    logger.info(f"Context claims (factual, counted in scoring): {context_count}")
 
             # Process entity results
             if isinstance(results[1], Exception):
@@ -782,6 +1073,10 @@ Regras:
                 claim_similarities = self._compute_claim_source_similarity(
                     metadata.claims, texto_base, enrichment_text
                 )
+                # Fill in missing source_reference using TF-IDF best match
+                self._fill_source_references(
+                    metadata.claims, texto_base, enrichment_text
+                )
 
             # Compute confidence score
             metadata.confidence_score = self._compute_confidence(
@@ -817,6 +1112,13 @@ Regras:
 
             metadata.is_verified = True
             metadata.enrichment_used = bool(enrichment and enrichment.success)
+
+            # Truncation metadata (4A)
+            metadata.truncation = {
+                "source_truncated": len(texto_base.strip()) > 6000,
+                "article_truncated": len(generated_article.strip()) > 3000,
+                "unverified_chars": max(0, len(generated_article.strip()) - 3000),
+            }
 
         except Exception as e:
             logger.error(f"Verification pipeline failed: {e}")
@@ -860,16 +1162,24 @@ Regras:
                 elif enrichment.context_text:
                     source_context += f"\n\nCONTEXTO DE FONTES EXTERNAS (material bruto):\n{enrichment.context_text[:2000]}"
 
+            # Truncation warning (4A)
+            source_for_verification = texto_base[:6000]
+            article_for_verification = generated_article[:3000]
+            if len(texto_base) > 6000:
+                logger.warning(f"Source truncated for verification: {len(texto_base)} -> 6000 chars")
+            if len(generated_article) > 3000:
+                logger.warning(f"Article truncated for verification: {len(generated_article)} -> 3000 chars ({len(generated_article)-3000} chars unverified)")
+
             system = ("Voce e um verificador factual EXTREMAMENTE rigoroso de artigos "
                       "jornalisticos. Seu papel e proteger o leitor contra desinformacao. "
                       "Na duvida, erre para o lado da cautela.")
             prompt = f"""Compare o ARTIGO GERADO com o TEXTO-FONTE e verifique a fidelidade factual.
 
 TEXTO-FONTE (material original):
-{texto_base[:6000]}
+{source_for_verification}
 
 ARTIGO GERADO (para verificar):
-{generated_article[:3000]}
+{article_for_verification}
 
 {f"CONTEXTO VERIFICADO (fontes externas):{chr(10)}{source_context[len(texto_base):]}" if enrichment and enrichment.success else ""}
 
@@ -881,8 +1191,9 @@ Responda em JSON:
   "claims": [
     {{
       "text": "Afirmacao extraida do artigo",
-      "verdict": "grounded|fabricated|unverifiable|inaccurate|editorial",
+      "verdict": "grounded|fabricated|unverifiable|inaccurate|opinion|context",
       "source_evidence": "Trecho do texto-fonte que sustenta (ou contradiz) a afirmacao",
+      "source_reference": "Sentenca EXATA do texto-fonte que sustenta esta afirmacao (copiar literal)",
       "category": "fact|statistic|quote|outcome|attribution|opinion"
     }}
   ]
@@ -894,26 +1205,27 @@ Regras de classificacao:
 - **fabricated**: Informacao factual INCORRETA, DESCONEXA do tema, ou dados especificos inventados que CONTRADIZEM ou DISTORCEM os fatos (ex: inventar placar, atribuir fala a pessoa errada, criar evento que nao aconteceu)
 - **inaccurate**: Informacao factual distorcida (ex: numeros errados, nomes trocados)
 - **unverifiable**: Informacao factual impossivel de confirmar com o material disponivel
-- **editorial**: Inclui TODAS as seguintes situacoes:
-  1. Opinioes, analises, previsoes ou comentarios editoriais ("o cenario e preocupante", "analistas esperam melhoras")
-  2. Contexto factual correto que ENRIQUECE a materia com coesao tematica, mesmo que nao esteja nas fontes (ex: "O Kommersant e um dos principais jornais da Russia", "tentativas de assassinato contra oficiais de inteligencia sao raras")
-  3. Inferencias logicas razoaveis baseadas nos fatos apresentados (ex: "a detencao rapida sugere que o caso e prioritario")
-  4. Background factual de conhecimento publico que contextualiza a noticia
+- **opinion**: Opiniao subjetiva, analise valorativa, previsao ("o cenario e preocupante", "analistas esperam"), comentarios editoriais. NAO verificavel factualmente.
+- **context**: Contexto factual que enriquece a materia: background de organizacoes, dados historicos de conhecimento publico, inferencias logicas RAZOAVEIS dos fatos. DEVE ser factualmente correto.
 
 IMPORTANTE - REGRAS DE CLASSIFICACAO:
-- "fabricated" deve ser usado APENAS para informacoes que sao INCORRETAS, DESCONEXAS do tema, ou que DISTORCEM os fatos. Informacao factualmente correta que enriquece a materia com coesao tematica e "editorial", NAO "fabricated"
+- "fabricated" deve ser usado APENAS para informacoes que sao INCORRETAS, DESCONEXAS do tema, ou que DISTORCEM os fatos. Informacao factualmente correta que enriquece a materia com coesao tematica e "context", NAO "fabricated"
 - Exemplos de "fabricated" (erros reais):
   * Inventar resultado de jogo/eleicao que nao aconteceu -> fabricated
   * Atribuir citacao a pessoa errada -> fabricated
   * Criar estatistica/numero falso -> fabricated
   * Adicionar detalhes desconexos do tema (misturar eventos diferentes) -> fabricated
-- Exemplos de "editorial" (contexto correto, NAO fabricated):
-  * Descrever uma organizacao mencionada na fonte ("e um dos maiores jornais") -> editorial
-  * Analise razoavel dos fatos ("isso sugere que...") -> editorial
-  * Contexto historico/geografico correto e relevante ao tema -> editorial
-  * Generalizacoes fatuais de conhecimento publico ("ataques a oficiais sao raros") -> editorial
-- NA DUVIDA entre "editorial" e "fabricated": se a informacao e factualmente correta e tem coesao com o tema, prefira "editorial"
-- Afirmacoes editoriais NAO contam na avaliacao de precisao factual"""
+- Exemplos de "opinion" (subjetivo, NAO verificavel):
+  * "O cenario e preocupante" -> opinion
+  * "Analistas esperam melhoras" -> opinion
+  * "Isso sugere que o caso e prioritario" -> opinion
+- Exemplos de "context" (factual correto, enriquece materia):
+  * Descrever uma organizacao mencionada na fonte ("e um dos maiores jornais") -> context
+  * Contexto historico/geografico correto e relevante ao tema -> context
+  * Generalizacoes fatuais de conhecimento publico ("ataques a oficiais sao raros") -> context
+- NA DUVIDA entre "context" e "fabricated": se a informacao e factualmente correta e tem coesao com o tema, prefira "context"
+- Afirmacoes "opinion" NAO contam na avaliacao de precisao factual
+- Afirmacoes "context" CONTAM na avaliacao (devem ser factualmente corretas)"""
 
             response_text = await llm.call_api(system, prompt, 2048)
 
@@ -925,10 +1237,15 @@ IMPORTANTE - REGRAS DE CLASSIFICACAO:
             data = json.loads(response_text[json_start:json_end])
             claims = []
             for c in data.get("claims", [])[:MAX_CLAIMS]:
+                # Backwards compat: map legacy "editorial" to "context"
+                verdict = c.get("verdict", "unverifiable")
+                if verdict == "editorial":
+                    verdict = "context"
                 claims.append(ExtractedClaim(
                     text=c.get("text", ""),
-                    verdict=c.get("verdict", "unverifiable"),
+                    verdict=verdict,
                     source_evidence=c.get("source_evidence", ""),
+                    source_reference=c.get("source_reference", ""),
                     category=c.get("category", "fact"),
                 ))
 
@@ -1184,6 +1501,29 @@ IMPORTANTE - REGRAS DE CLASSIFICACAO:
     # TF-IDF Claim-Source Similarity (pure computation, no API calls)
     # =========================================================================
 
+    # Portuguese stopwords for TF-IDF (improves signal-to-noise ratio)
+    _PT_STOPWORDS = {
+        "que", "nao", "para", "por", "com", "uma", "mas", "dos", "das",
+        "mais", "como", "foi", "tem", "ser", "seu", "sua", "sao", "nos",
+        "ele", "ela", "isso", "este", "esta", "entre", "tambem", "apos",
+        "sobre", "quando", "muito", "ainda", "mesmo", "pode", "seus",
+        "suas", "cada", "desde", "ate", "aqui", "havia", "onde", "pelo",
+        "pela", "eram", "esse", "essa", "esses", "essas", "num",
+        "numa", "pelos", "pelas", "algum", "alguma", "outros", "outras",
+    }
+
+    @staticmethod
+    def _pt_stem(word: str) -> str:
+        """Basic Portuguese suffix removal (not full Snowball, just common suffixes)."""
+        for suffix in ("mente", "acao", "agem", "ando", "endo", "indo",
+                       "aram", "eram", "iram", "ados", "idos", "veis"):
+            if len(word) > len(suffix) + 3 and word.endswith(suffix):
+                return word[:-len(suffix)]
+        for suffix in ("ar", "er", "ir", "ou", "am", "em"):
+            if len(word) > len(suffix) + 4 and word.endswith(suffix):
+                return word[:-len(suffix)]
+        return word
+
     @staticmethod
     def _compute_claim_source_similarity(
         claims: list,
@@ -1193,7 +1533,8 @@ IMPORTANTE - REGRAS DE CLASSIFICACAO:
         """
         Compute TF-IDF cosine similarity between each claim and best source sentence.
 
-        Pure computation, zero API calls. Returns list of floats [0,1].
+        Pure computation, zero API calls. Uses Portuguese stopwords and basic stemming.
+        Returns list of floats [0,1].
         """
         if not claims or not source_text:
             return []
@@ -1209,9 +1550,13 @@ IMPORTANTE - REGRAS DE CLASSIFICACAO:
         if not sentences:
             return [0.0] * len(claims)
 
-        # Tokenize
+        # Tokenize with Portuguese stopwords and basic stemming
+        pt_stops = FactCheckService._PT_STOPWORDS
+        pt_stem = FactCheckService._pt_stem
+
         def tokenize(text):
-            return re.findall(r'\b\w{2,}\b', text.lower())
+            words = re.findall(r'\b\w{2,}\b', text.lower())
+            return [pt_stem(w) for w in words if w not in pt_stops]
 
         sentence_tokens = [tokenize(s) for s in sentences]
 
@@ -1266,6 +1611,58 @@ IMPORTANTE - REGRAS DE CLASSIFICACAO:
             similarities.append(round(max_sim, 4))
 
         return similarities
+
+    @staticmethod
+    def _fill_source_references(
+        claims: list,
+        source_text: str,
+        enrichment_text: str = ""
+    ):
+        """
+        Fill in missing source_reference for claims using TF-IDF best sentence match.
+
+        Modifies claims in-place. Only fills when source_reference is empty.
+        """
+        if not claims or not source_text:
+            return
+
+        full_source = source_text
+        if enrichment_text:
+            full_source += " " + enrichment_text
+
+        sentences = re.split(r'[.!?]\s+', full_source)
+        sentences = [s.strip() for s in sentences if len(s.strip()) > 10]
+        if not sentences:
+            return
+
+        pt_stops = FactCheckService._PT_STOPWORDS
+        pt_stem = FactCheckService._pt_stem
+
+        def tokenize(text):
+            words = re.findall(r'\b\w{2,}\b', text.lower())
+            return [pt_stem(w) for w in words if w not in pt_stops]
+
+        # Simple word overlap for speed (no full TF-IDF needed for reference matching)
+        sent_token_sets = [set(tokenize(s)) for s in sentences]
+
+        for claim in claims:
+            if isinstance(claim, ExtractedClaim):
+                if claim.source_reference:
+                    continue  # Already filled by LLM
+                claim_tokens = set(tokenize(claim.text))
+                if not claim_tokens:
+                    continue
+                best_idx = 0
+                best_overlap = 0.0
+                for i, sent_tokens in enumerate(sent_token_sets):
+                    if not sent_tokens:
+                        continue
+                    overlap = len(claim_tokens & sent_tokens) / len(claim_tokens)
+                    if overlap > best_overlap:
+                        best_overlap = overlap
+                        best_idx = i
+                if best_overlap > 0.2:
+                    claim.source_reference = sentences[best_idx]
 
     # =========================================================================
     # Quote Verification (string matching, no API calls)
@@ -1561,7 +1958,7 @@ PERGUNTAS E RESPOSTAS DE VERIFICACAO:
 Responda em JSON:
 ```json
 {{
-  "final_verdict": "grounded|editorial|unverifiable|fabricated",
+  "final_verdict": "grounded|context|opinion|unverifiable|fabricated",
   "reasoning": "Breve explicacao da decisao",
   "evidence_strength": "strong|moderate|weak"
 }}
@@ -1569,7 +1966,8 @@ Responda em JSON:
 
 Regras:
 - **grounded**: Respostas confirmam que a informacao esta nas fontes
-- **editorial**: Contexto factual correto que enriquece a materia
+- **context**: Contexto factual correto que enriquece a materia (background, dados publicos)
+- **opinion**: Opiniao subjetiva, analise valorativa, previsao - nao verificavel factualmente
 - **unverifiable**: Impossivel confirmar nem negar
 - **fabricated**: Respostas confirmam que a informacao e INCORRETA ou DESCONEXA"""
 
@@ -1611,10 +2009,12 @@ Regras:
         - Material sufficiency: 10%
         - Claim-source similarity: 5% (TF-IDF, non-LLM signal)
         """
-        # Claim grounding score (excluding editorial claims)
+        # Claim grounding score (excluding opinion claims; context claims ARE factual)
+        # Backwards compat: also exclude legacy "editorial" verdict
+        _non_factual = {"opinion", "editorial"}
         factual_claims = [c for c in metadata.claims
-                         if isinstance(c, ExtractedClaim) and c.verdict != "editorial"
-                         or isinstance(c, dict) and c.get("verdict") != "editorial"]
+                         if (isinstance(c, ExtractedClaim) and c.verdict not in _non_factual)
+                         or (isinstance(c, dict) and c.get("verdict") not in _non_factual)]
         num_factual = len(factual_claims)
         if num_factual > 0:
             grounded_count = sum(1 for c in factual_claims
@@ -1624,11 +2024,23 @@ Regras:
                                  if (isinstance(c, ExtractedClaim) and c.verdict == "fabricated")
                                  or (isinstance(c, dict) and c.get("verdict") == "fabricated"))
             grounded_ratio = grounded_count / num_factual
-            # Penalty for fabricated claims (worse than unverifiable)
-            fabrication_penalty = fabricated_count / num_factual * 0.5
+            # Phase 2.6: Non-linear fabrication penalty
+            # 1 fabricated = 0.30, 2 = 0.55, 3+ = 0.80
+            if fabricated_count == 0:
+                fabrication_penalty = 0.0
+            elif fabricated_count == 1:
+                fabrication_penalty = 0.30
+            elif fabricated_count == 2:
+                fabrication_penalty = 0.55
+            else:
+                fabrication_penalty = 0.80
             claim_score = max(0, grounded_ratio - fabrication_penalty)
         else:
-            claim_score = 0.5  # No claims = uncertain
+            # Empty claims fallback (4B): penalize if extraction failed
+            if metadata.claim_extraction_failed:
+                claim_score = 0.35  # pessimistic, not neutral
+            else:
+                claim_score = 0.5  # No claims = uncertain
 
         # Entity overlap score
         entity_score = entity_result.overlap_score
@@ -1758,7 +2170,8 @@ Regras:
             elif level in ("low", "medium"):
                 level = "high"
         elif metadata.fabricated_claims == 1:
-            if score < 0.30:
+            # Phase 2.6: 1 fabricated + score < 0.50 → high (was 0.30)
+            if score < 0.50:
                 level = "high"
 
         # Override: extreme expansion
@@ -1800,15 +2213,35 @@ Regras:
 # Singleton
 # =============================================================================
 
+import threading
 _fact_check_service: Optional[FactCheckService] = None
+_fact_check_service_lock = threading.Lock()
 
 
 def get_fact_check_service() -> FactCheckService:
-    """Get or create the FactCheckService singleton."""
+    """Get or create the FactCheckService singleton (thread-safe)."""
     global _fact_check_service
     if _fact_check_service is None:
-        _fact_check_service = FactCheckService()
+        with _fact_check_service_lock:
+            if _fact_check_service is None:
+                import atexit
+                _fact_check_service = FactCheckService()
+                atexit.register(_cleanup_fact_check_service)
     return _fact_check_service
+
+
+def _cleanup_fact_check_service():
+    """Cleanup FactCheckService HTTP client on process exit."""
+    global _fact_check_service
+    if _fact_check_service:
+        try:
+            import asyncio
+            loop = asyncio.new_event_loop()
+            loop.run_until_complete(_fact_check_service.close())
+            loop.close()
+        except Exception:
+            pass
+        _fact_check_service = None
 
 
 def is_fact_check_enabled() -> bool:

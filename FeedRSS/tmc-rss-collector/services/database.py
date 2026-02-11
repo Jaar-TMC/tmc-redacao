@@ -29,19 +29,26 @@ class DatabaseService:
 
     def __init__(self):
         """Inicializa o servico com configuracoes do ambiente."""
-        self.server = os.environ.get('SQL_SERVER', 'bi4ia-tmc.database.windows.net')
-        self.database = os.environ.get('SQL_DATABASE', 'tmc')
-        self.username = os.environ.get('SQL_USERNAME', 'tmc_collector')
+        self.server = os.environ.get('SQL_SERVER', '')
+        self.database = os.environ.get('SQL_DATABASE', '')
+        self.username = os.environ.get('SQL_USERNAME', '')
         self.password = os.environ.get('SQL_PASSWORD', '')
+        # Phase 4.2: Fail explicitly if required DB config is missing
+        if not self.server or not self.database:
+            raise ValueError(
+                "Database not configured. Set SQL_SERVER and SQL_DATABASE environment variables."
+            )
 
     def get_connection(self) -> pymssql.Connection:
         """Obtem uma conexao com o banco de dados."""
+        query_timeout = int(os.environ.get('SQL_QUERY_TIMEOUT', '30'))
         return pymssql.connect(
             server=self.server,
             user=self.username,
             password=self.password,
             database=self.database,
             login_timeout=30,
+            timeout=query_timeout,
             as_dict=False,
             charset='UTF-8'
         )
@@ -2696,12 +2703,16 @@ class DatabaseService:
             return False
 
 
-# Singleton para uso global
+# Singleton para uso global (thread-safe)
+import threading
 _db_service: Optional[DatabaseService] = None
+_db_service_lock = threading.Lock()
 
 def get_db() -> DatabaseService:
-    """Retorna instancia singleton do DatabaseService."""
+    """Retorna instancia singleton do DatabaseService (thread-safe)."""
     global _db_service
     if _db_service is None:
-        _db_service = DatabaseService()
+        with _db_service_lock:
+            if _db_service is None:
+                _db_service = DatabaseService()
     return _db_service

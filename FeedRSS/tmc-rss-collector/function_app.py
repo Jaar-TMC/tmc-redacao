@@ -24,12 +24,19 @@ app = func.FunctionApp(http_auth_level=func.AuthLevel.ANONYMOUS)
 # CORS Configuration
 # ========================================
 
-ALLOWED_ORIGINS = [
-    "http://localhost:5173",
-    "http://localhost:3000",
-    "https://purple-river-09235a310.azurestaticapps.net",
-    "https://purple-river-09235a310.3.azurestaticapps.net",
-]
+import os
+
+# Phase 4.2: CORS from env var (comma-separated), with localhost fallback for dev
+_cors_env = os.environ.get("CORS_ALLOWED_ORIGINS", "")
+if _cors_env:
+    ALLOWED_ORIGINS = [o.strip() for o in _cors_env.split(",") if o.strip()]
+else:
+    ALLOWED_ORIGINS = [
+        "http://localhost:5173",
+        "http://localhost:3000",
+        "https://purple-river-09235a310.azurestaticapps.net",
+        "https://purple-river-09235a310.3.azurestaticapps.net",
+    ]
 
 
 def add_cors_headers(response: func.HttpResponse, origin: str = None) -> func.HttpResponse:
@@ -338,6 +345,19 @@ async def collect_source(req: func.HttpRequest) -> func.HttpResponse:
 # HTTP TRIGGERS - AI GENERATION API
 # ========================================
 
+@app.route(route="metrics", methods=["GET", "OPTIONS"])
+@with_cors
+async def metrics(req: func.HttpRequest) -> func.HttpResponse:
+    """GET /api/metrics - In-process pipeline metrics."""
+    import json as _json
+    from services.metrics import Metrics
+    return func.HttpResponse(
+        _json.dumps(Metrics.get().snapshot()),
+        status_code=200,
+        mimetype="application/json"
+    )
+
+
 @app.route(route="generate", methods=["POST", "OPTIONS"])
 @with_cors
 async def generate_article(req: func.HttpRequest) -> func.HttpResponse:
@@ -365,6 +385,17 @@ async def generate_article(req: func.HttpRequest) -> func.HttpResponse:
             "tags_sugeridas": ["tag1", "tag2", "tag3"]
         }
     """
+    # Phase 4.8: Rate limiting
+    from services.rate_limiter import RateLimiter
+    retry_after = RateLimiter.get().check("generate")
+    if retry_after is not None:
+        import json as _json
+        return func.HttpResponse(
+            _json.dumps({"error": "Rate limit exceeded", "retry_after_seconds": round(retry_after, 1)}),
+            status_code=429,
+            headers={"Retry-After": str(int(retry_after) + 1)},
+            mimetype="application/json",
+        )
     from functions.generation_api import generate_article_handler
     return await generate_article_handler(req)
 
@@ -674,3 +705,4 @@ logger.info("  - GET  /api/semantic-themes")
 logger.info("  - GET  /api/semantic-themes/{id}")
 logger.info("  - GET  /api/clustering-stats")
 logger.info("  - POST /api/clustering/maintenance")
+logger.info("  - GET  /api/metrics")
