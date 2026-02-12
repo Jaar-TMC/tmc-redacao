@@ -671,7 +671,7 @@ async def generate_article_handler(req: func.HttpRequest) -> func.HttpResponse:
                 from services.fact_check_service import compute_readability
                 readability = compute_readability(result["conteudo"])
                 result["readability"] = readability
-                if readability["flesch_score"] < 50:
+                if readability["flesch_score"] < 42:
                     if "human_review_required" not in result:
                         result["human_review_required"] = False
                     if "review_reasons" not in result:

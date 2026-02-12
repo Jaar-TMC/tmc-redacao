@@ -267,6 +267,20 @@ def decontaminate_article(article_text: str, source_text: str, enrichment_text: 
 # Phase 3.3: Readability Measurement
 # =============================================================================
 
+def _strip_markdown(text: str) -> str:
+    """Strip markdown formatting before readability analysis."""
+    # Remove bold/italic markers
+    text = text.replace('**', '').replace('__', '')
+    text = text.replace('*', '').replace('_', ' ')
+    # Remove markdown headers
+    text = re.sub(r'^#{1,6}\s+', '', text, flags=re.MULTILINE)
+    # Remove markdown links [text](url) → text
+    text = re.sub(r'\[([^\]]+)\]\([^)]+\)', r'\1', text)
+    # Remove stray markdown artifacts
+    text = re.sub(r'[`~]', '', text)
+    return text
+
+
 def compute_readability(text: str) -> dict:
     """
     Compute Flesch readability score for Brazilian Portuguese text.
@@ -276,8 +290,11 @@ def compute_readability(text: str) -> dict:
 
     Returns dict with flesch_score, avg_sentence_length, long_sentence_pct, readability_level.
     """
+    # Strip markdown before analysis to avoid inflated counts
+    clean_text = _strip_markdown(text)
+
     # Split into sentences
-    sentences = re.split(r'[.!?]+', text)
+    sentences = re.split(r'[.!?]+', clean_text)
     sentences = [s.strip() for s in sentences if len(s.strip()) > 5]
 
     if not sentences:
@@ -293,7 +310,7 @@ def compute_readability(text: str) -> dict:
     long_sentence_pct = long_sentences / len(sentences) if sentences else 0
 
     # Count syllables (Portuguese approximation)
-    all_words = text.split()
+    all_words = clean_text.split()
     total_syllables = sum(_count_syllables_pt(w) for w in all_words if len(w) > 0)
     avg_syllables_per_word = total_syllables / total_words if total_words > 0 else 0
 
@@ -301,12 +318,12 @@ def compute_readability(text: str) -> dict:
     flesch_score = 248.835 - (1.015 * avg_sentence_length) - (84.6 * avg_syllables_per_word)
     flesch_score = max(0, min(100, flesch_score))
 
-    # Readability level
+    # Readability level (calibrated for PT-BR journalism: 45-55 is normal)
     if flesch_score >= 75:
         level = "muito_facil"
     elif flesch_score >= 60:
         level = "facil"
-    elif flesch_score >= 50:
+    elif flesch_score >= 45:
         level = "medio"
     elif flesch_score >= 30:
         level = "dificil"
@@ -316,25 +333,85 @@ def compute_readability(text: str) -> dict:
     return {
         "flesch_score": round(flesch_score, 1),
         "avg_sentence_length": round(avg_sentence_length, 1),
+        "avg_syllables_per_word": round(avg_syllables_per_word, 2),
         "long_sentence_pct": round(long_sentence_pct * 100, 1),
         "readability_level": level,
+        "words": total_words,
     }
 
 
+# Portuguese diphthongs (count as 1 syllable, not 2)
+_PT_DIPHTHONGS = {
+    'ai', 'au', 'ei', 'eu', 'iu', 'oi', 'ou', 'ui', 'io',
+    'ão', 'ãe', 'õe',
+    'ái', 'áu', 'éi', 'éu', 'ói',
+    'âi',
+}
+
+# Portuguese hiatus pairs (count as 2 syllables despite being adjacent vowels)
+_PT_HIATUS = {
+    'aí', 'aú', 'eí', 'oí', 'uí',
+    'ía', 'íe', 'ío', 'úa', 'úe', 'úo',
+}
+
+
 def _count_syllables_pt(word: str) -> int:
-    """Approximate syllable count for Portuguese words."""
-    word = word.lower().strip(".,;:!?\"'()[]{}—–-")
+    """
+    Improved syllable count for Portuguese words.
+
+    Handles diphthongs (ai, ei, oi, ou, ão, õe, etc.) as single syllables
+    and hiatus pairs (aí, oí, etc.) as two syllables.
+    """
+    # Strip markdown and punctuation
+    word = word.replace('**', '').replace('*', '')
+    word = word.lower().strip(".,;:!?\"'()[]{}—–-_@#/\\")
+
     if not word:
         return 1
-    # Count vowel groups as syllables
-    vowels = "aeiouáéíóúâêîôûãõàü"
+    # Pure numbers get 1 syllable
+    if word.isdigit() or re.match(r'^\d+[.,]?\d*$', word):
+        return 1
+
+    vowels = set("aeiouáéíóúâêîôûãõàü")
     count = 0
-    prev_was_vowel = False
-    for char in word:
-        is_vowel = char in vowels
-        if is_vowel and not prev_was_vowel:
-            count += 1
-        prev_was_vowel = is_vowel
+    i = 0
+    length = len(word)
+
+    while i < length:
+        if word[i] not in vowels:
+            i += 1
+            continue
+
+        # Found a vowel — start a new syllable
+        count += 1
+
+        # Check for diphthong/hiatus (2-char vowel combo)
+        if i + 1 < length and word[i + 1] in vowels:
+            pair = word[i:i + 2]
+            if pair in _PT_HIATUS:
+                # Hiatus: each vowel is a separate syllable
+                i += 1
+                continue
+            if pair in _PT_DIPHTHONGS:
+                # Diphthong: skip the second vowel (already counted)
+                i += 2
+                # Check for true triphthong (only uai, uei, uou in Portuguese)
+                if i < length and word[i] in vowels:
+                    triplet = word[i - 2:i + 1]
+                    if triplet in ('uai', 'uei', 'uou'):
+                        i += 1
+                continue
+            # Unrecognized pair — default to diphthong (1 syllable)
+            # Most adjacent vowels in PT-BR function as diphthongs in practice
+            while i + 1 < length and word[i + 1] in vowels:
+                pair = word[i:i + 2]
+                if pair in _PT_HIATUS:
+                    break
+                i += 1
+            i += 1
+        else:
+            i += 1
+
     return max(1, count)
 
 
