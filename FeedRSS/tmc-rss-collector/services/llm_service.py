@@ -328,6 +328,14 @@ Se houver conflito entre SEO e precisao factual, SEMPRE priorize a precisao.
 - **Voz ativa**: OBRIGATORIO. "O governo aprovou" em vez de "Foi aprovado pelo governo"
 - **Densidade keyword**: A palavra-chave principal deve aparecer entre 1-2.5% do texto
 
+### LINKS EXTERNOS (OBRIGATORIO quando fontes verificadas disponiveis)
+- Inclua 2-4 hyperlinks para fontes VERIFICADAS usando markdown: [nome da fonte](url)
+- Prefira fontes autoritativas (.gov.br, .edu.br, .org.br, veiculos conhecidos)
+- O texto do link deve ser descritivo (nome da fonte ou titulo da materia)
+- Distribua os links naturalmente pelo corpo do texto
+- NUNCA invente URLs. Use APENAS URLs das <verified-sources> fornecidas
+- Se nao houver fontes verificadas, NAO inclua links
+
 ### SLUG SUGERIDO
 - Gere um slug com 3-6 palavras separadas por hifen
 - Sem acentos, tudo minusculo
@@ -1100,7 +1108,7 @@ def get_system_prompt(
 
 2. **Formatação:**
    - Use parágrafos curtos (2-3 frases, maximo 4)
-   - Inclua subtítulos quando apropriado (use ## para subtítulos)
+   - Use ## (H2) para subtitulos principais e ### (H3) para sub-secoes. NUNCA use # (H1) no corpo.
    - Destaque citações importantes
    - Mantenha fluidez entre parágrafos
 
@@ -1251,7 +1259,7 @@ Mantenha os vetos universais (sem preconceito, ataques pessoais, etc.)"""
 
 2. **Formatação:**
    - Use parágrafos curtos (2-3 frases, maximo 4)
-   - Inclua subtítulos quando apropriado (use ## para subtítulos)
+   - Use ## (H2) para subtitulos principais e ### (H3) para sub-secoes. NUNCA use # (H1) no corpo.
    - Destaque citações importantes
    - Mantenha fluidez entre parágrafos
 
@@ -1309,7 +1317,8 @@ def build_user_prompt(
     enrichment_context: Optional[str] = None,
     enrichment_key_facts: Optional[list] = None,
     verified_chars: int = 0,
-    tipo_materia: str = "destaque"
+    tipo_materia: str = "destaque",
+    source_urls: Optional[list] = None,
 ) -> str:
     """
     Build the user prompt with all provided content.
@@ -1325,6 +1334,7 @@ def build_user_prompt(
         enrichment_key_facts: List of verified key facts from enrichment
         verified_chars: Total verified material chars (source + enrichment)
         tipo_materia: Article type key for type-aware length floors
+        source_urls: List of verified source URLs from enrichment for hyperlinks
 
     Returns:
         Complete user prompt string
@@ -1359,6 +1369,13 @@ ATENCAO: Este contexto pode conter imprecisoes ou dados de eventos SIMILARES mas
         prompt_parts.append(f"""<verified-facts>
 {facts_text}
 </verified-facts>""")
+
+    if source_urls:
+        urls_text = "\n".join([f"- {url}" for url in source_urls[:10]])
+        prompt_parts.append(f"""<verified-sources>
+URLs de fontes verificadas para usar como hyperlinks no artigo:
+{urls_text}
+</verified-sources>""")
 
     if orientacao_lide:
         prompt_parts.append(f"""
@@ -1610,6 +1627,7 @@ class LLMService:
         verified_chars: int = 0,
         sensitive_instructions: Optional[list] = None,
         correlation_id: str = "",
+        source_urls: Optional[list] = None,
     ) -> dict:
         """
         Generate a journalistic article using Claude.
@@ -1662,6 +1680,7 @@ class LLMService:
             enrichment_key_facts=enrichment_key_facts,
             verified_chars=verified_chars,
             tipo_materia=tipo_materia,
+            source_urls=source_urls,
         )
 
         try:
@@ -1686,13 +1705,17 @@ class LLMService:
 
                 # Phase 3.6: Slug generation - ensure slug_sugerido exists
                 if "slug_sugerido" not in result or not result["slug_sugerido"]:
-                    # Auto-generate from title
+                    # Auto-generate from title with PT-BR stop word filtering
                     import unicodedata
+                    _SLUG_STOP_WORDS = {
+                        "de", "da", "do", "das", "dos", "em", "no", "na", "nos", "nas",
+                        "para", "por", "com", "sem", "que", "um", "uma", "o", "a", "os", "as", "e",
+                    }
                     slug_base = result.get("titulo", "artigo")
                     slug_base = unicodedata.normalize("NFKD", slug_base)
                     slug_base = slug_base.encode("ascii", "ignore").decode("ascii")
                     slug_base = re.sub(r'[^a-z0-9\s-]', '', slug_base.lower())
-                    slug_words = slug_base.split()[:6]
+                    slug_words = [w for w in slug_base.split() if w not in _SLUG_STOP_WORDS][:6]
                     result["slug_sugerido"] = "-".join(slug_words) if slug_words else "artigo"
 
                 # Output validation: remove prompt leakage and script injection

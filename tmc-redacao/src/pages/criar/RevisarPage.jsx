@@ -329,6 +329,7 @@ const RevisarPage = () => {
           readability: result.readability || null,
           enrichmentDegraded: result.enrichment_degraded || false,
           slugSugerido: result.slug_sugerido || null,
+          sourceUrls: result.source_urls || [],
           // v7.1: additional pipeline fields
           schemaOrg: result.schema_org || null,
           aiDisclosure: result.ai_disclosure || null,

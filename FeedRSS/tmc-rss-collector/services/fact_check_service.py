@@ -556,7 +556,7 @@ class FactCheckService:
                             filtered_count += 1
                             continue
                         if text and len(text.strip()) > 50:
-                            all_texts.append(f"[{title}] {text[:max_text_chars]}")
+                            all_texts.append(f"[{title}]({url}) {text[:max_text_chars]}")
                         if url:
                             all_urls.add(url)
                         if domain:

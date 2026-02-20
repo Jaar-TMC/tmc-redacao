@@ -82,6 +82,7 @@ const CriarPostPage = () => {
   const regenerated = resultado?.regenerated || false;
   const correlationId = resultado?.correlationId || null;
   const qualityLoopPassed = resultado?.qualityLoop?.quality_loop_passed ?? false;
+  const sourceUrls = resultado?.sourceUrls || [];
   const [showSchemaOrg, setShowSchemaOrg] = useState(false);
   const [schemaCopied, setSchemaCopied] = useState(false);
 
@@ -1728,6 +1729,9 @@ Com esse desempenho, o Brasil reafirma sua posição estratégica no cenário gl
                 linhaFina={linhaFina}
                 content={content}
                 tags={tags}
+                slug={slugValue}
+                targetKeyword={tags?.[0] || ''}
+                hasAuthor={true}
                 articleType={selectedArticleType?.id || 'default'}
                 onOptimizeWithAI={(seoAnalysis) => {
                   // Generate intelligent, data-driven prompt based on SEO analysis
@@ -1747,6 +1751,34 @@ Com esse desempenho, o Brasil reafirma sua posição estratégica no cenário gl
                   sendEditMessage(prompt);
                 }}
               />
+              {/* Verified Sources for manual linking */}
+              {sourceUrls.length > 0 && (
+                <details className="mt-4 border border-gray-200 dark:border-gray-700 rounded-lg">
+                  <summary className="cursor-pointer px-3 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 rounded-lg flex items-center gap-2">
+                    <Link2 className="w-4 h-4" />
+                    Fontes verificadas ({sourceUrls.length})
+                  </summary>
+                  <div className="px-3 pb-3 space-y-1">
+                    <p className="text-xs text-gray-500 dark:text-gray-400 mb-2">
+                      Clique para copiar a URL e inserir como link no editor.
+                    </p>
+                    {sourceUrls.map((url, idx) => {
+                      let domain = '';
+                      try { domain = new URL(url).hostname.replace('www.', ''); } catch { domain = url; }
+                      return (
+                        <button
+                          key={idx}
+                          onClick={() => navigator.clipboard.writeText(url)}
+                          className="w-full text-left px-2 py-1.5 text-xs rounded hover:bg-blue-50 dark:hover:bg-blue-900/20 text-blue-600 dark:text-blue-400 truncate block"
+                          title={url}
+                        >
+                          {domain}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </details>
+              )}
             </div>
           )}
         </div>

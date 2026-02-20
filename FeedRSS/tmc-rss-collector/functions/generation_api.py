@@ -566,6 +566,9 @@ async def generate_article_handler(req: func.HttpRequest) -> func.HttpResponse:
                     logger.warning(f"[{correlation_id}] Phase 1 enrichment failed (non-blocking): {e}")
             phase_timings["enrichment_ms"] = int((time.time() - enrichment_start) * 1000)
 
+        # Extract source URLs for hyperlink generation
+        enrichment_source_urls = enrichment.source_urls if enrichment and getattr(enrichment, "source_urls", None) else []
+
         # ==============================================================
         # Sensitive Topic Detection (2B)
         # ==============================================================
@@ -593,6 +596,7 @@ async def generate_article_handler(req: func.HttpRequest) -> func.HttpResponse:
                 verified_chars=verified_chars,
                 sensitive_instructions=sensitive_instructions,
                 correlation_id=correlation_id,
+                source_urls=enrichment_source_urls,
             )
         except Exception as e:
             logger.error(f"[{correlation_id}] Phase 2 generation failed: {e}")
@@ -1046,6 +1050,9 @@ async def generate_article_handler(req: func.HttpRequest) -> func.HttpResponse:
             result["publication_status"] = "draft"
         result["can_auto_publish"] = False  # Conservative default
 
+        # Add enrichment source URLs to result for frontend hyperlink display
+        result["source_urls"] = enrichment_source_urls
+
         # Add correlation_id to result
         result["correlation_id"] = correlation_id
 
@@ -1497,6 +1504,7 @@ def _build_audit_data(
             "success": getattr(enrichment, "success", False),
             "key_facts_count": len(getattr(enrichment, "key_facts", []) or []),
             "source_urls_count": len(getattr(enrichment, "source_urls", []) or []),
+            "source_urls": getattr(enrichment, "source_urls", []) or [],
             "verified_chars": getattr(enrichment, "verified_chars", 0),
         }
 
