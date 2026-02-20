@@ -94,7 +94,7 @@ async def login_handler(req: func.HttpRequest) -> func.HttpResponse:
         # Verify password
         if not verify_password(password, user.password_hash):
             db.record_failed_login(str(user.id))
-            db.log_auth_event(str(user.id), "login_failed", req.headers.get("X-Forwarded-For", "unknown"))
+            db.log_auth_event(str(user.id), user.email, "login_failed", req.headers.get("X-Forwarded-For", "unknown"))
             return func.HttpResponse(
                 json.dumps({"error": "Email ou senha incorretos"}),
                 status_code=401,
@@ -103,7 +103,7 @@ async def login_handler(req: func.HttpRequest) -> func.HttpResponse:
 
         # Successful login
         db.record_successful_login(str(user.id))
-        db.log_auth_event(str(user.id), "login_success", req.headers.get("X-Forwarded-For", "unknown"))
+        db.log_auth_event(str(user.id), user.email, "login_success", req.headers.get("X-Forwarded-For", "unknown"))
 
         # Create tokens
         access_token = create_access_token(
@@ -328,7 +328,7 @@ async def logout_handler(req: func.HttpRequest) -> func.HttpResponse:
                 db.blacklist_token(payload["jti"], req.user["id"], exp)
 
         # Log audit event
-        db.log_auth_event(req.user["id"], "logout", req.headers.get("X-Forwarded-For", "unknown"))
+        db.log_auth_event(req.user["id"], req.user["email"], "logout", req.headers.get("X-Forwarded-For", "unknown"))
 
         # Clear refresh_token cookie
         clear_cookie = "refresh_token=; HttpOnly; SameSite=Lax; Secure; Path=/api/auth; Max-Age=0"
@@ -441,9 +441,9 @@ async def create_user_handler(req: func.HttpRequest) -> func.HttpResponse:
 
         # Log audit
         db.log_auth_event(
-            req.user["id"], "user_created",
+            req.user["id"], req.user["email"], "password_change",
             req.headers.get("X-Forwarded-For", "unknown"),
-            details=f"Created user {user.email} (role={user.role})"
+            metadata={"detail": f"Created user {user.email} (role={user.role})"}
         )
 
         logger.info(f"User created: {user.email} by admin {req.user['email']}")
@@ -550,9 +550,9 @@ async def delete_user_handler(req: func.HttpRequest) -> func.HttpResponse:
 
         # Log audit
         db.log_auth_event(
-            req.user["id"], "user_deactivated",
+            req.user["id"], req.user["email"], "account_locked",
             req.headers.get("X-Forwarded-For", "unknown"),
-            details=f"Deactivated user {user_id}"
+            metadata={"detail": f"Deactivated user {user_id}"}
         )
 
         logger.info(f"User deactivated: {user_id} by admin {req.user['email']}")
@@ -615,9 +615,9 @@ async def reset_password_handler(req: func.HttpRequest) -> func.HttpResponse:
 
         # Log audit
         db.log_auth_event(
-            req.user["id"], "password_reset",
+            req.user["id"], req.user["email"], "password_reset",
             req.headers.get("X-Forwarded-For", "unknown"),
-            details=f"Password reset for user {user_id}"
+            metadata={"detail": f"Password reset for user {user_id}"}
         )
 
         logger.info(f"Password reset for user {user_id} by admin {req.user['email']}")

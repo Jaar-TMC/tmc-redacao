@@ -1,10 +1,20 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { NavLink, Outlet, useLocation } from 'react-router-dom';
 import { Newspaper, TrendingUp, User, Plug, Settings, Menu, X } from 'lucide-react';
+import { useOnboarding, TOUR_IDS } from '../components/onboarding';
 
 const ConfiguracoesPage = () => {
   const location = useLocation();
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const { shouldShowTour, startTour } = useOnboarding();
+
+  // Auto-trigger CONFIG tour for first-time visitors
+  useEffect(() => {
+    if (shouldShowTour(TOUR_IDS.CONFIG)) {
+      const timer = setTimeout(() => startTour(TOUR_IDS.CONFIG), 500);
+      return () => clearTimeout(timer);
+    }
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const menuItems = [
     { path: '/configuracoes/buscador', label: 'Buscador de Notícias', icon: Newspaper },
@@ -59,16 +69,22 @@ const ConfiguracoesPage = () => {
                 <X size={20} className="text-medium-gray" />
               </button>
             </div>
-            <nav className="space-y-1">
+            <nav className="space-y-1" data-tour="config-sidebar">
               {menuItems.map((item) => {
                 const Icon = item.icon;
                 const isActive = location.pathname === item.path;
+                const tourAttr = item.path === '/configuracoes/buscador'
+                  ? 'config-buscador'
+                  : item.path === '/configuracoes/trends'
+                    ? 'config-trends'
+                    : undefined;
 
                 return (
                   <NavLink
                     key={item.path}
                     to={item.path}
                     onClick={() => setSidebarOpen(false)}
+                    data-tour={tourAttr}
                     className={`flex items-center gap-3 px-4 py-3 rounded-lg transition-colors ${
                       isActive
                         ? 'bg-tmc-orange text-white'

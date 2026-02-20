@@ -23,6 +23,30 @@ function getBaseUrl() {
 // API Base URL - evaluated on each call to support dynamic WordPress config
 const getApiBaseUrl = () => getBaseUrl();
 
+// Auth handler registration (avoids circular import with auth.js)
+let _getAuthToken = null;
+let _onUnauthorized = null;
+
+/**
+ * Register auth handlers for token injection and 401 handling.
+ * Called by AuthContext on mount to wire up auth without circular imports.
+ * @param {() => string|null} getToken - Returns current access token
+ * @param {() => void} onUnauth - Called on 401 response
+ */
+export function registerAuthHandlers(getToken, onUnauth) {
+  _getAuthToken = getToken;
+  _onUnauthorized = onUnauth;
+}
+
+/**
+ * Get current auth token via registered handler.
+ * Exported so AuthContext can pass it to registerAuthHandlers without circular ref.
+ * @returns {string|null}
+ */
+export function getAuthToken() {
+  return _getAuthToken ? _getAuthToken() : null;
+}
+
 /**
  * Custom error class for API errors
  */
@@ -53,12 +77,21 @@ async function fetchApi(endpoint, options = {}) {
     headers['Content-Type'] = 'application/json';
   }
 
-  const config = { ...restOptions, headers, signal };
+  // Inject Authorization header if token is available
+  const token = _getAuthToken ? _getAuthToken() : null;
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
+
+  const config = { ...restOptions, headers, signal, credentials: 'include' };
 
   try {
     const response = await fetch(url, config);
 
     if (!response.ok) {
+      if (response.status === 401 && _onUnauthorized) {
+        _onUnauthorized();
+      }
       const errorData = await response.json().catch(() => null);
       throw new ApiError(
         errorData?.error || `HTTP error ${response.status}`,
@@ -534,6 +567,9 @@ export { getApiBaseUrl };
 // Export error class for type checking
 export { ApiError };
 
+// Export fetchApi for use by auth service
+export { fetchApi };
+
 // Default export with all functions
 export default {
   checkHealth,
@@ -558,5 +594,8 @@ export default {
   deleteUserArticle,
   isApiAvailable,
   getApiBaseUrl,
+  registerAuthHandlers,
+  getAuthToken,
   ApiError,
+  fetchApi,
 };

@@ -13,7 +13,8 @@
 export const TOUR_IDS = {
   HOME: 'home',
   CRIAR: 'criar',
-  EDITOR: 'editor'
+  EDITOR: 'editor',
+  CONFIG: 'config'
 };
 
 export const tourSteps = {
@@ -119,6 +120,28 @@ export const tourSteps = {
       content: 'Salve rascunhos ou publique direto no WordPress.',
       position: 'bottom',
       beaconPosition: 'top-left'
+    }
+  ],
+
+  // Tour 4: Configurações
+  [TOUR_IDS.CONFIG]: [
+    {
+      target: '[data-tour="config-sidebar"]',
+      title: 'Menu de Configurações',
+      content: 'Navegue entre as diferentes configurações do sistema.',
+      position: 'right'
+    },
+    {
+      target: '[data-tour="config-buscador"]',
+      title: 'Buscador de Notícias',
+      content: 'Configure as fontes de notícias e feeds RSS monitorados.',
+      position: 'bottom'
+    },
+    {
+      target: '[data-tour="config-trends"]',
+      title: 'Google Trends',
+      content: 'Configure os temas para monitoramento de tendências.',
+      position: 'bottom'
     }
   ]
 };

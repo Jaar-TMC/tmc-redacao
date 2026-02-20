@@ -14,6 +14,8 @@ import {
   CategoryGuidelines,
   OpinionToggle
 } from '../../components/criar';
+import { RequirePermission } from '../../components/auth';
+import { PERMISSIONS } from '../../constants/permissions';
 import {
   CATEGORIAS_EDITORIAIS,
   TIPO_MATERIA_OPTIONS,
@@ -309,20 +311,22 @@ const ConfigurarPage = () => {
           </h1>
 
           <div className="flex items-center gap-3">
-            <button
-              onClick={() => setShowAdvanced(!showAdvanced)}
-              className={`flex items-center gap-2 px-3 py-1.5 rounded-lg transition-colors ${
-                showAdvanced
-                  ? 'bg-gray-800 text-white'
-                  : 'text-medium-gray hover:text-tmc-orange hover:bg-off-white'
-              }`}
-              aria-label="Modo Avancado"
-            >
-              {showAdvanced ? <EyeOff size={18} /> : <Code size={18} />}
-              <span className="text-sm font-medium hidden sm:inline">
-                {showAdvanced ? 'Ocultar Prompt' : 'Modo Avancado'}
-              </span>
-            </button>
+            <RequirePermission permission={PERMISSIONS.VIEW_ADVANCED_MODE}>
+              <button
+                onClick={() => setShowAdvanced(!showAdvanced)}
+                className={`flex items-center gap-2 px-3 py-1.5 rounded-lg transition-colors ${
+                  showAdvanced
+                    ? 'bg-gray-800 text-white'
+                    : 'text-medium-gray hover:text-tmc-orange hover:bg-off-white'
+                }`}
+                aria-label="Modo Avancado"
+              >
+                {showAdvanced ? <EyeOff size={18} /> : <Code size={18} />}
+                <span className="text-sm font-medium hidden sm:inline">
+                  {showAdvanced ? 'Ocultar Prompt' : 'Modo Avancado'}
+                </span>
+              </button>
+            </RequirePermission>
             <button
               className="flex items-center gap-2 text-medium-gray hover:text-tmc-orange transition-colors"
               aria-label="Ajuda"

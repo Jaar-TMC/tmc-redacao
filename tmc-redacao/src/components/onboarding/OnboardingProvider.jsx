@@ -2,8 +2,8 @@ import { createContext, useState, useCallback, useEffect, useMemo } from 'react'
 import PropTypes from 'prop-types';
 import { tourSteps, TOUR_IDS } from './tourSteps';
 
-// Storage key for persisting tour state
-const STORAGE_KEY = 'tmc-onboarding-v1';
+// Storage key scoped by user id
+const getStorageKey = (uid) => 'tmc-onboarding-v1' + (uid ? '-' + uid : '');
 
 // Context for onboarding state
 export const OnboardingContext = createContext(null);
@@ -16,30 +16,43 @@ export const OnboardingContext = createContext(null);
  * - Tour completion persistence
  * - Auto-trigger logic for first-time users
  */
-export const OnboardingProvider = ({ children }) => {
+export const OnboardingProvider = ({ children, userId }) => {
   // Current active tour state
   const [activeTour, setActiveTour] = useState(null);
   const [currentStepIndex, setCurrentStepIndex] = useState(0);
   const [isActive, setIsActive] = useState(false);
 
+  // Auth-gated state for tour blocking
+  const [gated, setGated] = useState(false);
+
   // Persisted tour completion state
   const [completedTours, setCompletedTours] = useState(() => {
     try {
-      const stored = localStorage.getItem(STORAGE_KEY);
+      const stored = localStorage.getItem(getStorageKey(userId));
       return stored ? JSON.parse(stored) : {};
     } catch {
       return {};
     }
   });
 
+  // Reload completedTours when userId changes
+  useEffect(() => {
+    try {
+      const stored = localStorage.getItem(getStorageKey(userId));
+      setCompletedTours(stored ? JSON.parse(stored) : {});
+    } catch {
+      setCompletedTours({});
+    }
+  }, [userId]);
+
   // Persist completed tours to localStorage
   useEffect(() => {
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(completedTours));
+      localStorage.setItem(getStorageKey(userId), JSON.stringify(completedTours));
     } catch (error) {
       console.warn('Failed to persist onboarding state:', error);
     }
-  }, [completedTours]);
+  }, [completedTours, userId]);
 
   // Get current tour steps
   const currentTourSteps = useMemo(() => {
@@ -53,10 +66,11 @@ export const OnboardingProvider = ({ children }) => {
 
   // Check if a tour should auto-show (first time on this page)
   const shouldShowTour = useCallback((tourId) => {
+    if (gated) return false;
     const tourState = completedTours[tourId];
     // Show if never seen or if explicitly reset
     return !tourState || tourState.reset;
-  }, [completedTours]);
+  }, [completedTours, gated]);
 
   // Start a specific tour
   const startTour = useCallback((tourId) => {
@@ -138,8 +152,8 @@ export const OnboardingProvider = ({ children }) => {
   // Reset all tours
   const resetAllTours = useCallback(() => {
     setCompletedTours({});
-    localStorage.removeItem(STORAGE_KEY);
-  }, []);
+    localStorage.removeItem(getStorageKey(userId));
+  }, [userId]);
 
   // Check if a tour has been completed
   const isTourCompleted = useCallback((tourId) => {
@@ -162,6 +176,7 @@ export const OnboardingProvider = ({ children }) => {
     currentStepIndex,
     totalSteps: currentTourSteps.length,
     completedTours,
+    gated,
 
     // Actions
     startTour,
@@ -172,6 +187,7 @@ export const OnboardingProvider = ({ children }) => {
     resetTour,
     resetAllTours,
     goToStep,
+    setGated,
 
     // Helpers
     shouldShowTour,
@@ -186,6 +202,7 @@ export const OnboardingProvider = ({ children }) => {
     currentStepIndex,
     currentTourSteps.length,
     completedTours,
+    gated,
     startTour,
     nextStep,
     prevStep,
@@ -206,7 +223,8 @@ export const OnboardingProvider = ({ children }) => {
 };
 
 OnboardingProvider.propTypes = {
-  children: PropTypes.node.isRequired
+  children: PropTypes.node.isRequired,
+  userId: PropTypes.string
 };
 
 export default OnboardingProvider;

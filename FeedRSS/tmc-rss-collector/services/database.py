@@ -2846,7 +2846,7 @@ class DatabaseService:
         """Create a new user. Password comes pre-hashed from auth_service."""
         query = f"""
             INSERT INTO users (name, email, password_hash, role)
-            OUTPUT INSERTED.{self.USER_COLUMNS}
+            OUTPUT {', '.join('INSERTED.' + c.strip() for c in self.USER_COLUMNS.split(','))}
             VALUES (%s, %s, %s, %s)
         """
         with self.get_connection() as conn:

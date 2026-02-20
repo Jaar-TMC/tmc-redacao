@@ -1,8 +1,9 @@
 import { useState, useEffect, useRef } from 'react';
-import { Settings, User, PenLine, Menu, X, HelpCircle, ChevronDown, FileText, Youtube } from 'lucide-react';
+import { User, PenLine, Menu, X, HelpCircle, ChevronDown, FileText, Youtube, LogOut } from 'lucide-react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import LogoTMC from '../../assets/logo-tmc.svg?react';
-import { useWordPress } from '../../context';
+import { useAuth } from '../../context/AuthContext';
+import usePermissions from '../../hooks/usePermissions';
 import { useOnboarding, TOUR_IDS } from '../onboarding';
 
 /**
@@ -17,7 +18,8 @@ import { useOnboarding, TOUR_IDS } from '../onboarding';
 const Header = () => {
   const location = useLocation();
   const navigate = useNavigate();
-  const { user, isWordPress } = useWordPress();
+  const { user, logout } = useAuth();
+  const { isAdmin } = usePermissions();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [createMenuOpen, setCreateMenuOpen] = useState(false);
   const [helpMenuOpen, setHelpMenuOpen] = useState(false);
@@ -26,9 +28,8 @@ const Header = () => {
   const { resetTour, startTour, resetAllTours } = useOnboarding();
 
   // Get user display name and role
-  const displayName = user?.displayName || 'Usuário';
-  const userRole = user?.roles?.[0] || 'Redator';
-  const userAvatar = user?.avatar;
+  const displayName = user?.name || 'Usuário';
+  const userRole = user?.role || 'user';
 
   const createOptions = [
     { path: '/criar', label: 'Nova Matéria', icon: FileText, description: 'Escolha sua fonte inicial' },
@@ -39,7 +40,8 @@ const Header = () => {
     { path: '/', label: 'Redação' },
     { path: '/transcricao', label: 'Transcrição' },
     { path: '/minhas-materias', label: 'Minhas Matérias' },
-    { path: '/configuracoes', label: 'Configurações' }
+    // Only show Configurações to admins
+    ...(isAdmin ? [{ path: '/configuracoes', label: 'Configurações' }] : [])
   ];
 
   // Handle Escape key to close menus (WCAG 2.1.2 - No Keyboard Trap)
@@ -105,10 +107,7 @@ const Header = () => {
     return null;
   };
 
-  // In WordPress, use sticky positioning instead of fixed to work with admin layout
-  const headerClasses = isWordPress
-    ? "bg-tmc-dark-green text-white h-16 sticky top-0 z-50 shadow-lg"
-    : "bg-tmc-dark-green text-white h-16 fixed top-0 left-0 right-0 z-50 shadow-lg";
+  const headerClasses = "bg-tmc-dark-green text-white h-16 fixed top-0 left-0 right-0 z-50 shadow-lg";
 
   return (
     <header className={headerClasses} role="banner">
@@ -258,13 +257,15 @@ const Header = () => {
             )}
           </div>
 
-          {/* Settings - Hidden on mobile */}
+          {/* Logout - Hidden on mobile */}
           <button
             type="button"
+            onClick={logout}
             className="hidden md:flex items-center justify-center p-2 hover:bg-tmc-light-green/50 rounded-lg transition-colors min-h-[44px] min-w-[44px]"
-            aria-label="Configurações"
+            aria-label="Sair"
+            title="Sair"
           >
-            <Settings size={20} aria-hidden="true" />
+            <LogOut size={20} aria-hidden="true" />
           </button>
 
           {/* User Info - Simplified on mobile */}
@@ -273,17 +274,9 @@ const Header = () => {
               <p className="text-sm font-medium">{displayName}</p>
               <p className="text-xs text-white/60 capitalize">{userRole}</p>
             </div>
-            {userAvatar ? (
-              <img
-                src={userAvatar}
-                alt={displayName}
-                className="w-9 h-9 rounded-full object-cover"
-              />
-            ) : (
-              <div className="w-9 h-9 bg-tmc-orange rounded-full flex items-center justify-center" aria-hidden="true">
-                <User size={20} />
-              </div>
-            )}
+            <div className="w-9 h-9 bg-tmc-orange rounded-full flex items-center justify-center" aria-hidden="true">
+              <span className="text-sm font-bold text-white">{displayName.charAt(0).toUpperCase()}</span>
+            </div>
           </div>
 
           {/* Mobile Menu Button */}
@@ -345,22 +338,23 @@ const Header = () => {
               </div>
 
               <div className="md:hidden flex items-center gap-3 px-4 py-3 bg-tmc-light-green/20 rounded-lg" role="region" aria-label="Informações do usuário">
-                {userAvatar ? (
-                  <img
-                    src={userAvatar}
-                    alt={displayName}
-                    className="w-9 h-9 rounded-full object-cover"
-                  />
-                ) : (
-                  <div className="w-9 h-9 bg-tmc-orange rounded-full flex items-center justify-center" aria-hidden="true">
-                    <User size={20} />
-                  </div>
-                )}
+                <div className="w-9 h-9 bg-tmc-orange rounded-full flex items-center justify-center" aria-hidden="true">
+                  <span className="text-sm font-bold text-white">{displayName.charAt(0).toUpperCase()}</span>
+                </div>
                 <div>
                   <p className="text-sm font-medium">{displayName}</p>
                   <p className="text-xs text-white/60 capitalize">{userRole}</p>
                 </div>
               </div>
+
+              {/* Mobile Logout Button */}
+              <button
+                onClick={() => { logout(); setMobileMenuOpen(false); }}
+                className="w-full flex items-center gap-3 px-4 py-3 hover:bg-red-500/20 rounded-lg text-sm text-red-300"
+              >
+                <LogOut size={18} aria-hidden="true" />
+                <span>Sair</span>
+              </button>
             </div>
           </nav>
         </div>
