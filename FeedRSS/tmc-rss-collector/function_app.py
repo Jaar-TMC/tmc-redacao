@@ -6,9 +6,11 @@ Este arquivo registra todas as functions (triggers e routes) da aplicação.
 """
 
 import azure.functions as func
+import json
 import logging
 import asyncio
 from functools import wraps
+from utils.auth import require_auth, require_admin
 
 # Configurar logging
 logging.basicConfig(
@@ -302,8 +304,24 @@ async def sources_handler(req: func.HttpRequest) -> func.HttpResponse:
     /api/sources - Gerencia fontes RSS.
 
     GET: Lista todas as fontes RSS.
-    POST: Cria uma nova fonte RSS.
+    POST: Cria uma nova fonte RSS (admin only).
     """
+    if req.method == "POST":
+        from utils.auth import get_current_user
+        user = get_current_user(req)
+        if not user:
+            return func.HttpResponse(
+                json.dumps({"error": "Authentication required"}),
+                status_code=401,
+                mimetype="application/json"
+            )
+        if user["role"] != "admin":
+            return func.HttpResponse(
+                json.dumps({"error": "Admin access required"}),
+                status_code=403,
+                mimetype="application/json"
+            )
+        req.user = user
     if req.method == "GET":
         from functions.sources_api import list_sources_handler
         return await list_sources_handler(req)
@@ -319,9 +337,25 @@ async def source_by_id_handler(req: func.HttpRequest) -> func.HttpResponse:
     /api/sources/{id} - Gerencia uma fonte específica.
 
     GET: Retorna uma fonte específica.
-    PUT: Atualiza uma fonte existente.
-    DELETE: Desativa uma fonte (soft delete).
+    PUT: Atualiza uma fonte existente (admin only).
+    DELETE: Desativa uma fonte (admin only, soft delete).
     """
+    if req.method in ("PUT", "DELETE"):
+        from utils.auth import get_current_user
+        user = get_current_user(req)
+        if not user:
+            return func.HttpResponse(
+                json.dumps({"error": "Authentication required"}),
+                status_code=401,
+                mimetype="application/json"
+            )
+        if user["role"] != "admin":
+            return func.HttpResponse(
+                json.dumps({"error": "Admin access required"}),
+                status_code=403,
+                mimetype="application/json"
+            )
+        req.user = user
     if req.method == "GET":
         from functions.sources_api import get_source_handler
         return await get_source_handler(req)
@@ -335,8 +369,9 @@ async def source_by_id_handler(req: func.HttpRequest) -> func.HttpResponse:
 
 @app.route(route="sources/{id}/collect", methods=["POST", "OPTIONS"])
 @with_cors
+@require_admin
 async def collect_source(req: func.HttpRequest) -> func.HttpResponse:
-    """POST /api/sources/{id}/collect - Dispara coleta manual."""
+    """POST /api/sources/{id}/collect - Dispara coleta manual (admin only)."""
     from functions.sources_api import collect_source_handler
     return await collect_source_handler(req)
 
@@ -360,6 +395,7 @@ async def metrics(req: func.HttpRequest) -> func.HttpResponse:
 
 @app.route(route="generate", methods=["POST", "OPTIONS"])
 @with_cors
+@require_auth
 async def generate_article(req: func.HttpRequest) -> func.HttpResponse:
     """
     POST /api/generate - Gera matéria usando IA.
@@ -402,6 +438,7 @@ async def generate_article(req: func.HttpRequest) -> func.HttpResponse:
 
 @app.route(route="extract-topics", methods=["POST", "OPTIONS"])
 @with_cors
+@require_auth
 async def extract_topics(req: func.HttpRequest) -> func.HttpResponse:
     """
     POST /api/extract-topics - Extrai tópicos do texto usando IA.
@@ -418,6 +455,7 @@ async def extract_topics(req: func.HttpRequest) -> func.HttpResponse:
 
 @app.route(route="generate-tags", methods=["POST", "OPTIONS"])
 @with_cors
+@require_auth
 async def generate_tags(req: func.HttpRequest) -> func.HttpResponse:
     """
     POST /api/generate-tags - Gera tags para conteúdo usando IA.
@@ -434,6 +472,7 @@ async def generate_tags(req: func.HttpRequest) -> func.HttpResponse:
 
 @app.route(route="merge-topics", methods=["POST", "OPTIONS"])
 @with_cors
+@require_auth
 async def merge_topics(req: func.HttpRequest) -> func.HttpResponse:
     """
     POST /api/merge-topics - Agrupa tópicos de múltiplas matérias usando IA.
@@ -483,6 +522,7 @@ async def merge_topics(req: func.HttpRequest) -> func.HttpResponse:
 
 @app.route(route="edit-article", methods=["POST", "OPTIONS"])
 @with_cors
+@require_auth
 async def edit_article(req: func.HttpRequest) -> func.HttpResponse:
     """
     POST /api/edit-article - Edita uma matéria existente usando IA.
@@ -523,6 +563,7 @@ async def edit_article(req: func.HttpRequest) -> func.HttpResponse:
 
 @app.route(route="user-articles", methods=["GET", "POST", "OPTIONS"])
 @with_cors
+@require_auth
 async def user_articles_handler(req: func.HttpRequest) -> func.HttpResponse:
     """
     /api/user-articles - Gerencia matérias do usuário.
@@ -540,6 +581,7 @@ async def user_articles_handler(req: func.HttpRequest) -> func.HttpResponse:
 
 @app.route(route="user-articles/{id}", methods=["GET", "PUT", "DELETE", "OPTIONS"])
 @with_cors
+@require_auth
 async def user_article_by_id_handler(req: func.HttpRequest) -> func.HttpResponse:
     """
     /api/user-articles/{id} - Gerencia uma matéria específica.
@@ -638,6 +680,7 @@ async def clustering_stats(req: func.HttpRequest) -> func.HttpResponse:
 
 @app.route(route="clustering/maintenance", methods=["POST", "OPTIONS"])
 @with_cors
+@require_admin
 async def clustering_maintenance_manual(req: func.HttpRequest) -> func.HttpResponse:
     """
     POST /api/clustering/maintenance - Executa manutencao do clustering manualmente.
@@ -666,6 +709,146 @@ async def clustering_maintenance_manual(req: func.HttpRequest) -> func.HttpRespo
     """
     from functions.clustering_maintenance import clustering_maintenance_manual_handler
     return await clustering_maintenance_manual_handler(req)
+
+
+# ========================================
+# HTTP TRIGGERS - AUTH API
+# ========================================
+
+@app.route(route="auth/login", methods=["POST", "OPTIONS"])
+@with_cors
+async def auth_login(req: func.HttpRequest) -> func.HttpResponse:
+    """POST /api/auth/login - Authenticate user."""
+    from functions.auth_api import login_handler
+    return await login_handler(req)
+
+
+@app.route(route="auth/refresh", methods=["POST", "OPTIONS"])
+@with_cors
+async def auth_refresh(req: func.HttpRequest) -> func.HttpResponse:
+    """POST /api/auth/refresh - Refresh access token."""
+    from functions.auth_api import refresh_handler
+    return await refresh_handler(req)
+
+
+@app.route(route="auth/me", methods=["GET", "PATCH", "OPTIONS"])
+@with_cors
+async def auth_me(req: func.HttpRequest) -> func.HttpResponse:
+    """GET/PATCH /api/auth/me - Get or update current user."""
+    from utils.auth import get_current_user
+    if req.method != "OPTIONS":
+        user = get_current_user(req)
+        if not user:
+            return func.HttpResponse(
+                json.dumps({"error": "Authentication required"}),
+                status_code=401,
+                mimetype="application/json"
+            )
+        req.user = user
+    if req.method == "GET":
+        from functions.auth_api import me_handler
+        return await me_handler(req)
+    elif req.method == "PATCH":
+        from functions.auth_api import update_me_handler
+        return await update_me_handler(req)
+
+
+@app.route(route="auth/logout", methods=["POST", "OPTIONS"])
+@with_cors
+async def auth_logout(req: func.HttpRequest) -> func.HttpResponse:
+    """POST /api/auth/logout - Logout and invalidate token."""
+    from utils.auth import get_current_user
+    if req.method != "OPTIONS":
+        user = get_current_user(req)
+        if not user:
+            return func.HttpResponse(
+                json.dumps({"error": "Authentication required"}),
+                status_code=401,
+                mimetype="application/json"
+            )
+        req.user = user
+    from functions.auth_api import logout_handler
+    return await logout_handler(req)
+
+
+@app.route(route="auth/users", methods=["GET", "POST", "OPTIONS"])
+@with_cors
+async def auth_users(req: func.HttpRequest) -> func.HttpResponse:
+    """/api/auth/users - Admin user management."""
+    from utils.auth import get_current_user
+    if req.method != "OPTIONS":
+        user = get_current_user(req)
+        if not user:
+            return func.HttpResponse(
+                json.dumps({"error": "Authentication required"}),
+                status_code=401,
+                mimetype="application/json"
+            )
+        if user["role"] != "admin":
+            return func.HttpResponse(
+                json.dumps({"error": "Admin access required"}),
+                status_code=403,
+                mimetype="application/json"
+            )
+        req.user = user
+    if req.method == "GET":
+        from functions.auth_api import list_users_handler
+        return await list_users_handler(req)
+    elif req.method == "POST":
+        from functions.auth_api import create_user_handler
+        return await create_user_handler(req)
+
+
+@app.route(route="auth/users/{id}", methods=["PUT", "DELETE", "OPTIONS"])
+@with_cors
+async def auth_user_by_id(req: func.HttpRequest) -> func.HttpResponse:
+    """/api/auth/users/{id} - Admin manage specific user."""
+    from utils.auth import get_current_user
+    if req.method != "OPTIONS":
+        user = get_current_user(req)
+        if not user:
+            return func.HttpResponse(
+                json.dumps({"error": "Authentication required"}),
+                status_code=401,
+                mimetype="application/json"
+            )
+        if user["role"] != "admin":
+            return func.HttpResponse(
+                json.dumps({"error": "Admin access required"}),
+                status_code=403,
+                mimetype="application/json"
+            )
+        req.user = user
+    if req.method == "PUT":
+        from functions.auth_api import update_user_handler
+        return await update_user_handler(req)
+    elif req.method == "DELETE":
+        from functions.auth_api import delete_user_handler
+        return await delete_user_handler(req)
+
+
+@app.route(route="auth/users/{id}/reset-password", methods=["POST", "OPTIONS"])
+@with_cors
+async def auth_reset_password(req: func.HttpRequest) -> func.HttpResponse:
+    """POST /api/auth/users/{id}/reset-password - Admin reset user password."""
+    from utils.auth import get_current_user
+    if req.method != "OPTIONS":
+        user = get_current_user(req)
+        if not user:
+            return func.HttpResponse(
+                json.dumps({"error": "Authentication required"}),
+                status_code=401,
+                mimetype="application/json"
+            )
+        if user["role"] != "admin":
+            return func.HttpResponse(
+                json.dumps({"error": "Admin access required"}),
+                status_code=403,
+                mimetype="application/json"
+            )
+        req.user = user
+    from functions.auth_api import reset_password_handler
+    return await reset_password_handler(req)
 
 
 # ========================================
@@ -706,3 +889,13 @@ logger.info("  - GET  /api/semantic-themes/{id}")
 logger.info("  - GET  /api/clustering-stats")
 logger.info("  - POST /api/clustering/maintenance")
 logger.info("  - GET  /api/metrics")
+logger.info("  - POST /api/auth/login")
+logger.info("  - POST /api/auth/refresh")
+logger.info("  - GET  /api/auth/me")
+logger.info("  - PATCH /api/auth/me")
+logger.info("  - POST /api/auth/logout")
+logger.info("  - GET  /api/auth/users")
+logger.info("  - POST /api/auth/users")
+logger.info("  - PUT  /api/auth/users/{id}")
+logger.info("  - DELETE /api/auth/users/{id}")
+logger.info("  - POST /api/auth/users/{id}/reset-password")

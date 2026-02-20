@@ -15,7 +15,8 @@ from models import (
     Source, SourceCreate, SourceUpdate,
     Article, ArticleCreate,
     CollectionLog, CollectionLogCreate,
-    UserArticle, UserArticleCreate, UserArticleUpdate
+    UserArticle, UserArticleCreate, UserArticleUpdate,
+    User, UserCreate, UserUpdate, UserWithPassword
 )
 
 # Type alias for embedding vectors
@@ -1050,6 +1051,7 @@ class DatabaseService:
 
     def get_user_articles(
         self,
+        user_id: Optional[str] = None,
         page: int = 1,
         limit: int = 20,
         status: Optional[str] = None,
@@ -1061,6 +1063,7 @@ class DatabaseService:
         Lista artigos do usuario com filtros e paginacao.
 
         Args:
+            user_id: Filter by owner (required for non-admin users)
             page: Pagina atual (1-based)
             limit: Itens por pagina (max 100)
             status: 'draft' ou 'published'
@@ -1077,6 +1080,10 @@ class DatabaseService:
         # Construir WHERE clause
         conditions = ["deleted_at IS NULL"]  # Excluir soft-deleted
         params = []
+
+        if user_id:
+            conditions.append("user_id = %s")
+            params.append(user_id)
 
         if status:
             conditions.append("status = %s")
@@ -1136,27 +1143,35 @@ class DatabaseService:
 
         return articles, total
 
-    def get_user_article_by_id(self, article_id: UUID) -> Optional[UserArticle]:
-        """Retorna um artigo de usuario especifico pelo ID."""
-        query = """
+    def get_user_article_by_id(self, article_id: UUID, user_id: Optional[str] = None) -> Optional[UserArticle]:
+        """Retorna um artigo de usuario especifico pelo ID, optionally scoped by user_id."""
+        conditions = ["id = %s", "deleted_at IS NULL"]
+        params = [str(article_id)]
+
+        if user_id:
+            conditions.append("user_id = %s")
+            params.append(user_id)
+
+        query = f"""
             SELECT id, title, linha_fina, content, preview, status, category,
                    tags, source_article_ids, generation_config, author_name,
                    created_at, updated_at, published_at, deleted_at
             FROM user_articles
-            WHERE id = %s AND deleted_at IS NULL
+            WHERE {' AND '.join(conditions)}
         """
         with self.get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute(query, (str(article_id),))
+            cursor.execute(query, params)
             row = cursor.fetchone()
             return self._row_to_user_article(row) if row else None
 
-    def create_user_article(self, article: UserArticleCreate) -> UserArticle:
+    def create_user_article(self, article: UserArticleCreate, user_id: Optional[str] = None) -> UserArticle:
         """
         Cria um novo artigo de usuario.
 
         Args:
             article: Dados do artigo a criar
+            user_id: ID do usuario autenticado (owner)
 
         Returns:
             UserArticle criado com ID
@@ -1172,9 +1187,9 @@ class DatabaseService:
         query = """
             INSERT INTO user_articles
             (title, linha_fina, content, preview, status, category,
-             tags, source_article_ids, generation_config, author_name)
+             tags, source_article_ids, generation_config, author_name, user_id)
             OUTPUT INSERTED.id, INSERTED.created_at, INSERTED.updated_at
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         """
 
         tags_json = json.dumps(article.tags) if article.tags else '[]'
@@ -1193,7 +1208,8 @@ class DatabaseService:
                 tags_json,
                 source_ids_json,
                 config_json,
-                article.author_name
+                article.author_name,
+                user_id
             ))
             row = cursor.fetchone()
             conn.commit()
@@ -1215,7 +1231,7 @@ class DatabaseService:
             )
 
     def update_user_article(
-        self, article_id: UUID, data: UserArticleUpdate
+        self, article_id: UUID, data: UserArticleUpdate, user_id: Optional[str] = None
     ) -> Optional[UserArticle]:
         """
         Atualiza um artigo de usuario existente.
@@ -1273,15 +1289,20 @@ class DatabaseService:
             params.append(json.dumps(data.generation_config))
 
         if not updates:
-            return self.get_user_article_by_id(article_id)
+            return self.get_user_article_by_id(article_id, user_id=user_id)
 
         updates.append("updated_at = GETUTCDATE()")
         params.append(str(article_id))
 
+        where_conditions = "id = %s AND deleted_at IS NULL"
+        if user_id:
+            where_conditions += " AND user_id = %s"
+            params.append(user_id)
+
         query = f"""
             UPDATE user_articles
             SET {', '.join(updates)}
-            WHERE id = %s AND deleted_at IS NULL
+            WHERE {where_conditions}
         """
 
         with self.get_connection() as conn:
@@ -1295,24 +1316,31 @@ class DatabaseService:
 
         return self.get_user_article_by_id(article_id)
 
-    def delete_user_article(self, article_id: UUID) -> bool:
+    def delete_user_article(self, article_id: UUID, user_id: Optional[str] = None) -> bool:
         """
         Soft delete de um artigo de usuario.
 
         Args:
             article_id: ID do artigo
+            user_id: Scope by owner (required for non-admin users)
 
         Returns:
             True se deletado, False se nao encontrado
         """
-        query = """
+        params = [str(article_id)]
+        where = "id = %s AND deleted_at IS NULL"
+        if user_id:
+            where += " AND user_id = %s"
+            params.append(user_id)
+
+        query = f"""
             UPDATE user_articles
             SET deleted_at = GETUTCDATE(), updated_at = GETUTCDATE()
-            WHERE id = %s AND deleted_at IS NULL
+            WHERE {where}
         """
         with self.get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute(query, (str(article_id),))
+            cursor.execute(query, params)
             affected = cursor.rowcount
             conn.commit()
             return affected > 0
@@ -2701,6 +2729,311 @@ class DatabaseService:
         except Exception as e:
             logger.warning(f"Failed to insert generation audit (non-blocking): {e}")
             return False
+
+    # ========================================
+    # USERS & AUTH
+    # ========================================
+
+    USER_COLUMNS = "id, name, email, role, avatar, is_new_user, is_active, last_login, failed_login_attempts, locked_until, created_at, updated_at"
+    USER_WITH_PW_COLUMNS = "id, name, email, password_hash, role, avatar, is_new_user, is_active, last_login, failed_login_attempts, locked_until, created_at, updated_at"
+
+    LOCKOUT_THRESHOLD = 5
+    LOCKOUT_MINUTES = 15
+
+    def _row_to_user(self, row) -> User:
+        """Convert DB row to User model."""
+        return User(
+            id=row[0],
+            name=row[1],
+            email=row[2],
+            role=row[3],
+            avatar=row[4],
+            is_new_user=bool(row[5]),
+            is_active=bool(row[6]),
+            last_login=row[7],
+            failed_login_attempts=row[8] or 0,
+            locked_until=row[9],
+            created_at=row[10],
+            updated_at=row[11],
+        )
+
+    def _row_to_user_with_password(self, row) -> UserWithPassword:
+        """Convert DB row to UserWithPassword model (includes password_hash)."""
+        return UserWithPassword(
+            id=row[0],
+            name=row[1],
+            email=row[2],
+            password_hash=row[3],
+            role=row[4],
+            avatar=row[5],
+            is_new_user=bool(row[6]),
+            is_active=bool(row[7]),
+            last_login=row[8],
+            failed_login_attempts=row[9] or 0,
+            locked_until=row[10],
+            created_at=row[11],
+            updated_at=row[12],
+        )
+
+    def get_user_by_email(self, email: str) -> Optional[UserWithPassword]:
+        """Get user by email (includes password_hash for login verification)."""
+        query = f"""
+            SELECT {self.USER_WITH_PW_COLUMNS}
+            FROM users
+            WHERE email = %s AND is_active = 1
+        """
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(query, (str(email),))
+            row = cursor.fetchone()
+            return self._row_to_user_with_password(row) if row else None
+
+    def get_user_by_id(self, user_id) -> Optional[User]:
+        """Get user by ID (excludes password_hash)."""
+        query = f"""
+            SELECT {self.USER_COLUMNS}
+            FROM users
+            WHERE id = %s AND is_active = 1
+        """
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(query, (str(user_id),))
+            row = cursor.fetchone()
+            return self._row_to_user(row) if row else None
+
+    def get_users(self, page: int = 1, limit: int = 20, search: Optional[str] = None, role: Optional[str] = None) -> Tuple[List[User], int]:
+        """List users with pagination and optional filters."""
+        limit = min(limit, 100)
+        offset = (page - 1) * limit
+
+        conditions = ["is_active = 1"]
+        params = []
+
+        if search:
+            conditions.append("(name LIKE %s OR email LIKE %s)")
+            search_param = f"%{search}%"
+            params.extend([search_param, search_param])
+
+        if role:
+            conditions.append("role = %s")
+            params.append(role)
+
+        where_clause = "WHERE " + " AND ".join(conditions)
+
+        count_query = f"SELECT COUNT(*) FROM users {where_clause}"
+
+        query = f"""
+            SELECT {self.USER_COLUMNS}
+            FROM users
+            {where_clause}
+            ORDER BY name ASC
+            OFFSET %s ROWS FETCH NEXT %s ROWS ONLY
+        """
+
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+
+            cursor.execute(count_query, params)
+            total = cursor.fetchone()[0]
+
+            cursor.execute(query, params + [offset, limit])
+            rows = cursor.fetchall()
+            users = [self._row_to_user(row) for row in rows]
+
+        return users, total
+
+    def create_user(self, user_data: UserCreate, password_hash: str) -> User:
+        """Create a new user. Password comes pre-hashed from auth_service."""
+        query = f"""
+            INSERT INTO users (name, email, password_hash, role)
+            OUTPUT INSERTED.{self.USER_COLUMNS}
+            VALUES (%s, %s, %s, %s)
+        """
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(query, (
+                str(user_data.name),
+                str(user_data.email),
+                str(password_hash),
+                str(user_data.role),
+            ))
+            row = cursor.fetchone()
+            conn.commit()
+            return self._row_to_user(row)
+
+    def update_user(self, user_id, data: UserUpdate) -> Optional[User]:
+        """Update user fields dynamically from non-None fields."""
+        updates = []
+        params = []
+
+        if data.name is not None:
+            updates.append("name = %s")
+            params.append(data.name)
+        if data.email is not None:
+            updates.append("email = %s")
+            params.append(data.email)
+        if data.role is not None:
+            updates.append("role = %s")
+            params.append(data.role)
+        if data.is_active is not None:
+            updates.append("is_active = %s")
+            params.append(1 if data.is_active else 0)
+
+        if not updates:
+            return self.get_user_by_id(user_id)
+
+        updates.append("updated_at = GETUTCDATE()")
+        params.append(str(user_id))
+
+        query = f"""
+            UPDATE users
+            SET {', '.join(updates)}
+            WHERE id = %s AND is_active = 1
+        """
+
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(query, params)
+            conn.commit()
+
+        return self.get_user_by_id(user_id)
+
+    def deactivate_user(self, user_id) -> bool:
+        """Soft-deactivate a user."""
+        query = """
+            UPDATE users
+            SET is_active = 0, updated_at = GETUTCDATE()
+            WHERE id = %s
+        """
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(query, (str(user_id),))
+            affected = cursor.rowcount
+            conn.commit()
+            return affected > 0
+
+    def reset_user_password(self, user_id, new_password_hash: str) -> bool:
+        """Reset user password and mark as new user (force password change)."""
+        query = """
+            UPDATE users
+            SET password_hash = %s, is_new_user = 1, updated_at = GETUTCDATE()
+            WHERE id = %s
+        """
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(query, (str(new_password_hash), str(user_id)))
+            affected = cursor.rowcount
+            conn.commit()
+            return affected > 0
+
+    def set_user_not_new(self, user_id) -> bool:
+        """Clear is_new_user flag after user changes password."""
+        query = """
+            UPDATE users
+            SET is_new_user = 0, updated_at = GETUTCDATE()
+            WHERE id = %s
+        """
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(query, (str(user_id),))
+            affected = cursor.rowcount
+            conn.commit()
+            return affected > 0
+
+    # --- Login tracking ---
+
+    def record_failed_login(self, user_id) -> None:
+        """Increment failed login attempts; lock account after threshold."""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+
+            cursor.execute(
+                "UPDATE users SET failed_login_attempts = failed_login_attempts + 1, updated_at = GETUTCDATE() WHERE id = %s",
+                (str(user_id),)
+            )
+
+            cursor.execute(
+                "SELECT failed_login_attempts FROM users WHERE id = %s",
+                (str(user_id),)
+            )
+            row = cursor.fetchone()
+            if row and row[0] >= self.LOCKOUT_THRESHOLD:
+                cursor.execute(
+                    "UPDATE users SET locked_until = DATEADD(minute, %s, GETUTCDATE()) WHERE id = %s",
+                    (self.LOCKOUT_MINUTES, str(user_id))
+                )
+
+            conn.commit()
+
+    def record_successful_login(self, user_id) -> None:
+        """Reset failed attempts, clear lock, update last_login."""
+        query = """
+            UPDATE users
+            SET failed_login_attempts = 0, locked_until = NULL,
+                last_login = GETUTCDATE(), updated_at = GETUTCDATE()
+            WHERE id = %s
+        """
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(query, (str(user_id),))
+            conn.commit()
+
+    # --- Token blacklist ---
+
+    def blacklist_token(self, jti: str, user_id, expires_at) -> None:
+        """Add a JWT token ID to the blacklist."""
+        query = """
+            INSERT INTO token_blacklist (token_jti, user_id, expires_at)
+            VALUES (%s, %s, %s)
+        """
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(query, (str(jti), str(user_id), expires_at))
+            conn.commit()
+
+    def is_token_blacklisted(self, jti: str) -> bool:
+        """Check if a JWT token ID is blacklisted."""
+        query = "SELECT 1 FROM token_blacklist WHERE token_jti = %s"
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(query, (str(jti),))
+            return cursor.fetchone() is not None
+
+    def cleanup_expired_blacklist(self) -> int:
+        """Remove expired tokens from blacklist. Returns count deleted."""
+        query = "DELETE FROM token_blacklist WHERE expires_at < GETUTCDATE()"
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(query)
+            deleted = cursor.rowcount
+            conn.commit()
+            return deleted
+
+    # --- Auth audit log ---
+
+    def log_auth_event(self, user_id, email: str, action: str,
+                       ip_address: Optional[str] = None,
+                       user_agent: Optional[str] = None,
+                       metadata: Optional[dict] = None) -> None:
+        """Insert an auth audit log entry."""
+        query = """
+            INSERT INTO auth_audit_log
+            (user_id, email, action, ip_address, user_agent, metadata)
+            VALUES (%s, %s, %s, %s, %s, %s)
+        """
+        metadata_json = json.dumps(metadata, ensure_ascii=False) if metadata else None
+
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(query, (
+                str(user_id) if user_id else None,
+                str(email),
+                str(action),
+                str(ip_address) if ip_address else None,
+                str(user_agent) if user_agent else None,
+                metadata_json,
+            ))
+            conn.commit()
 
 
 # Singleton para uso global (thread-safe)

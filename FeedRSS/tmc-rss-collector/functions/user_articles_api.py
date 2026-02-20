@@ -41,9 +41,10 @@ async def list_user_articles_handler(req: func.HttpRequest) -> func.HttpResponse
         if page < 1:
             page = 1
 
-        # Buscar artigos
+        # Buscar artigos (scoped por user_id)
         db = get_db()
         articles, total = db.get_user_articles(
+            user_id=req.user["id"],
             page=page,
             limit=limit,
             status=status,
@@ -101,7 +102,7 @@ async def get_user_article_handler(req: func.HttpRequest) -> func.HttpResponse:
             )
 
         db = get_db()
-        article = db.get_user_article_by_id(article_id)
+        article = db.get_user_article_by_id(article_id, user_id=req.user["id"])
 
         if not article:
             return func.HttpResponse(
@@ -184,9 +185,9 @@ async def create_user_article_handler(req: func.HttpRequest) -> func.HttpRespons
             generation_config=body.get('generationConfig')
         )
 
-        # Criar no banco
+        # Criar no banco (com user_id do usuario autenticado)
         db = get_db()
-        article = db.create_user_article(article_data)
+        article = db.create_user_article(article_data, user_id=req.user["id"])
 
         logger.info(f"Created user article: {article.id} - {article.title[:50]}")
 
@@ -262,9 +263,9 @@ async def update_user_article_handler(req: func.HttpRequest) -> func.HttpRespons
             generation_config=body.get('generationConfig')
         )
 
-        # Atualizar no banco
+        # Atualizar no banco (scoped por user_id)
         db = get_db()
-        article = db.update_user_article(article_id, update_data)
+        article = db.update_user_article(article_id, update_data, user_id=req.user["id"])
 
         if not article:
             return func.HttpResponse(
@@ -312,9 +313,9 @@ async def delete_user_article_handler(req: func.HttpRequest) -> func.HttpRespons
                 mimetype="application/json"
             )
 
-        # Deletar no banco
+        # Deletar no banco (scoped por user_id)
         db = get_db()
-        deleted = db.delete_user_article(article_id)
+        deleted = db.delete_user_article(article_id, user_id=req.user["id"])
 
         if not deleted:
             return func.HttpResponse(

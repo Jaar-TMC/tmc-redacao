@@ -56,6 +56,11 @@ class AppConfig:
     rate_limit_generate: float = 0.5
     rate_limit_burst_generate: int = 3
 
+    # JWT Authentication
+    jwt_secret_key: str = ""
+    jwt_access_token_minutes: int = 60
+    jwt_refresh_token_days: int = 7
+
     @property
     def has_llm_key(self) -> bool:
         return bool(self.anthropic_api_key or self.azure_ai_api_key)
@@ -120,6 +125,10 @@ def load_config() -> AppConfig:
         # Rate limits
         rate_limit_generate=_float_env("RATE_LIMIT_GENERATE", 0.5),
         rate_limit_burst_generate=_int_env("RATE_LIMIT_BURST_GENERATE", 3),
+        # JWT
+        jwt_secret_key=os.environ.get("JWT_SECRET_KEY", ""),
+        jwt_access_token_minutes=_int_env("JWT_ACCESS_TOKEN_MINUTES", 60),
+        jwt_refresh_token_days=_int_env("JWT_REFRESH_TOKEN_DAYS", 7),
     )
 
     import logging
@@ -156,6 +165,13 @@ def load_config() -> AppConfig:
         log.warning(
             "PRODUCTION_SAFETY_MODE=true but CORS_ALLOWED_ORIGINS not set. "
             "Set to specific origins (e.g. https://app.tmc.com.br) for production."
+        )
+
+    # Validate JWT secret in production
+    if config.production_safety_mode and not config.jwt_secret_key:
+        log.warning(
+            "PRODUCTION_SAFETY_MODE=true but JWT_SECRET_KEY not set. "
+            "Authentication will not work in production."
         )
 
     return config

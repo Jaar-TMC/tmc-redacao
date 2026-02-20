@@ -26,6 +26,9 @@ from .event_signature import (
     EventSignature, EventSignatureCreate, EventSignatureUpdate, EventSignatureBase,
     EventSignatureResponse, normalize_entity, entities_match, calculate_entity_similarity
 )
+from .user import (
+    User, UserLogin, UserCreate, UserUpdate, UserBase, UserWithPassword
+)
 
 __all__ = [
     # Source
@@ -81,4 +84,11 @@ __all__ = [
     'normalize_entity',
     'entities_match',
     'calculate_entity_similarity',
+    # User (Auth)
+    'User',
+    'UserLogin',
+    'UserCreate',
+    'UserUpdate',
+    'UserBase',
+    'UserWithPassword',
 ]
