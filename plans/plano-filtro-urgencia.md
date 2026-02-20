@@ -7,10 +7,11 @@ O redator jornalistico precisa identificar rapidamente quais noticias sao **quen
 
 ### Contexto Atual
 - **FilterBar** atual: Search, Tema, Tag, Origem (4 filtros)
-- **FiltersContext**: ja possui campo `period: 'today'` (declarado mas NAO implementado)
+- **FiltersContext**: ja possui campo `period: 'today'` (declarado mas NAO implementado no frontend)
 - **ArticleCard**: ja exibe timestamp relativo (`ha 2h`, `ha 30min`, etc.)
-- **API**: nao envia parametro de periodo atualmente
-- **IntervalFilter** existe para videos (transcricao), mas nao para artigos do feed
+- **Backend `get_articles()`**: ja aceita parametro `period` com valores `today/week/month` usando `DATEADD`
+- **Frontend `api.js`**: NAO envia `period` atualmente (campo ignorado)
+- **Ordenacao**: Backend ja ordena por `published_at DESC` (mais recente primeiro)
 
 ---
 
@@ -26,108 +27,247 @@ O redator jornalistico precisa identificar rapidamente quais noticias sao **quen
 
 Baseado no workflow jornalistico real, onde urgencia decai exponencialmente:
 
-| Cluster | Intervalo | Label | Icone | Cor | Justificativa |
-|---------|-----------|-------|-------|-----|---------------|
-| **AGORA** | 0-1h | `Agora` | Flame | Vermelho `#EF4444` | Breaking news, publicacao imediata |
-| **RECENTE** | 1-3h | `Recente` | Zap | Laranja `#F59E0B` | Ainda quente, janela de oportunidade |
-| **HOJE** | 3-8h | `Hoje` | Clock | Azul `#2563EB` | Noticias do dia, analise possivel |
-| **MAIS CEDO** | 8-24h | `Mais cedo` | History | Cinza `#6B7280` | Materia de ontem/madrugada, ainda relevante |
-| **TODAS** | 0-24h | `Todas` | - | Default | Sem filtro temporal (estado padrao) |
+| Cluster | Intervalo | Label | Icone | Cor | API param | Justificativa |
+|---------|-----------|-------|-------|-----|-----------|---------------|
+| **TODAS** | 0-24h | `Todas` | - | Default `#6B7280` | `urgency=null` | Sem filtro temporal (estado padrao) |
+| **AGORA** | 0-1h | `Agora` | Flame | Vermelho `#EF4444` | `urgency=1` | Breaking news, publicacao imediata |
+| **RECENTE** | 1-3h | `Recente` | Zap | Laranja `#F59E0B` | `urgency=3` | Ainda quente, janela de oportunidade |
+| **HOJE** | 3-8h | `Hoje` | Sun | Azul `#2563EB` | `urgency=8` | Noticias do dia, analise possivel |
+| **MAIS CEDO** | 8-24h | `Mais cedo` | History | Cinza `#6B7280` | `urgency=24` | Materia de ontem/madrugada, ainda relevante |
+
+> **Nota sobre icones**: O chip "Hoje" usa `Sun` (nao `Clock`) para evitar duplicidade com o label "Frescor" que usa `Clock`.
 
 ### Racional dos Clusters:
-- **0-1h (Agora)**: A "golden hour" do jornalismo. A noticia acabou de sair. Redatores precisam agir RAPIDO. Textos de agencias, breaking news.
+- **0-1h (Agora)**: A "golden hour" do jornalismo. A noticia acabou de sair. Redatores precisam agir RAPIDO.
 - **1-3h (Recente)**: Ainda ha tempo de cobrir com originalidade. Janela ideal para criacao de conteudo baseado em fontes multiplas.
-- **3-8h (Hoje)**: Noticias da manha/tarde corrente. Ideal para analises mais aprofundadas e matérias de contexto.
-- **8-24h (Mais cedo)**: Matérias que podem já ter sido cobertas pela concorrência, mas ainda servem para artigos de análise, opinião ou retrospectiva.
+- **3-8h (Hoje)**: Noticias da manha/tarde corrente. Ideal para analises mais aprofundadas e materias de contexto.
+- **8-24h (Mais cedo)**: Materias que podem ja ter sido cobertas pela concorrencia, mas ainda servem para artigos de analise, opiniao ou retrospectiva.
+
+---
+
+## Abordagem Tecnica: Filtragem Server-Side com Paginacao
+
+### Decisao: **Server-side filtering + server-side pagination**
+
+O filtro de urgencia e enviado como parametro para a API. O backend filtra por hora e retorna paginado, sempre do mais recente pro mais antigo.
+
+**Por que server-side?**
+1. A paginacao existente e server-side (20 por pagina) - filtrar client-side daria contagens erradas
+2. O backend ja tem infra para filtros (`period` param no `get_articles()`)
+3. Contagens precisam refletir o total real, nao apenas a pagina atual
+4. Performance consistente independente do volume de artigos
+
+### Mudancas no Backend
+
+#### 1. `database.py` - `get_articles()` (linha ~236)
+Estender o parametro `period` para aceitar valores de horas:
+
+```python
+# Novo: suporte a urgency (horas)
+if period:
+    if period == 'today':
+        conditions.append("a.published_at >= DATEADD(day, -1, GETUTCDATE())")
+    elif period == 'week':
+        conditions.append("a.published_at >= DATEADD(week, -1, GETUTCDATE())")
+    elif period == 'month':
+        conditions.append("a.published_at >= DATEADD(month, -1, GETUTCDATE())")
+    else:
+        # Tentar interpretar como numero de horas (urgency filter)
+        try:
+            hours = int(period)
+            if 1 <= hours <= 24:
+                conditions.append("a.published_at >= DATEADD(hour, -%s, GETUTCDATE())")
+                params.append(hours)
+        except ValueError:
+            pass  # Ignorar valores invalidos
+```
+
+**Cluster "Mais cedo" (8-24h)**: Precisa de range `BETWEEN`:
+```python
+# Para urgency com range (ex: 8-24h = min_hours=8, max_hours=24)
+if urgency_min and urgency_max:
+    conditions.append("""
+        a.published_at >= DATEADD(hour, -%s, GETUTCDATE())
+        AND a.published_at < DATEADD(hour, -%s, GETUTCDATE())
+    """)
+    params.extend([urgency_max, urgency_min])
+```
+
+**Alternativa mais simples**: Usar apenas `max_hours` e fazer ranges no parametro:
+- `urgency=1` → ultimas 1 hora (0-1h)
+- `urgency=3` → ultimas 3 horas (0-3h, inclui "Agora")
+- `urgency=8` → ultimas 8 horas (0-8h, inclui "Agora" e "Recente")
+- `urgency=24` → ultimas 24 horas (0-24h, tudo)
+- sem parametro → sem filtro (= todas, default atual)
+
+**DECISAO**: Usar abordagem simples com `max_hours` apenas. Cada chip filtra "tudo ate X horas atras". Isso e suficiente porque o redator tipicamente quer "me mostre o que ha de mais fresco" (0-1h) ou "me mostre as noticias de hoje" (0-8h), nao "mostre APENAS entre 8h e 24h atras".
+
+**Mas se o redator quiser ver "Mais cedo" (8-24h)?** Na verdade, o redator quer "todas" nesse caso - simplesmente nao aplica filtro. O cluster "Mais cedo" funciona melhor como **informacao visual** (badge no chip mostrando quantas tem nesse range) do que como filtro exclusivo. Assim:
+
+| Chip | Clique filtra para | O que mostra |
+|------|-------------------|-------------|
+| Todas | sem filtro | Todos os artigos 0-24h |
+| Agora | `max_hours=1` | Apenas 0-1h |
+| Recente | `max_hours=3` | 0-3h (inclui "Agora") |
+| Hoje | `max_hours=8` | 0-8h (inclui anteriores) |
+| Mais cedo | sem filtro (= Todas) | Todos 0-24h |
+
+**REVISAO**: Isso torna "Mais cedo" e "Todas" identicos. Melhor: **remover "Mais cedo" como filtro** e manter apenas 3 filtros + "Todas":
+
+| Chip | API param | Resultado |
+|------|-----------|-----------|
+| **Todas** | nenhum | Todos 0-24h (default) |
+| **Agora** | `max_hours=1` | Ultimas 1h |
+| **Recente** | `max_hours=3` | Ultimas 3h |
+| **Hoje** | `max_hours=8` | Ultimas 8h |
+
+Isso e mais limpo: 4 opcoes, cada uma e um subconjunto progressivo.
+
+#### 2. `articles_api.py` - `list_articles_handler()`
+Adicionar parsing do novo parametro:
+
+```python
+# Existente
+period = req.params.get('period')
+
+# Novo: urgency como alias para max_hours
+max_hours = req.params.get('max_hours')
+if max_hours:
+    try:
+        hours = int(max_hours)
+        if 1 <= hours <= 24:
+            period = str(hours)  # Reutiliza o campo period internamente
+    except ValueError:
+        pass
+```
+
+#### 3. `api.js` - `getArticles()`
+Adicionar parametro `max_hours`:
+
+```javascript
+export async function getArticles(params = {}, options = {}) {
+  const queryParams = new URLSearchParams();
+  // ... existente ...
+  if (params.max_hours) queryParams.append('max_hours', params.max_hours.toString());
+  // ...
+}
+```
+
+### Contagens por Cluster (Endpoint Separado)
+
+Para mostrar contagens nos chips **sem re-fetch a cada troca**, adicionar endpoint leve:
+
+#### `GET /api/articles/counts?group_by=urgency`
+
+```python
+# Retorna contagens por cluster de urgencia
+# Query unica e eficiente com CASE WHEN
+query = """
+    SELECT
+        SUM(CASE WHEN published_at >= DATEADD(hour, -1, GETUTCDATE()) THEN 1 ELSE 0 END) as now_count,
+        SUM(CASE WHEN published_at >= DATEADD(hour, -3, GETUTCDATE()) THEN 1 ELSE 0 END) as recent_count,
+        SUM(CASE WHEN published_at >= DATEADD(hour, -8, GETUTCDATE()) THEN 1 ELSE 0 END) as today_count,
+        COUNT(*) as total_count
+    FROM collected_articles a
+    JOIN sources s ON a.source_id = s.id
+    WHERE a.published_at >= DATEADD(day, -1, GETUTCDATE())
+    -- Aplicar mesmos filtros de conteudo (category, source, search, tag)
+"""
+```
+
+Response:
+```json
+{
+  "counts": {
+    "now": 12,      // 0-1h
+    "recent": 28,   // 0-3h (inclui now)
+    "today": 45,    // 0-8h (inclui recent)
+    "all": 67       // 0-24h
+  }
+}
+```
+
+**Alternativa mais simples**: Retornar as contagens junto com a response de `GET /api/articles` como campo extra. Assim nao precisa de endpoint separado:
+
+```json
+{
+  "items": [...],
+  "total": 67,
+  "page": 1,
+  "pages": 4,
+  "urgency_counts": {
+    "now": 12,
+    "recent": 28,
+    "today": 45,
+    "all": 67
+  }
+}
+```
+
+**DECISAO**: Incluir `urgency_counts` na response existente de `GET /api/articles`. Uma unica query SQL adicional (ou subquery) e mais simples que um endpoint separado.
 
 ---
 
 ## Localizacao na Interface
 
-### Posicao: Abaixo da FilterBar, acima do grid de artigos
+### Posicao: Dentro da FilterBar como segunda linha
+
+Os chips ficam **dentro** do container branco da FilterBar, como segunda linha separada por um divisor sutil. Isso mantem tudo no mesmo "card" e evita fragmentacao visual.
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
-│ [Busca________________________]  [Tema▼]  [Tag▼]  [Origem▼]        │  ← FilterBar existente
-├─────────────────────────────────────────────────────────────────────┤
-│                                                                     │
-│  🕐 Frescor:  [Todas]  [🔥 Agora]  [⚡ Recente]  [🕐 Hoje]  [📋 Mais cedo] │  ← NOVO: Urgency Chips
-│                                                                     │
-│  Mostrando 45 matérias • Última atualização há 5 min               │  ← Counter + refresh info
-│                                                                     │
-├─────────────────────────────────────────────────────────────────────┤
-│  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐           │
-│  │  Card 1  │  │  Card 2  │  │  Card 3  │  │  Card 4  │           │  ← Article Grid
-│  │  🔥 2min │  │  ⚡ 1h30 │  │  🕐 5h   │  │  📋 12h  │           │
-│  └──────────┘  └──────────┘  └──────────┘  └──────────┘           │
+│ [Busca________________________]  [Tema▼]  [Tag▼]  [Origem▼]        │  ← Linha 1: filtros de conteudo
+│ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─  │  ← Divisor sutil (border-t dashed)
+│ 🕐 [Todas]  [🔥 Agora]  [⚡ Recente]  [☀ Hoje]                    │  ← Linha 2: filtro temporal
+└─────────────────────────────────────────────────────────────────────┘
+  45 matérias encontradas                                               ← Counter fora, antes do grid
+┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐
+│  Card 1  │  │  Card 2  │  │  Card 3  │  │  Card 4  │                ← Article Grid
+└──────────┘  └──────────┘  └──────────┘  └──────────┘
 ```
 
-### Por que esta posicao?
-1. **Hierarquia de filtros**: Filtros de conteudo (tema, tag, origem) ficam na barra principal. Filtro temporal fica em uma segunda linha porque e uma **dimensao diferente** de filtragem.
-2. **Scan visual**: O olho desce naturalmente - filtros > urgencia > artigos.
-3. **Nao poluir a FilterBar**: A FilterBar ja tem 4 elementos. Adicionar mais um dropdown quebraria o ritmo visual.
+### Por que dentro da FilterBar?
+1. **Mesma familia visual** - o container `bg-white rounded-xl border` ja existe
+2. **Sem espaco extra** entre FilterBar e grid
+3. **Coesao** - todos os filtros num so lugar, separados por dimensao (conteudo vs tempo)
 
 ---
 
 ## Especificacao Visual Detalhada
 
-### Urgency Chips Bar
+### Urgency Chips - Layout
 
 ```
-┌──────────────────────────────────────────────────────────────────────────────────┐
-│                                                                                  │
-│  🕐  Frescor:   ┌─────────┐  ┌───────────────┐  ┌──────────────┐  ┌───────────┐  ┌──────────────┐  │
-│                  │  Todas  │  │  🔥 Agora (12)│  │ ⚡ Recente(8)│  │ 🕐 Hoje(20)│  │📋 Mais cedo(5)│  │
-│                  └─────────┘  └───────────────┘  └──────────────┘  └───────────┘  └──────────────┘  │
-│                                                                                  │
-│  45 matérias encontradas                                                         │
-│                                                                                  │
-└──────────────────────────────────────────────────────────────────────────────────┘
+┌────────────────────────────────────────────────────────────────────────┐
+│ [Busca________________________]  [Tema▼]  [Tag▼]  [Origem▼]           │
+│                                                                        │
+│ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─   │
+│                                                                        │
+│ 🕐  ┌─────────┐  ┌───────────────┐  ┌──────────────┐  ┌───────────┐  │
+│     │  Todas  │  │  🔥 Agora (12)│  │ ⚡ Recente(28)│  │ ☀ Hoje(45)│  │
+│     └─────────┘  └───────────────┘  └──────────────┘  └───────────┘  │
+│                                                                        │
+└────────────────────────────────────────────────────────────────────────┘
 ```
 
-### Chip Individual - Estados
+### Chip Individual - Estados (Tailwind classes)
 
-```css
-/* Default (nao selecionado) */
-.chip-default {
-  background: white;
-  border: 1px solid #E5E7EB;    /* light-gray */
-  color: #6B7280;               /* medium-gray */
-  border-radius: 9999px;        /* full rounded */
-  padding: 6px 14px;
-  font-size: 13px;
-  font-weight: 500;
-}
-
-/* Hover */
-.chip-hover {
-  border-color: var(--chip-color);
-  color: var(--chip-color);
-  background: var(--chip-color-10);  /* 10% opacity */
-}
-
-/* Active/Selected */
-.chip-active {
-  background: var(--chip-color);
-  border-color: var(--chip-color);
-  color: white;
-  font-weight: 600;
-  box-shadow: 0 2px 8px var(--chip-color-25);  /* glow sutil */
-}
+```
+Default:     bg-white border border-light-gray text-medium-gray rounded-full px-3.5 py-1.5 text-sm font-medium
+Hover:       border-{chip-color} text-{chip-color} bg-{chip-color}/10
+Active:      bg-{chip-color} border-{chip-color} text-white font-semibold shadow-sm
 ```
 
 ### Cores por Cluster
 
-| Cluster | --chip-color | Hover BG | Active BG | Badge |
-|---------|-------------|----------|-----------|-------|
-| Todas | `#6B7280` | `#F3F4F6` | `#6B7280` | - |
-| Agora | `#EF4444` | `#FEF2F2` | `#EF4444` | count vermelho |
-| Recente | `#F59E0B` | `#FFFBEB` | `#F59E0B` | count laranja |
-| Hoje | `#2563EB` | `#EFF6FF` | `#2563EB` | count azul |
-| Mais cedo | `#6B7280` | `#F3F4F6` | `#6B7280` | count cinza |
+| Cluster | Tailwind Active | Tailwind Hover | Count Badge |
+|---------|----------------|----------------|-------------|
+| Todas | `bg-gray-500 text-white` | `hover:bg-gray-50 hover:text-gray-600` | - |
+| Agora | `bg-red-500 text-white` | `hover:bg-red-50 hover:text-red-500` | `bg-red-100 text-red-600` |
+| Recente | `bg-amber-500 text-white` | `hover:bg-amber-50 hover:text-amber-500` | `bg-amber-100 text-amber-600` |
+| Hoje | `bg-blue-500 text-white` | `hover:bg-blue-50 hover:text-blue-500` | `bg-blue-100 text-blue-600` |
 
-### Animacao do Chip "Agora"
-Quando ha matérias na ultima hora, o chip "Agora" deve ter um **pulse sutil** para chamar atencao:
+### Animacao do Chip "Agora" (com prefers-reduced-motion)
 
 ```css
 /* Apenas quando chip "Agora" nao esta selecionado E tem count > 0 */
@@ -139,97 +279,87 @@ Quando ha matérias na ultima hora, o chip "Agora" deve ter um **pulse sutil** p
 .chip-agora-has-items:not(.active) {
   animation: urgency-pulse 2s ease-in-out infinite;
 }
+
+/* WCAG 2.3.3 - Respeitar preferencia do usuario */
+@media (prefers-reduced-motion: reduce) {
+  .chip-agora-has-items:not(.active) {
+    animation: none;
+  }
+}
 ```
 
 ---
 
-## Impacto no ArticleCard
+## Impacto no ArticleCard (Fase 2 - Opcional)
 
-### Badge de Urgencia no Card (Opcional, recomendado)
+### Urgencia no Timestamp (nao como badge separado)
 
-Adicionar um pequeno indicador visual de frescor no canto do card:
+Em vez de adicionar um icone novo no top do card (espaco apertado), integrar a urgencia no **timestamp existente** no footer:
 
 ```
-┌─────────────────────────────────────────┐
-│ [🔥] ☐                    [TECNOLOGIA]  │  ← Icone de urgencia ao lado do checkbox
-│                                          │
-│ Título da matéria que pode               │
-│ ocupar até duas linhas...                │
-│                                          │
-│ [🌐] G1 • há 15 min                     │
-│ #tag1 #tag2 #tag3                        │
-└──────────────────────────────────────────┘
+Footer normal:     [🌐] G1 • há 15 min
+Footer com frescor: [🌐] G1 • 🔥 há 15 min     (icone vermelho inline)
+Footer com frescor: [🌐] G1 • ⚡ há 2h           (icone laranja inline)
+Footer > 3h:       [🌐] G1 • há 5h               (sem icone, normal)
 ```
 
-Regras do badge:
-- **0-1h**: 🔥 (flame icon, vermelho) - pequeno, 16x16px
-- **1-3h**: ⚡ (zap icon, laranja) - pequeno, 16x16px
-- **3-8h**: sem badge (neutral)
-- **8-24h**: sem badge (neutral)
+Regras:
+- **0-1h**: Flame icon vermelho antes do timestamp
+- **1-3h**: Zap icon laranja antes do timestamp
+- **3h+**: Sem icone (comportamento atual)
 
-Apenas os dois clusters mais urgentes ganham badge visual no card, para nao poluir a interface.
+Isso reutiliza espaco existente sem poluir o layout do card.
 
 ---
 
 ## Fluxo de Interacao
 
 ### 1. Estado Inicial
-- Chip "Todas" selecionado (estado padrao)
-- Todos os artigos visiveis, sem filtro temporal
-- Contagem de artigos por cluster calculada client-side usando `publishedAt`
+- Chip "Todas" selecionado (estado padrao, `bg-gray-500 text-white`)
+- API chamada sem `max_hours` → retorna todos os artigos 0-24h paginados
+- Response inclui `urgency_counts` → chips mostram contagens
 
 ### 2. Selecao de Cluster
 ```
 Usuario clica em [🔥 Agora (12)]
   → Chip "Agora" fica ativo (fundo vermelho, texto branco)
-  → Chip "Todas" fica inativo
-  → Grid filtra para mostrar apenas artigos de 0-1h
-  → Counter atualiza: "12 matérias encontradas"
-  → Animacao suave (fade) nos cards que saem/entram
+  → Chip "Todas" fica inativo (volta ao default)
+  → API re-fetch com max_hours=1, page=1
+  → Grid atualiza com artigos de 0-1h, paginados
+  → Counter: "12 matérias encontradas"
   → Paginacao resetada para pagina 1
 ```
 
 ### 3. Deselecao (volta a "Todas")
 ```
 Usuario clica no chip ativo OU clica em "Todas"
-  → Volta ao estado sem filtro temporal
-  → Todos os artigos visiveis novamente
+  → API re-fetch sem max_hours, page=1
+  → Volta ao estado completo
 ```
 
 ### 4. Combinacao com Outros Filtros
-O filtro de urgencia e **combinavel** com os outros filtros:
+Combinavel com todos os filtros existentes:
 ```
-Exemplo: [Tema: Tecnologia] + [🔥 Agora]
-  → Mostra apenas artigos de Tecnologia publicados na ultima hora
-  → Counter: "3 matérias encontradas"
+[Tema: Tecnologia] + [🔥 Agora]
+  → API: category=Tecnologia&max_hours=1&page=1
+  → urgency_counts considera os filtros de conteudo ativos
 ```
 
 ### 5. Estado Vazio
 ```
-Se cluster selecionado tem 0 artigos:
-  → EmptyState: "Nenhuma matéria nas últimas X horas"
-  → Sugestao: "Tente ampliar o intervalo de tempo"
+Se cluster selecionado retorna 0 artigos:
+  → EmptyState com icone do cluster
+  → Mensagem: "Nenhuma matéria na última hora" (ajusta por cluster)
+  → Sugestao: "Tente ampliar o período ou ajustar os filtros"
 ```
 
----
-
-## Abordagem Tecnica: Client-Side vs Server-Side
-
-### Recomendacao: **Filtragem Client-Side** (fase 1)
-
-**Por que?**
-1. Os artigos ja tem `publishedAt` como campo Date no frontend
-2. Sao apenas 24h de artigos (maximo ~200-300), ja carregados
-3. A filtragem por data e uma simples comparacao de timestamps
-4. Nao requer mudancas na API backend
-5. Response time instantaneo (0ms vs ~200ms da API)
-
-**Implementacao**:
-- O filtro de urgencia filtra `articles[]` localmente no `RedacaoPage`
-- As contagens por cluster sao calculadas usando `useMemo` sobre todos os artigos
-- Quando combinado com outros filtros, a urgencia atua como filtro adicional sobre os resultados da API
-
-**Fase 2 (futuro)**: Se necessario, adicionar parametro `hours_ago` na API para filtragem server-side com paginacao.
+### 6. Loading State
+```
+Ao trocar de chip:
+  → Chip selecionado fica ativo imediatamente (feedback instantaneo)
+  → Grid mostra loading overlay (pattern existente do RedacaoPage)
+  → Contagens nos chips mantem valores anteriores ate response chegar
+```
 
 ---
 
@@ -237,51 +367,63 @@ Se cluster selecionado tem 0 artigos:
 
 ### Desktop (>1280px)
 ```
-🕐 Frescor:  [Todas]  [🔥 Agora (12)]  [⚡ Recente (8)]  [🕐 Hoje (20)]  [📋 Mais cedo (5)]
+🕐  [Todas]  [🔥 Agora (12)]  [⚡ Recente (28)]  [☀ Hoje (45)]
 ```
-Todos os chips visíveis em uma linha.
+Todos os chips visiveis com labels completos + contagens.
 
 ### Tablet (768-1280px)
 ```
-🕐 Frescor:  [Todas]  [🔥 Agora (12)]  [⚡ Recente (8)]  [🕐 Hoje (20)]  [📋 Mais cedo (5)]
+[Todas]  [🔥 Agora (12)]  [⚡ Recente (28)]  [☀ Hoje (45)]
 ```
-Mesma disposição, chips menores (padding reduzido, sem label "Frescor").
+Sem icone Clock label. Chips com padding reduzido.
 
 ### Mobile (<768px)
 ```
-[Todas] [🔥 12] [⚡ 8] [🕐 20] [📋 5]
+[Todas] [🔥 12] [⚡ 28] [☀ 45]
 ```
-- Labels abreviados (apenas icone + count)
-- Scroll horizontal se necessario
-- Chips menores
+- Labels omitidos, apenas icone + count
+- Chips menores (`px-2.5 py-1 text-xs`)
+- Se necessario, scroll horizontal (`overflow-x-auto`)
 
 ---
 
 ## Acessibilidade
 
-- `role="radiogroup"` no container dos chips
+- `role="radiogroup"` + `aria-label="Filtrar por frescor"` no container
 - `role="radio"` + `aria-checked` em cada chip
-- `aria-label` descritivo: "Filtrar por matérias publicadas na última hora (12 matérias)"
+- `aria-label` descritivo: ex. "Agora - matérias da última hora, 12 matérias"
 - Navegacao por teclado: Arrow Left/Right entre chips, Enter/Space para selecionar
-- Contraste minimo 4.5:1 em todos os estados
-- `aria-live="polite"` no counter para anunciar mudancas
+- Contraste minimo 4.5:1 em todos os estados (verificado: branco sobre #EF4444 = 4.63:1 OK)
+- `aria-live="polite"` no counter de materias para anunciar mudancas
+- `@media (prefers-reduced-motion: reduce)` para desativar pulse animation
+- Focus visible ring (`:focus-visible`) em todos os chips
 
 ---
 
 ## Componentes a Criar/Modificar
 
 ### Novos:
-1. **`UrgencyChips.jsx`** - Componente dos chips de urgencia (novo)
-2. **`useUrgencyFilter.js`** - Hook para logica de filtragem temporal (novo, opcional)
+1. **`UrgencyChips.jsx`** - Componente dos chips de urgencia
+   - Props: `counts`, `activeUrgency`, `onUrgencyChange`
+   - Renderiza 4 chips com icones, labels, contagens
+   - Gerencia estados visuais e acessibilidade
 
-### Modificar:
-3. **`FiltersContext.jsx`** - Adicionar campo `urgency` (null | 'now' | 'recent' | 'today' | 'earlier')
-4. **`RedacaoPage.jsx`** - Integrar UrgencyChips + filtragem client-side no useMemo
-5. **`ArticleCard.jsx`** - Adicionar badge de urgencia (opcional, fase 2)
+### Modificar (Frontend):
+2. **`FiltersContext.jsx`** - Adicionar campo `urgency` ao state
+   - Tipo: `null | 1 | 3 | 8` (horas)
+   - Default: `null` (= "Todas")
+   - Incluir no `resetFilters()` como `urgency: null`
+3. **`FilterBar.jsx`** - Adicionar UrgencyChips como segunda linha dentro do container
+4. **`RedacaoPage.jsx`** - Incluir `filters.urgency` no useEffect de fetch + enviar `max_hours` para API
+5. **`api.js`** - Adicionar `max_hours` ao `getArticles()`
+
+### Modificar (Backend):
+6. **`database.py`** - Estender `get_articles()` para aceitar `max_hours` (int)
+   - Adicionar `urgency_counts` query (SUM com CASE WHEN)
+7. **`articles_api.py`** - Parsear `max_hours` param e retornar `urgency_counts` na response
 
 ### NAO modificar:
-- `FilterBar.jsx` - Os chips ficam FORA da FilterBar, como componente separado
-- `api.js` - Filtragem e client-side, sem mudanca na API
+- `ArticleCard.jsx` - Badge no timestamp e fase 2, nao bloqueia o MVP
 
 ---
 
@@ -290,10 +432,12 @@ Mesma disposição, chips menores (padding reduzido, sem label "Frescor").
 | Decisao | Escolha | Alternativa descartada | Motivo |
 |---------|---------|----------------------|--------|
 | Formato | Chips horizontais | Dropdown/Select | Visibilidade imediata, 1 clique |
-| Posicao | Abaixo da FilterBar | Dentro da FilterBar | Separacao de dimensoes de filtro |
-| Clusters | 4 + "Todas" | 6 clusters de 4h | Jornalismo tem urgencia exponencial, nao linear |
-| Filtragem | Client-side | Server-side | Performance, simplicidade, artigos ja carregados |
-| Selecao | Single-select | Multi-select | Simplicidade, caso de uso claro |
-| Contagem | Badge no chip | Sem contagem | Feedback quantitativo essencial |
-| Badge no card | Apenas 0-1h e 1-3h | Todos os clusters | Evitar poluicao visual |
-| Pulse | Apenas "Agora" | Nenhum | Chamar atencao para breaking news |
+| Posicao | Dentro da FilterBar (2a linha) | Fora, separado | Coesao visual, mesmo container |
+| Clusters | 3 + "Todas" | 4 + "Todas" com "Mais cedo" | "Mais cedo" e identico a "Todas" na pratica |
+| Filtragem | **Server-side** | Client-side | Contagens corretas, paginacao consistente |
+| Contagens | Na response de /articles | Endpoint separado | Menos requests, dados sempre sincronizados |
+| Selecao | Single-select (radiogroup) | Multi-select | Simplicidade, urgencia e hierarquica |
+| Icone "Hoje" | Sun | Clock | Evitar duplicidade com label "Frescor" |
+| Badge no card | Inline no timestamp (fase 2) | Icone novo no top | Reutiliza espaco, nao polui layout |
+| Pulse | Apenas "Agora" + reduced-motion | Sem animacao | Atencao para breaking news, acessivel |
+| API param | `max_hours` (int) | Estender `period` string | Mais explicito, sem ambiguidade |
