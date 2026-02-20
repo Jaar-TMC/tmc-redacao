@@ -83,9 +83,10 @@ const RevisarPage = () => {
 
   // Pipeline phases with realistic timing based on production measurements
   const PHASES = useMemo(() => [
-    { id: 'enrichment', label: 'Enriquecimento', description: 'Buscando fontes e verificando fatos...', Icon: Search, targetProgress: 18, durationMs: 7000 },
-    { id: 'generation', label: 'Geração', description: 'Escrevendo matéria com IA Claude...', Icon: Sparkles, targetProgress: 62, durationMs: 20000 },
-    { id: 'verification', label: 'Verificação', description: 'Conferindo claims e informações...', Icon: ShieldCheck, targetProgress: 88, durationMs: 12000 },
+    { id: 'enrichment', label: 'Enriquecimento', description: 'Buscando fontes e verificando fatos...', Icon: Search, targetProgress: 15, durationMs: 7000 },
+    { id: 'generation', label: 'Geração', description: 'Escrevendo matéria com IA Claude...', Icon: Sparkles, targetProgress: 50, durationMs: 20000 },
+    { id: 'verification', label: 'Verificação', description: 'Conferindo claims e informações...', Icon: ShieldCheck, targetProgress: 70, durationMs: 12000 },
+    { id: 'refinement', label: 'Refinamento', description: 'Corrigindo e aprimorando automaticamente...', Icon: Sparkles, targetProgress: 90, durationMs: 15000 },
     { id: 'finishing', label: 'Finalização', description: 'Aplicando SEO e revisão final...', Icon: CheckCircle2, targetProgress: 95, durationMs: 3000 },
   ], []);
 
@@ -338,6 +339,8 @@ const RevisarPage = () => {
           regenerated: result.regenerated || false,
           regenerationImprovement: result.regeneration_improvement || null,
           correlationId: result.correlation_id || null,
+          // Quality Loop result
+          qualityLoop: result.quality_loop || null,
         });
       }
 

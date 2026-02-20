@@ -81,6 +81,7 @@ const CriarPostPage = () => {
   const notaDisclaimer = resultado?.notaDisclaimer || null;
   const regenerated = resultado?.regenerated || false;
   const correlationId = resultado?.correlationId || null;
+  const qualityLoopPassed = resultado?.qualityLoop?.quality_loop_passed ?? false;
   const [showSchemaOrg, setShowSchemaOrg] = useState(false);
   const [schemaCopied, setSchemaCopied] = useState(false);
 
@@ -831,16 +832,10 @@ Com esse desempenho, o Brasil reafirma sua posição estratégica no cenário gl
                   Bloqueado
                 </span>
               )}
-              {publicationStatus === 'draft_review' && (
+              {publicationStatus === 'draft_review' && !qualityLoopPassed && (
                 <span className="text-xs px-2 py-1 rounded-full bg-amber-100 text-amber-700 font-medium flex items-center gap-1">
                   <AlertTriangle size={12} />
                   Revisao necessaria
-                </span>
-              )}
-              {publicationStatus === 'ready_for_review' && (
-                <span className="text-xs px-2 py-1 rounded-full bg-green-100 text-green-700 font-medium flex items-center gap-1">
-                  <ShieldCheck size={12} />
-                  Verificado
                 </span>
               )}
               <button
@@ -925,8 +920,33 @@ Com esse desempenho, o Brasil reafirma sua posição estratégica no cenário gl
           </div>
         )}
 
-        {/* v7: Verification Banner (now active) */}
-        {verificationData && (
+        {/* Quality Loop failed — simple, non-technical message */}
+        {resultado?.qualityLoop && !qualityLoopPassed && !publishBlocked && (
+          <div className="bg-amber-50 border-t border-amber-200 px-4 py-3">
+            <div className="flex items-start gap-3">
+              <AlertTriangle size={18} className="text-amber-500 mt-0.5 flex-shrink-0" />
+              <div className="flex-1">
+                <p className="text-sm font-medium text-amber-800">
+                  A materia precisa de revisao manual
+                </p>
+                <p className="text-xs text-amber-600 mt-1">
+                  A IA nao conseguiu resolver todos os pontos automaticamente. Revise o texto antes de publicar.
+                </p>
+                <div className="flex gap-2 mt-2">
+                  <button
+                    onClick={() => navigate('/criar/texto-base')}
+                    className="text-xs px-3 py-1.5 bg-white text-amber-700 border border-amber-300 rounded font-medium hover:bg-amber-50"
+                  >
+                    Adicionar mais fontes
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* v7: Verification Banner — ONLY show when quality loop did NOT pass */}
+        {verificationData && !qualityLoopPassed && (
           <div className="px-4 pt-3">
             <VerificationBanner
               verification={verificationData}
@@ -938,8 +958,8 @@ Com esse desempenho, o Brasil reafirma sua posição estratégica no cenário gl
           </div>
         )}
 
-        {/* v7: Readability display */}
-        {readabilityData && (
+        {/* v7: Readability display — ONLY show when quality loop did NOT pass */}
+        {readabilityData && !qualityLoopPassed && (
           <div className="px-4 pb-1">
             <div className={`text-xs flex items-center gap-3 px-3 py-2 rounded border ${
               readabilityData.flesch_score >= 60 ? 'bg-green-50 border-green-200 text-green-700' :
@@ -957,8 +977,8 @@ Com esse desempenho, o Brasil reafirma sua posição estratégica no cenário gl
           </div>
         )}
 
-        {/* v7: Enrichment degradation warning */}
-        {enrichmentDegraded && (
+        {/* v7: Enrichment degradation warning — ONLY show when quality loop did NOT pass */}
+        {enrichmentDegraded && !qualityLoopPassed && (
           <div className="px-4 pb-1">
             <div className="text-xs px-3 py-2 rounded border bg-amber-50 border-amber-200 text-amber-700 flex items-center gap-2">
               <AlertTriangle size={14} />
@@ -996,15 +1016,7 @@ Com esse desempenho, o Brasil reafirma sua posição estratégica no cenário gl
           </div>
         )}
 
-        {/* v7.1: Auto-regeneration notice */}
-        {regenerated && (
-          <div className="px-4 pb-1">
-            <div className="text-xs px-3 py-2 rounded border bg-purple-50 border-purple-200 text-purple-700 flex items-center gap-2">
-              <Sparkles size={14} />
-              <span>Materia foi regenerada automaticamente para corrigir fabricacoes detectadas</span>
-            </div>
-          </div>
-        )}
+        {/* v7.1: Regeneration notice — HIDDEN (quality loop handles this internally) */}
 
         {/* v7.1: Schema.org preview */}
         {schemaOrg && (

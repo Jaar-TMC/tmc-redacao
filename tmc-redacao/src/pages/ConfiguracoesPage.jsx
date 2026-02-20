@@ -1,12 +1,14 @@
 import { useState, useEffect } from 'react';
 import { NavLink, Outlet, useLocation } from 'react-router-dom';
-import { Newspaper, TrendingUp, User, Plug, Settings, Menu, X } from 'lucide-react';
+import { Newspaper, Users, Menu, X } from 'lucide-react';
 import { useOnboarding, TOUR_IDS } from '../components/onboarding';
+import usePermissions from '../hooks/usePermissions';
 
 const ConfiguracoesPage = () => {
   const location = useLocation();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const { shouldShowTour, startTour } = useOnboarding();
+  const { canManageUsers } = usePermissions();
 
   // Auto-trigger CONFIG tour for first-time visitors
   useEffect(() => {
@@ -18,10 +20,7 @@ const ConfiguracoesPage = () => {
 
   const menuItems = [
     { path: '/configuracoes/buscador', label: 'Buscador de Notícias', icon: Newspaper },
-    { path: '/configuracoes/trends', label: 'Google Trends', icon: TrendingUp },
-    { path: '/configuracoes/perfil', label: 'Perfil', icon: User },
-    { path: '/configuracoes/integracoes', label: 'Integrações', icon: Plug },
-    { path: '/configuracoes/preferencias', label: 'Preferências', icon: Settings }
+    ...(canManageUsers ? [{ path: '/configuracoes/usuarios', label: 'Usuários', icon: Users }] : []),
   ];
 
   const currentMenuItem = menuItems.find(item => item.path === location.pathname);
@@ -75,9 +74,7 @@ const ConfiguracoesPage = () => {
                 const isActive = location.pathname === item.path;
                 const tourAttr = item.path === '/configuracoes/buscador'
                   ? 'config-buscador'
-                  : item.path === '/configuracoes/trends'
-                    ? 'config-trends'
-                    : undefined;
+                  : undefined;
 
                 return (
                   <NavLink

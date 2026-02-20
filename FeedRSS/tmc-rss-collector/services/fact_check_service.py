@@ -734,6 +734,125 @@ class FactCheckService:
         start = datetime.utcnow() - timedelta(days=EXA_SEARCH_DAYS)
         return start.strftime("%Y-%m-%dT%H:%M:%S.000Z")
 
+    async def verify_claim_with_exa(
+        self,
+        claim: ExtractedClaim,
+        timeout: float = 3.0,
+    ) -> dict:
+        """
+        Verify a specific claim using Exa web search.
+
+        Searches for the claim text, then uses LLM to compare search results
+        with the original claim to determine if it's confirmed, contradicted,
+        or inconclusive.
+
+        Args:
+            claim: The claim to verify
+            timeout: Max seconds for the Exa search
+
+        Returns:
+            dict with keys: verdict (confirmed|contradicted|inconclusive),
+            corrective_instruction (str|None), evidence (str)
+        """
+        try:
+            # Build search query from claim text (first 100 chars)
+            query = claim.text[:100]
+
+            # Search with timeout
+            try:
+                results = await asyncio.wait_for(
+                    self._search_exa(query, num_results=3, max_text=1000),
+                    timeout=timeout,
+                )
+            except (asyncio.TimeoutError, Exception) as e:
+                logger.warning(f"Exa claim search failed for '{query[:50]}': {e}")
+                return {
+                    "verdict": "inconclusive",
+                    "corrective_instruction": f'REMOVER: "{claim.text}"',
+                    "evidence": "",
+                }
+
+            if not results:
+                return {
+                    "verdict": "inconclusive",
+                    "corrective_instruction": f'REMOVER: "{claim.text}"',
+                    "evidence": "",
+                }
+
+            # Combine search results for LLM comparison
+            search_context = "\n".join(
+                f"[{r.get('title', '')}] {r.get('text', '')[:500]}"
+                for r in results[:3]
+            )
+
+            # LLM comparison: is the claim confirmed or contradicted?
+            llm = self._get_llm()
+            system_prompt = "Verificador factual objetivo."
+            comparison_prompt = f"""Compare esta AFIRMACAO com as FONTES encontradas na web.
+
+AFIRMACAO: "{claim.text}"
+
+FONTES:
+{search_context}
+
+Responda em JSON:
+```json
+{{
+  "verdict": "confirmed|contradicted|inconclusive",
+  "correct_data": "Se contradicted, qual e a informacao correta? Null se confirmed/inconclusive",
+  "evidence": "Resumo breve da evidencia encontrada"
+}}
+```
+
+Regras:
+- "confirmed": as fontes CONFIRMAM a afirmacao (dados batem)
+- "contradicted": as fontes CONTRADIZEM a afirmacao (dados diferentes)
+- "inconclusive": as fontes nao falam sobre este assunto especifico"""
+
+            response = await llm.call_api(system_prompt, comparison_prompt, 512)
+            parsed = self._parse_json_response(response)
+
+            if not parsed:
+                return {
+                    "verdict": "inconclusive",
+                    "corrective_instruction": f'REMOVER: "{claim.text}"',
+                    "evidence": "",
+                }
+
+            verdict = parsed.get("verdict", "inconclusive")
+            correct_data = parsed.get("correct_data")
+            evidence = parsed.get("evidence", "")
+
+            if verdict == "confirmed":
+                return {
+                    "verdict": "confirmed",
+                    "corrective_instruction": None,
+                    "evidence": evidence,
+                }
+            elif verdict == "contradicted" and correct_data:
+                return {
+                    "verdict": "contradicted",
+                    "corrective_instruction": (
+                        f'CORRIGIR: "{claim.text}" esta ERRADO. '
+                        f'Informacao correta: {correct_data}'
+                    ),
+                    "evidence": evidence,
+                }
+            else:
+                return {
+                    "verdict": "inconclusive",
+                    "corrective_instruction": f'REMOVER: "{claim.text}"',
+                    "evidence": evidence,
+                }
+
+        except Exception as e:
+            logger.warning(f"Claim verification failed (non-blocking): {e}")
+            return {
+                "verdict": "inconclusive",
+                "corrective_instruction": f'REMOVER: "{claim.text}"',
+                "evidence": "",
+            }
+
     # URL patterns that indicate non-article pages (topic indexes, portals, docs)
     _BAD_URL_PATTERNS = [
         "/topicos/", "/folha-topicos/", "/assuntos/", "/tag/",

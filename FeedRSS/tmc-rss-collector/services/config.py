@@ -46,9 +46,6 @@ class AppConfig:
     # Safety thresholds
     min_source_chars: int = 100
     nota_only_threshold: int = 150
-    max_regeneration_attempts: int = 1
-    regen_fabrication_threshold: int = 2
-
     # CORS
     cors_allowed_origins: str = ""
 
@@ -118,8 +115,6 @@ def load_config() -> AppConfig:
         # Safety
         min_source_chars=_int_env("MIN_SOURCE_CHARS", 100),
         nota_only_threshold=_int_env("NOTA_ONLY_THRESHOLD", 150),
-        max_regeneration_attempts=_int_env("MAX_REGENERATION_ATTEMPTS", 1),
-        regen_fabrication_threshold=_int_env("REGEN_FABRICATION_THRESHOLD", 2),
         # CORS
         cors_allowed_origins=os.environ.get("CORS_ALLOWED_ORIGINS", ""),
         # Rate limits

@@ -8,7 +8,6 @@ import { ArticlesCacheProvider } from './context/ArticlesCacheContext';
 import { OnboardingProvider, OnboardingTour } from './components/onboarding';
 import ProtectedRoute from './components/auth/ProtectedRoute';
 import AuthLoadingScreen from './components/auth/AuthLoadingScreen';
-import PropTypes from 'prop-types';
 
 // Lazy load page components for code splitting
 const RedacaoPage = lazy(() => import('./pages/RedacaoPage'));
@@ -17,7 +16,7 @@ const TranscricaoPage = lazy(() => import('./pages/transcricao/TranscricaoPage')
 const MinhasMaterias = lazy(() => import('./pages/MinhasMaterias'));
 const ConfiguracoesPage = lazy(() => import('./pages/ConfiguracoesPage'));
 const BuscadorPage = lazy(() => import('./pages/config/BuscadorPage'));
-const TrendsPage = lazy(() => import('./pages/config/TrendsPage'));
+const UsuariosPage = lazy(() => import('./pages/config/UsuariosPage'));
 
 // Novo fluxo de criação de matéria (Rework)
 const SelecionarFontePage = lazy(() => import('./pages/criar/index'));
@@ -46,10 +45,7 @@ function DocumentTitleUpdater() {
       '/editar': 'Editar Matéria',
       '/configuracoes': 'Configurações',
       '/configuracoes/buscador': 'Buscador de Notícias - Configurações',
-      '/configuracoes/trends': 'Google Trends - Configurações',
-      '/configuracoes/perfil': 'Perfil - Configurações',
-      '/configuracoes/integracoes': 'Integrações - Configurações',
-      '/configuracoes/preferencias': 'Preferências - Configurações'
+      '/configuracoes/usuarios': 'Usuários - Configurações'
     };
 
     const pageTitle = titles[location.pathname] || 'TMC Redação';
@@ -173,10 +169,7 @@ function AppContent() {
                     <Route path="/configuracoes" element={<ProtectedRoute><ConfiguracoesPage /></ProtectedRoute>}>
                       <Route index element={<Navigate to="/configuracoes/buscador" replace />} />
                       <Route path="buscador" element={<BuscadorPage />} />
-                      <Route path="trends" element={<TrendsPage />} />
-                      <Route path="perfil" element={<PlaceholderPage title="Perfil" />} />
-                      <Route path="integracoes" element={<PlaceholderPage title="Integrações" />} />
-                      <Route path="preferencias" element={<PlaceholderPage title="Preferências" />} />
+                      <Route path="usuarios" element={<ProtectedRoute permission="manage_users"><UsuariosPage /></ProtectedRoute>} />
                     </Route>
 
                     {/* Catch-all: redirect to login if not authenticated, home if authenticated */}
@@ -205,21 +198,5 @@ function App() {
     </ErrorBoundary>
   );
 }
-
-// Placeholder for pages not yet implemented
-function PlaceholderPage({ title }) {
-  return (
-    <div className="flex items-center justify-center h-96">
-      <div className="text-center">
-        <h2 className="text-2xl font-bold text-dark-gray mb-2">{title}</h2>
-        <p className="text-medium-gray">Esta página está em desenvolvimento.</p>
-      </div>
-    </div>
-  );
-}
-
-PlaceholderPage.propTypes = {
-  title: PropTypes.string.isRequired,
-};
 
 export default App;

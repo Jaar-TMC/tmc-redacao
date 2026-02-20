@@ -136,12 +136,6 @@ export const tourSteps = {
       title: 'Buscador de Notícias',
       content: 'Configure as fontes de notícias e feeds RSS monitorados.',
       position: 'bottom'
-    },
-    {
-      target: '[data-tour="config-trends"]',
-      title: 'Google Trends',
-      content: 'Configure os temas para monitoramento de tendências.',
-      position: 'bottom'
     }
   ]
 };

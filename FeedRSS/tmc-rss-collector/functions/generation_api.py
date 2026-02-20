@@ -44,12 +44,16 @@ NOTA_ONLY_THRESHOLD = int(os.environ.get("NOTA_ONLY_THRESHOLD", "150"))
 # Phase 1.2: Production safety mode
 PRODUCTION_SAFETY_MODE = os.environ.get("PRODUCTION_SAFETY_MODE", "true").lower() == "true"
 
-# Phase 2.1: Auto-regeneration on fabrication
-MAX_REGENERATION_ATTEMPTS = int(os.environ.get("MAX_REGENERATION_ATTEMPTS", "1"))
-REGEN_FABRICATION_THRESHOLD = int(os.environ.get("REGEN_FABRICATION_THRESHOLD", "2"))
-
 # Phase 2.3: Temporal decontamination
 DECONTAMINATION_ENABLED = os.environ.get("DECONTAMINATION_ENABLED", "true").lower() == "true"
+
+# Quality Loop Configuration
+QUALITY_LOOP_ENABLED = os.environ.get("QUALITY_LOOP_ENABLED", "true").lower() == "true"
+QUALITY_LOOP_MAX_ATTEMPTS = int(os.environ.get("QUALITY_LOOP_MAX_ATTEMPTS", "3"))
+QUALITY_LOOP_MAX_CLAIM_SEARCHES = int(os.environ.get("QUALITY_LOOP_MAX_CLAIM_SEARCHES", "5"))
+QUALITY_LOOP_FLESCH_THRESHOLD = float(os.environ.get("QUALITY_LOOP_FLESCH_THRESHOLD", "42"))
+QUALITY_LOOP_CONFIDENCE_THRESHOLD = float(os.environ.get("QUALITY_LOOP_CONFIDENCE_THRESHOLD", "0.50"))
+QUALITY_LOOP_NOVEL_ENTITY_THRESHOLD = float(os.environ.get("QUALITY_LOOP_NOVEL_ENTITY_THRESHOLD", "0.60"))
 
 # Enrichment cache (TTL 5 minutes) - avoids redundant Exa calls on regen
 _enrichment_cache = {}
@@ -317,6 +321,125 @@ def evaluate_safety_gates(
         decision.review_reasons.append("Nivel de risco ALTO")
 
     return decision
+
+
+def evaluate_quality_criteria(
+    verification_data: dict,
+    readability_data: dict,
+) -> dict:
+    """
+    Evaluate all quality criteria for the Quality Loop.
+
+    Pure function. Returns which criteria passed/failed with details.
+
+    Args:
+        verification_data: From fact_check_service verify_article
+        readability_data: From compute_readability
+
+    Returns:
+        dict with all_passed (bool), failures (list of criterion dicts)
+    """
+    failures = []
+
+    # 1. Fabrication check
+    fabricated = verification_data.get("fabricated_claims", 0)
+    fabricated_claims_list = [
+        c for c in verification_data.get("claims", [])
+        if (isinstance(c, dict) and c.get("verdict") == "fabricated")
+    ]
+    if fabricated >= 1:
+        failures.append({
+            "criterion": "fabrication",
+            "detail": f"{fabricated} afirmacao(oes) fabricada(s)",
+            "claims": fabricated_claims_list,
+        })
+
+    # 2. Readability check
+    flesch = readability_data.get("flesch_score", 100)
+    if flesch < QUALITY_LOOP_FLESCH_THRESHOLD:
+        failures.append({
+            "criterion": "readability",
+            "detail": f"Flesch {flesch} abaixo do minimo {QUALITY_LOOP_FLESCH_THRESHOLD}",
+            "instruction": (
+                "Reescreva com frases mais curtas (maximo 20 palavras por frase). "
+                "Evite oracoes subordinadas longas. Use vocabulario mais acessivel."
+            ),
+        })
+
+    # 3. Confidence check
+    confidence = verification_data.get("confidence_score", 1.0)
+    is_verified = verification_data.get("is_verified", False)
+    if is_verified and confidence < QUALITY_LOOP_CONFIDENCE_THRESHOLD:
+        failures.append({
+            "criterion": "confidence",
+            "detail": f"Confianca {confidence:.0%} abaixo do minimo {QUALITY_LOOP_CONFIDENCE_THRESHOLD:.0%}",
+            "instruction": (
+                "Restrinja-se APENAS ao material-fonte. "
+                "NAO adicione informacoes externas que nao possam ser verificadas."
+            ),
+        })
+
+    # 4. Novel entities check
+    entity_data = verification_data.get("entity_comparison", {})
+    novel = entity_data.get("novel_entities", [])
+    output_entities = entity_data.get("output_entities", [])
+    if output_entities and len(novel) >= 4:
+        ratio = len(novel) / len(output_entities)
+        if ratio > QUALITY_LOOP_NOVEL_ENTITY_THRESHOLD:
+            failures.append({
+                "criterion": "novel_entities",
+                "detail": f"{len(novel)}/{len(output_entities)} entidades novas ({ratio:.0%})",
+                "instruction": (
+                    "NAO introduza nomes de pessoas, lugares ou organizacoes "
+                    "que nao estejam no texto-fonte original. "
+                    f"Entidades problematicas: {', '.join(novel[:5])}"
+                ),
+            })
+
+    return {
+        "all_passed": len(failures) == 0,
+        "failures": failures,
+    }
+
+
+def build_corrective_instructions(
+    failures: list,
+    exa_corrections: list = None,
+) -> str:
+    """
+    Build a corrective instruction prompt from quality loop failures.
+
+    Combines Exa-verified corrections with readability/confidence instructions
+    into a single prompt section injected into regeneration.
+
+    Args:
+        failures: List of failure dicts from evaluate_quality_criteria
+        exa_corrections: List of corrective instruction strings from Exa claim verification
+
+    Returns:
+        Formatted instruction string for LLM regeneration prompt
+    """
+    parts = ["\n\n## CORRECAO OBRIGATORIA\n"]
+    parts.append("A versao anterior teve problemas que DEVEM ser corrigidos:\n")
+
+    # Exa-verified corrections first (most specific)
+    if exa_corrections:
+        for correction in exa_corrections:
+            parts.append(f"- {correction}")
+
+    # General instructions from other criteria
+    for failure in failures:
+        instruction = failure.get("instruction")
+        if instruction:
+            parts.append(f"- {instruction}")
+
+    parts.append(
+        "\nReescreva o artigo corrigindo TODOS os problemas acima. "
+        "NAO invente informacoes para substituir as removidas. "
+        "Se nao ha informacao suficiente, escreva um texto MAIS CURTO."
+    )
+
+    return "\n".join(parts)
 
 
 # Azure Function Handlers
@@ -602,35 +725,103 @@ async def generate_article_handler(req: func.HttpRequest) -> func.HttpResponse:
             phase_timings["verification_ms"] = int((time.time() - verification_start) * 1000)
 
         # ==============================================================
-        # Phase 2.1: Auto-Regeneration on Fabrication
+        # Phase 4: Quality Loop (replaces Phase 2.1 auto-regeneration)
+        # Evaluates quality criteria, uses Exa to verify/correct claims,
+        # and regenerates until all criteria pass (max 3 attempts).
         # ==============================================================
-        verification_data = result.get("verification", {})
-        fabricated_count = verification_data.get("fabricated_claims", 0)
+        from services.fact_check_service import compute_readability, ExtractedClaim
 
-        if (MAX_REGENERATION_ATTEMPTS > 0
-                and fabricated_count >= REGEN_FABRICATION_THRESHOLD
-                and not request_data.skip_verification):
-            regen_start = time.time()
+        quality_loop_result = {
+            "quality_loop_passed": True,
+            "quality_loop_attempts": 0,
+            "quality_loop_issues_fixed": [],
+            "quality_loop_claims_corrected": 0,
+            "quality_loop_claims_removed": 0,
+            "quality_loop_claims_confirmed": 0,
+        }
+
+        # Compute initial readability
+        readability = {}
+        if result.get("conteudo"):
             try:
-                # Build constraint listing fabricated claims
-                fabricated_texts = []
-                for claim in verification_data.get("claims", []):
-                    if isinstance(claim, dict) and claim.get("verdict") == "fabricated":
-                        fabricated_texts.append(claim.get("text", ""))
+                readability = compute_readability(result["conteudo"])
+                result["readability"] = readability
+            except Exception as e:
+                logger.warning(f"[{correlation_id}] Readability measurement failed: {e}")
 
-                if fabricated_texts:
-                    constraint = (
-                        "\n\n## CORRECAO OBRIGATORIA\n"
-                        "A versao anterior continha afirmacoes FABRICADAS que devem ser REMOVIDAS:\n"
-                        + "\n".join(f"- REMOVER: \"{ft}\"" for ft in fabricated_texts[:5])
-                        + "\n\nReescreva SEM essas afirmacoes. NAO as substitua por outras invencoes. "
-                        "Se nao ha informacao suficiente, escreva um texto MAIS CURTO."
-                    )
+        if (QUALITY_LOOP_ENABLED
+                and is_fact_check_enabled()
+                and not request_data.skip_verification
+                and result.get("verification", {}).get("is_verified")):
 
-                    # Combine with existing sensitive instructions
-                    regen_sensitive = list(sensitive_instructions or [])
-                    regen_sensitive.append(constraint)
+            quality_loop_start = time.time()
+            verification_data = result.get("verification", {})
+            quality_eval = evaluate_quality_criteria(verification_data, readability)
+            best_result = dict(result)
+            best_failures_count = len(quality_eval["failures"])
 
+            attempt = 0
+            while not quality_eval["all_passed"] and attempt < QUALITY_LOOP_MAX_ATTEMPTS:
+                attempt += 1
+                quality_loop_result["quality_loop_attempts"] = attempt
+                logger.info(
+                    f"[{correlation_id}] Quality Loop attempt {attempt}/{QUALITY_LOOP_MAX_ATTEMPTS}: "
+                    f"failures={[f['criterion'] for f in quality_eval['failures']]}"
+                )
+
+                # Step 1: Exa claim verification for fabricated claims
+                exa_corrections = []
+                fabrication_failure = next(
+                    (f for f in quality_eval["failures"] if f["criterion"] == "fabrication"),
+                    None,
+                )
+                if fabrication_failure:
+                    try:
+                        fact_checker = get_fact_check_service()
+                        claims_to_check = fabrication_failure.get("claims", [])[:QUALITY_LOOP_MAX_CLAIM_SEARCHES]
+
+                        for claim_dict in claims_to_check:
+                            claim_obj = ExtractedClaim(
+                                text=claim_dict.get("text", ""),
+                                verdict=claim_dict.get("verdict", "fabricated"),
+                            )
+                            exa_result = await fact_checker.verify_claim_with_exa(claim_obj)
+
+                            if exa_result["verdict"] == "confirmed":
+                                quality_loop_result["quality_loop_claims_confirmed"] += 1
+                                logger.info(f"[{correlation_id}] Claim CONFIRMED by Exa: {claim_obj.text[:60]}")
+                            elif exa_result["verdict"] == "contradicted":
+                                quality_loop_result["quality_loop_claims_corrected"] += 1
+                                if exa_result.get("corrective_instruction"):
+                                    exa_corrections.append(exa_result["corrective_instruction"])
+                                logger.info(f"[{correlation_id}] Claim CONTRADICTED by Exa: {claim_obj.text[:60]}")
+                            else:  # inconclusive
+                                quality_loop_result["quality_loop_claims_removed"] += 1
+                                if exa_result.get("corrective_instruction"):
+                                    exa_corrections.append(exa_result["corrective_instruction"])
+                                logger.info(f"[{correlation_id}] Claim INCONCLUSIVE: {claim_obj.text[:60]}")
+                    except Exception as e:
+                        logger.warning(f"[{correlation_id}] Exa claim verification failed: {e}")
+
+                # If ALL fabricated claims were confirmed by Exa, skip regeneration
+                if (fabrication_failure
+                        and not exa_corrections
+                        and quality_loop_result["quality_loop_claims_confirmed"] > 0
+                        and len([f for f in quality_eval["failures"] if f["criterion"] != "fabrication"]) == 0):
+                    logger.info(f"[{correlation_id}] All claims confirmed by Exa, skipping regeneration")
+                    quality_eval = {"all_passed": True, "failures": []}
+                    break
+
+                # Step 2: Build corrective instructions
+                corrective_prompt = build_corrective_instructions(
+                    quality_eval["failures"], exa_corrections
+                )
+
+                # Step 3: Regenerate with corrective instructions
+                regen_sensitive = list(sensitive_instructions or [])
+                regen_sensitive.append(corrective_prompt)
+
+                try:
                     regen_result = await llm.generate_article(
                         texto_base=request_data.texto_base,
                         persona=request_data.persona,
@@ -650,69 +841,87 @@ async def generate_article_handler(req: func.HttpRequest) -> func.HttpResponse:
                         correlation_id=correlation_id,
                     )
 
-                    # Re-verify the regenerated article
-                    if is_fact_check_enabled():
-                        fact_checker = get_fact_check_service()
-                        regen_verification = await fact_checker.verify_article(
-                            texto_base=request_data.texto_base,
-                            generated_article=regen_result.get("conteudo", ""),
-                            citacoes=request_data.citacoes,
-                            enrichment=enrichment,
-                            correlation_id=correlation_id,
+                    # Step 4: Re-verify
+                    fact_checker = get_fact_check_service()
+                    regen_verification = await fact_checker.verify_article(
+                        texto_base=request_data.texto_base,
+                        generated_article=regen_result.get("conteudo", ""),
+                        citacoes=request_data.citacoes,
+                        enrichment=enrichment,
+                        correlation_id=correlation_id,
+                    )
+                    regen_result["verification"] = regen_verification.to_dict()
+
+                    # Compute readability for regenerated version
+                    regen_readability = compute_readability(regen_result.get("conteudo", ""))
+                    regen_result["readability"] = regen_readability
+
+                    # Re-evaluate quality
+                    regen_eval = evaluate_quality_criteria(
+                        regen_result["verification"], regen_readability
+                    )
+
+                    # Accept if better (fewer failures) or all passed
+                    if regen_eval["all_passed"] or len(regen_eval["failures"]) < best_failures_count:
+                        # Track which issues were fixed
+                        old_criteria = {f["criterion"] for f in quality_eval["failures"]}
+                        new_criteria = {f["criterion"] for f in regen_eval["failures"]}
+                        fixed = old_criteria - new_criteria
+                        quality_loop_result["quality_loop_issues_fixed"].extend(list(fixed))
+
+                        result = regen_result
+                        readability = regen_readability
+                        quality_eval = regen_eval
+                        best_result = dict(result)
+                        best_failures_count = len(regen_eval["failures"])
+                        logger.info(
+                            f"[{correlation_id}] Quality Loop attempt {attempt} improved: "
+                            f"fixed={fixed}, remaining={new_criteria}"
+                        )
+                    else:
+                        logger.info(
+                            f"[{correlation_id}] Quality Loop attempt {attempt} did not improve "
+                            f"({len(regen_eval['failures'])} >= {best_failures_count}), keeping best"
                         )
 
-                        regen_fabricated = regen_verification.fabricated_claims
-                        # Accept if fewer fabrications
-                        if regen_fabricated < fabricated_count:
-                            result = regen_result
-                            result["verification"] = regen_verification.to_dict()
-                            result["regenerated"] = True
-                            result["regeneration_improvement"] = {
-                                "original_fabricated": fabricated_count,
-                                "regenerated_fabricated": regen_fabricated,
-                            }
-                            logger.info(
-                                f"[{correlation_id}] Regeneration improved: "
-                                f"{fabricated_count} → {regen_fabricated} fabricated claims"
-                            )
-                        else:
-                            result["regenerated"] = False
-                            result["regeneration_improvement"] = {
-                                "original_fabricated": fabricated_count,
-                                "regenerated_fabricated": regen_fabricated,
-                                "kept": "original",
-                            }
-                            logger.info(
-                                f"[{correlation_id}] Regeneration did not improve "
-                                f"({regen_fabricated} >= {fabricated_count}), keeping original"
-                            )
+                except Exception as e:
+                    logger.warning(f"[{correlation_id}] Quality Loop attempt {attempt} failed: {e}")
+                    break
 
-            except Exception as e:
-                logger.warning(f"[{correlation_id}] Auto-regeneration failed (non-blocking): {e}")
-                result["regenerated"] = False
+            quality_loop_result["quality_loop_passed"] = quality_eval["all_passed"]
 
-            phase_timings["regeneration_ms"] = int((time.time() - regen_start) * 1000)
+            # If loop didn't pass, use best version
+            if not quality_loop_result["quality_loop_passed"]:
+                result = best_result
+                logger.warning(
+                    f"[{correlation_id}] Quality Loop exhausted {attempt} attempts, "
+                    f"using best version. Remaining: {[f['criterion'] for f in quality_eval['failures']]}"
+                )
 
-        # ==============================================================
-        # Phase 3.3: Readability Measurement
-        # ==============================================================
-        if result.get("conteudo"):
-            try:
-                from services.fact_check_service import compute_readability
-                readability = compute_readability(result["conteudo"])
-                result["readability"] = readability
-                if readability["flesch_score"] < 42:
-                    if "human_review_required" not in result:
-                        result["human_review_required"] = False
-                    if "review_reasons" not in result:
-                        result["review_reasons"] = []
-                    result["human_review_required"] = True
-                    result["review_reasons"] = list(result.get("review_reasons", []))
-                    result["review_reasons"].append(
-                        f"Legibilidade baixa (Flesch {readability['flesch_score']})"
-                    )
-            except Exception as e:
-                logger.warning(f"[{correlation_id}] Readability measurement failed: {e}")
+            result["quality_loop"] = quality_loop_result
+            result["regenerated"] = quality_loop_result["quality_loop_attempts"] > 0
+            phase_timings["quality_loop_ms"] = int((time.time() - quality_loop_start) * 1000)
+            logger.info(
+                f"[{correlation_id}] Quality Loop complete: passed={quality_loop_result['quality_loop_passed']}, "
+                f"attempts={quality_loop_result['quality_loop_attempts']}, "
+                f"fixed={quality_loop_result['quality_loop_issues_fixed']}"
+            )
+        else:
+            # Quality loop not applicable (disabled, no verification, etc.)
+            result["quality_loop"] = quality_loop_result
+
+        # Ensure readability human review flag is set (even if quality loop didn't run)
+        if readability and readability.get("flesch_score", 100) < 42:
+            if "human_review_required" not in result:
+                result["human_review_required"] = False
+            if "review_reasons" not in result:
+                result["review_reasons"] = []
+            result["human_review_required"] = True
+            result["review_reasons"] = list(result.get("review_reasons", []))
+            if not any("Legibilidade" in r for r in result["review_reasons"]):
+                result["review_reasons"].append(
+                    f"Legibilidade baixa (Flesch {readability['flesch_score']})"
+                )
 
         # ==============================================================
         # Phase 3.5: Content Length Enforcement (type-aware)
