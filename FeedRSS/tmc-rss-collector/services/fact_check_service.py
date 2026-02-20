@@ -1928,35 +1928,39 @@ IMPORTANTE - REGRAS DE CLASSIFICACAO:
         cove_results = []
         reclassified = 0
 
-        for idx, claim in fabricated:
-            try:
-                result = await self._cove_single_claim(
-                    claim, source_text, enrichment_text
-                )
-                cove_results.append(result)
+        # Run all claim verifications in parallel
+        cove_tasks = [
+            self._cove_single_claim(claim, source_text, enrichment_text)
+            for _idx, claim in fabricated
+        ]
+        results = await asyncio.gather(*cove_tasks, return_exceptions=True)
 
-                if result.final_verdict != "fabricated":
-                    # Reclassify the claim
-                    reclassified += 1
-                    if isinstance(claim, ExtractedClaim):
-                        claims[idx] = ExtractedClaim(
-                            text=claim.text,
-                            verdict=result.final_verdict,
-                            source_evidence=claim.source_evidence + " [CoVe reclassified]",
-                            category=claim.category,
-                        )
-                    elif isinstance(claim, dict):
-                        claims[idx] = {
-                            **claim,
-                            "verdict": result.final_verdict,
-                            "source_evidence": claim.get("source_evidence", "") + " [CoVe reclassified]",
-                        }
-                    logger.info(
-                        f"CoVe reclassified: '{claim.text[:60] if isinstance(claim, ExtractedClaim) else claim.get('text', '')[:60]}...' "
-                        f"fabricated -> {result.final_verdict}"
+        for (idx, claim), result in zip(fabricated, results):
+            if isinstance(result, Exception):
+                logger.warning(f"CoVe failed for claim (non-blocking): {result}")
+                continue
+            cove_results.append(result)
+
+            if result.final_verdict != "fabricated":
+                # Reclassify the claim
+                reclassified += 1
+                if isinstance(claim, ExtractedClaim):
+                    claims[idx] = ExtractedClaim(
+                        text=claim.text,
+                        verdict=result.final_verdict,
+                        source_evidence=claim.source_evidence + " [CoVe reclassified]",
+                        category=claim.category,
                     )
-            except Exception as e:
-                logger.warning(f"CoVe failed for claim (non-blocking): {e}")
+                elif isinstance(claim, dict):
+                    claims[idx] = {
+                        **claim,
+                        "verdict": result.final_verdict,
+                        "source_evidence": claim.get("source_evidence", "") + " [CoVe reclassified]",
+                    }
+                logger.info(
+                    f"CoVe reclassified: '{claim.text[:60] if isinstance(claim, ExtractedClaim) else claim.get('text', '')[:60]}...' "
+                    f"fabricated -> {result.final_verdict}"
+                )
 
         logger.info(f"CoVe complete: {reclassified}/{len(fabricated)} reclassified")
         return claims, cove_results, reclassified

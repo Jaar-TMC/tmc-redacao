@@ -1,9 +1,10 @@
-import { useState, useCallback, useMemo } from 'react';
+import { useState, useCallback, useMemo, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   ArrowLeft, HelpCircle, FileText, ChevronDown, ChevronUp,
   Link, Youtube, File, User, Palette, Building2, Calendar,
-  MessageSquare, Edit, Sparkles, Check, AlertCircle, Tag, X
+  MessageSquare, Edit, Sparkles, Check, AlertCircle, Tag, X,
+  Search, ShieldCheck, CheckCircle2
 } from 'lucide-react';
 import { Stepper } from '../../components/criar';
 import { useCriar } from '../../context';
@@ -74,21 +75,19 @@ const RevisarPage = () => {
   });
   const [isGenerating, setIsGenerating] = useState(false);
   const [generationProgress, setGenerationProgress] = useState(0);
-  const [generationMessage, setGenerationMessage] = useState('');
+  const [currentPhase, setCurrentPhase] = useState(0);
   const [generationError, setGenerationError] = useState(null);
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
+  const phaseTimerRef = useRef(null);
+  const elapsedTimerRef = useRef(null);
 
-  // Generation messages
-  const generationMessages = [
-    'Conectando à IA Claude Sonnet 4.5...',
-    'Analisando texto-base e fontes complementares...',
-    'Identificando informações principais...',
-    'Aplicando persona e tom selecionados...',
-    'Estruturando lide conforme orientação...',
-    'Incorporando citações e declarações...',
-    'Gerando parágrafos do corpo da matéria...',
-    'Otimizando para legibilidade e SEO...',
-    'Finalizando e revisando estrutura...'
-  ];
+  // Pipeline phases with realistic timing based on production measurements
+  const PHASES = useMemo(() => [
+    { id: 'enrichment', label: 'Enriquecimento', description: 'Buscando fontes e verificando fatos...', Icon: Search, targetProgress: 18, durationMs: 7000 },
+    { id: 'generation', label: 'Geração', description: 'Escrevendo matéria com IA Claude...', Icon: Sparkles, targetProgress: 62, durationMs: 20000 },
+    { id: 'verification', label: 'Verificação', description: 'Conferindo claims e informações...', Icon: ShieldCheck, targetProgress: 88, durationMs: 12000 },
+    { id: 'finishing', label: 'Finalização', description: 'Aplicando SEO e revisão final...', Icon: CheckCircle2, targetProgress: 95, durationMs: 3000 },
+  ], []);
 
   // Build review data from context or use mock
   const reviewData = useMemo(() => {
@@ -241,22 +240,42 @@ const RevisarPage = () => {
   const handleGenerate = useCallback(async () => {
     setIsGenerating(true);
     setGenerationProgress(0);
+    setCurrentPhase(0);
     setGenerationError(null);
-    setGenerationMessage(generationMessages[0]);
+    setElapsedSeconds(0);
 
-    // Progress simulation while API call is in progress
-    let progressInterval;
-    let currentProgress = 0;
+    // Phase-aware progress simulation based on real pipeline timing
+    let phase = 0;
+    let phaseStart = Date.now();
+    const pipelineStart = Date.now();
 
     const startProgressSimulation = () => {
-      progressInterval = setInterval(() => {
-        currentProgress += Math.random() * 8 + 2; // Slower, more realistic progress
-        if (currentProgress > 90) currentProgress = 90; // Cap at 90% until API returns
+      // Elapsed timer (updates every second)
+      elapsedTimerRef.current = setInterval(() => {
+        setElapsedSeconds(Math.floor((Date.now() - pipelineStart) / 1000));
+      }, 1000);
 
-        setGenerationProgress(currentProgress);
-        const messageIndex = Math.floor((currentProgress / 100) * generationMessages.length);
-        setGenerationMessage(generationMessages[Math.min(messageIndex, generationMessages.length - 1)]);
-      }, 1500);
+      // Phase progress timer (smooth 100ms updates)
+      phaseTimerRef.current = setInterval(() => {
+        if (phase >= PHASES.length) return;
+
+        const p = PHASES[phase];
+        const prevTarget = phase > 0 ? PHASES[phase - 1].targetProgress : 0;
+        const elapsed = Date.now() - phaseStart;
+        const phaseFraction = Math.min(elapsed / p.durationMs, 1);
+        // Ease-out curve for natural feel
+        const eased = 1 - Math.pow(1 - phaseFraction, 2);
+        const progress = prevTarget + eased * (p.targetProgress - prevTarget);
+
+        setGenerationProgress(Math.min(progress, 95)); // Cap at 95% until API returns
+
+        // Move to next phase when current phase duration elapsed
+        if (elapsed >= p.durationMs && phase < PHASES.length - 1) {
+          phase++;
+          phaseStart = Date.now();
+          setCurrentPhase(phase);
+        }
+      }, 100);
     };
 
     try {
@@ -281,11 +300,12 @@ const RevisarPage = () => {
       });
 
       // Stop progress simulation
-      clearInterval(progressInterval);
+      clearInterval(phaseTimerRef.current);
+      clearInterval(elapsedTimerRef.current);
 
       // Complete progress
       setGenerationProgress(100);
-      setGenerationMessage('Matéria gerada com sucesso!');
+      setCurrentPhase(PHASES.length); // All phases done
 
       // Store result in context (including verification data)
       if (setResultado) {
@@ -327,12 +347,21 @@ const RevisarPage = () => {
       }, 500);
 
     } catch (error) {
-      clearInterval(progressInterval);
+      clearInterval(phaseTimerRef.current);
+      clearInterval(elapsedTimerRef.current);
       console.error('Error generating article:', error);
       setIsGenerating(false);
       setGenerationError(error.message || 'Erro ao gerar matéria. Tente novamente.');
     }
-  }, [navigate, generationMessages, reviewData, setResultado]);
+  }, [navigate, PHASES, reviewData, setResultado]);
+
+  // Cleanup timers on unmount
+  useEffect(() => {
+    return () => {
+      clearInterval(phaseTimerRef.current);
+      clearInterval(elapsedTimerRef.current);
+    };
+  }, []);
 
   const handleStepClick = useCallback((stepIndex) => {
     const routes = ['/criar', '/criar/texto-base', '/criar/configurar', '/criar/editor'];
@@ -346,61 +375,109 @@ const RevisarPage = () => {
       reviewData.materiais.reduce((acc, m) => acc + (m.words || 0), 0);
   }, [reviewData]);
 
-  // Generation Overlay
+  // Generation Overlay — phase-based progress
   if (isGenerating) {
+    const activePhase = PHASES[Math.min(currentPhase, PHASES.length - 1)];
+    const ActiveIcon = activePhase.Icon;
+
     return (
       <div className="min-h-screen bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900 flex items-center justify-center">
-        <div className="text-center max-w-md px-6">
-          {/* Animated Icon */}
-          <div className="relative w-28 h-28 mx-auto mb-10">
-            {/* Outer ring - slow rotation */}
+        <div className="w-full max-w-lg px-6">
+          {/* Active phase icon */}
+          <div className="relative w-24 h-24 mx-auto mb-8">
             <div className="absolute inset-0 border-4 border-tmc-orange/20 rounded-full animate-spin" style={{ animationDuration: '3s' }} />
-            {/* Middle ring - pulse */}
-            <div className="absolute inset-2 bg-tmc-orange/10 rounded-full animate-ping" style={{ animationDuration: '2s' }} />
-            {/* Inner circle - breathing */}
-            <div className="absolute inset-4 bg-gradient-to-br from-tmc-orange to-orange-600 rounded-full flex items-center justify-center shadow-lg shadow-tmc-orange/30">
-              <Sparkles className="w-10 h-10 text-white animate-pulse" />
+            <div className="absolute inset-3 bg-gradient-to-br from-tmc-orange to-orange-600 rounded-full flex items-center justify-center shadow-lg shadow-tmc-orange/30">
+              <ActiveIcon className="w-9 h-9 text-white animate-pulse" />
             </div>
           </div>
 
-          <h2 className="text-2xl font-bold text-white mb-3">
-            Gerando sua matéria...
+          <h2 className="text-2xl font-bold text-white text-center mb-2">
+            {currentPhase >= PHASES.length ? 'Matéria gerada!' : activePhase.description}
           </h2>
 
-          <p className="text-gray-300 mb-8 min-h-[48px] leading-relaxed">
-            {generationMessage}
+          <p className="text-gray-400 text-sm text-center mb-10">
+            {elapsedSeconds}s decorridos
           </p>
 
-          {/* Progress Bar */}
-          <div className="w-full bg-gray-700/50 rounded-full h-3 mb-4 overflow-hidden">
+          {/* Phase steps */}
+          <div className="space-y-3 mb-10">
+            {PHASES.map((phase, idx) => {
+              const PhaseIcon = phase.Icon;
+              const isCompleted = idx < currentPhase;
+              const isActive = idx === currentPhase && currentPhase < PHASES.length;
+              const isPending = idx > currentPhase;
+
+              return (
+                <div
+                  key={phase.id}
+                  className={`flex items-center gap-4 px-4 py-3 rounded-xl transition-all duration-500 ${
+                    isActive
+                      ? 'bg-tmc-orange/10 border border-tmc-orange/30'
+                      : isCompleted
+                        ? 'bg-green-500/5 border border-green-500/10'
+                        : 'bg-gray-800/30 border border-gray-700/30'
+                  }`}
+                >
+                  {/* Phase icon / check */}
+                  <div className={`w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 transition-all duration-500 ${
+                    isActive
+                      ? 'bg-tmc-orange/20'
+                      : isCompleted
+                        ? 'bg-green-500/20'
+                        : 'bg-gray-700/40'
+                  }`}>
+                    {isCompleted ? (
+                      <Check className="w-5 h-5 text-green-400" />
+                    ) : (
+                      <PhaseIcon className={`w-5 h-5 transition-all ${
+                        isActive ? 'text-tmc-orange animate-pulse' : 'text-gray-500'
+                      }`} />
+                    )}
+                  </div>
+
+                  {/* Label */}
+                  <div className="flex-1 min-w-0">
+                    <span className={`text-sm font-medium transition-all ${
+                      isActive ? 'text-white' : isCompleted ? 'text-green-400/80' : 'text-gray-500'
+                    }`}>
+                      {phase.label}
+                    </span>
+                    {isActive && (
+                      <p className="text-xs text-gray-400 mt-0.5">{phase.description}</p>
+                    )}
+                  </div>
+
+                  {/* Status */}
+                  <div className="flex-shrink-0">
+                    {isActive && (
+                      <div className="flex gap-1">
+                        <span className="w-1.5 h-1.5 bg-tmc-orange rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
+                        <span className="w-1.5 h-1.5 bg-tmc-orange rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
+                        <span className="w-1.5 h-1.5 bg-tmc-orange rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+                      </div>
+                    )}
+                    {isCompleted && (
+                      <span className="text-xs text-green-400/60">OK</span>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Progress bar */}
+          <div className="w-full bg-gray-700/40 rounded-full h-2 mb-3 overflow-hidden">
             <div
-              className="bg-gradient-to-r from-tmc-orange to-orange-500 h-3 rounded-full transition-all duration-500 relative"
+              className="bg-gradient-to-r from-tmc-orange to-orange-500 h-2 rounded-full transition-all duration-300 relative"
               style={{ width: `${generationProgress}%` }}
             >
-              {/* Shimmer effect */}
               <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/20 to-transparent animate-pulse" />
             </div>
           </div>
 
-          <div className="flex items-center justify-center gap-3 text-sm">
-            <span className="text-white font-semibold">{Math.round(generationProgress)}%</span>
-            <span className="text-gray-400">•</span>
-            <span className="text-gray-400">Tempo estimado: ~25 segundos</span>
-          </div>
-
-          {/* Progress Steps Indicator */}
-          <div className="mt-8 flex justify-center gap-2">
-            {generationMessages.slice(0, 8).map((_, index) => (
-              <div
-                key={index}
-                className={`w-2 h-2 rounded-full transition-all duration-300 ${
-                  index <= Math.floor((generationProgress / 100) * 8)
-                    ? 'bg-tmc-orange scale-110'
-                    : 'bg-gray-600'
-                }`}
-              />
-            ))}
-          </div>
+          <p className="text-center text-xs text-gray-500">
+            {Math.round(generationProgress)}% concluído
+          </p>
         </div>
       </div>
     );

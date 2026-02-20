@@ -51,6 +51,25 @@ REGEN_FABRICATION_THRESHOLD = int(os.environ.get("REGEN_FABRICATION_THRESHOLD", 
 # Phase 2.3: Temporal decontamination
 DECONTAMINATION_ENABLED = os.environ.get("DECONTAMINATION_ENABLED", "true").lower() == "true"
 
+# Enrichment cache (TTL 5 minutes) - avoids redundant Exa calls on regen
+_enrichment_cache = {}
+_ENRICHMENT_CACHE_TTL = 300  # seconds
+
+
+def _get_cached_enrichment(cache_key: str):
+    entry = _enrichment_cache.get(cache_key)
+    if entry and (time.time() - entry["ts"]) < _ENRICHMENT_CACHE_TTL:
+        logger.info(f"Enrichment cache HIT for key={cache_key[:8]}...")
+        return entry["data"]
+    return None
+
+
+def _set_cached_enrichment(cache_key: str, enrichment):
+    if len(_enrichment_cache) > 50:
+        _enrichment_cache.clear()
+    _enrichment_cache[cache_key] = {"data": enrichment, "ts": time.time()}
+
+
 # Sensitive Topic Detection (2B)
 _SENSITIVE_TOPIC_PATTERNS = {
     "menor_de_idade": [r"\bmenor(?:es)?\b", r"\bcriancas?\b", r"\badolescente\b", r"\b\d{1,2}\s*anos\s*de\s*idade\b"],
@@ -386,31 +405,42 @@ async def generate_article_handler(req: func.HttpRequest) -> func.HttpResponse:
 
         if is_fact_check_enabled() and not request_data.skip_enrichment:
             enrichment_start = time.time()
-            try:
-                fact_checker = get_fact_check_service()
-                enrichment = await fact_checker.enrich_context(
-                    texto_base=request_data.texto_base,
-                    titulo_fonte=request_data.titulo_fonte,
-                    tags=request_data.tags,
-                    correlation_id=correlation_id,
-                )
+            enrichment_cache_key = hashlib.md5((request_data.titulo_fonte or "").encode()).hexdigest()
+            cached = _get_cached_enrichment(enrichment_cache_key)
+            if cached:
+                enrichment = cached
                 if enrichment.success:
                     enrichment_context = enrichment.context_text
                     enrichment_key_facts = enrichment.key_facts if enrichment.key_facts else None
                     verified_chars = enrichment.verified_chars
-                    logger.info(
-                        f"[{correlation_id}] Phase 1 complete: {len(enrichment.key_facts or [])} facts, "
-                        f"{len(enrichment.source_urls)} sources, "
-                        f"verified_chars={verified_chars}, "
-                        f"context_only={'yes' if not enrichment.key_facts else 'no'}"
+                    logger.info(f"[{correlation_id}] Phase 1 from cache, verified_chars={verified_chars}")
+            else:
+                try:
+                    fact_checker = get_fact_check_service()
+                    enrichment = await fact_checker.enrich_context(
+                        texto_base=request_data.texto_base,
+                        titulo_fonte=request_data.titulo_fonte,
+                        tags=request_data.tags,
+                        correlation_id=correlation_id,
                     )
-                else:
-                    logger.info(
-                        f"[{correlation_id}] Phase 1: no enrichment (urls={len(enrichment.source_urls)}, "
-                        f"context_len={len(enrichment.context_text)})"
-                    )
-            except Exception as e:
-                logger.warning(f"[{correlation_id}] Phase 1 enrichment failed (non-blocking): {e}")
+                    _set_cached_enrichment(enrichment_cache_key, enrichment)
+                    if enrichment.success:
+                        enrichment_context = enrichment.context_text
+                        enrichment_key_facts = enrichment.key_facts if enrichment.key_facts else None
+                        verified_chars = enrichment.verified_chars
+                        logger.info(
+                            f"[{correlation_id}] Phase 1 complete: {len(enrichment.key_facts or [])} facts, "
+                            f"{len(enrichment.source_urls)} sources, "
+                            f"verified_chars={verified_chars}, "
+                            f"context_only={'yes' if not enrichment.key_facts else 'no'}"
+                        )
+                    else:
+                        logger.info(
+                            f"[{correlation_id}] Phase 1: no enrichment (urls={len(enrichment.source_urls)}, "
+                            f"context_len={len(enrichment.context_text)})"
+                        )
+                except Exception as e:
+                    logger.warning(f"[{correlation_id}] Phase 1 enrichment failed (non-blocking): {e}")
             phase_timings["enrichment_ms"] = int((time.time() - enrichment_start) * 1000)
 
         # ==============================================================
@@ -812,6 +842,7 @@ async def generate_article_handler(req: func.HttpRequest) -> func.HttpResponse:
 
         total_ms = int((time.time() - pipeline_start) * 1000)
         phase_timings["total_ms"] = total_ms
+        result["phase_timings"] = phase_timings
         logger.info(f"[{correlation_id}] Full pipeline complete in {total_ms}ms")
 
         # ==============================================================
@@ -1321,8 +1352,8 @@ async def _find_similar_articles(
         seen_ids = set()
 
         for tag in tags[:3]:
-            results, count, _ = db.get_articles_with_urgency(
-                page=1, limit=limit, tag=tag, category=categoria
+            results, count, _ = await asyncio.to_thread(
+                db.get_articles_with_urgency, page=1, limit=limit, tag=tag, category=categoria
             )
             for article in results:
                 article_id = str(article.id)

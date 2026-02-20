@@ -330,7 +330,7 @@ export async function getAllTags(params = {}) {
  */
 export async function generateArticle(params) {
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 90000);
+  const timeoutId = setTimeout(() => controller.abort(), 180000);
 
   try {
     const response = await fetchApi('/generate', {
