@@ -175,6 +175,8 @@ async def create_user_article_handler(req: func.HttpRequest) -> func.HttpRespons
         article_data = UserArticleCreate(
             title=body.get('title'),
             linha_fina=body.get('linhaFina'),
+            titulo_curto=body.get('tituloCurto'),
+            resumo=body.get('resumo', []),
             content=body.get('content'),
             preview=body.get('preview'),
             status=body.get('status', 'draft'),
@@ -253,6 +255,8 @@ async def update_user_article_handler(req: func.HttpRequest) -> func.HttpRespons
         update_data = UserArticleUpdate(
             title=body.get('title'),
             linha_fina=body.get('linhaFina'),
+            titulo_curto=body.get('tituloCurto'),
+            resumo=body.get('resumo'),
             content=body.get('content'),
             preview=body.get('preview'),
             status=body.get('status'),

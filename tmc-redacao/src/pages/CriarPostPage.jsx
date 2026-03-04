@@ -152,6 +152,7 @@ Com esse desempenho, o Brasil reafirma sua posição estratégica no cenário gl
 
   // Use loaded article, resultado from context, or fall back to mock data
   const initialTitle = loadedArticle?.title || resultado?.titulo || mockArticle.title;
+  const initialTituloCurto = loadedArticle?.tituloCurto || resultado?.tituloCurto || '';
   const initialLinhaFina = loadedArticle?.linhaFina || resultado?.linhaFina || mockArticle.linhaFina;
   const initialContent = loadedArticle?.content || resultado?.conteudo || mockArticle.content;
   // Ensure initialTags is always an array
@@ -162,6 +163,7 @@ Com esse desempenho, o Brasil reafirma sua posição estratégica no cenário gl
   useEffect(() => {
     if (loadedArticle) {
       setTitle(loadedArticle.title || '');
+      setTituloCurto(loadedArticle.tituloCurto || '');
       setLinhaFina(loadedArticle.linhaFina || '');
       setContent(loadedArticle.content || '');
       setTags(Array.isArray(loadedArticle.tags) ? loadedArticle.tags : []);
@@ -184,6 +186,7 @@ Com esse desempenho, o Brasil reafirma sua posição estratégica no cenário gl
     goToVersion
   } = useVersionHistory({
     title: initialTitle,
+    tituloCurto: initialTituloCurto,
     linhaFina: initialLinhaFina,
     body: initialContent,
     tags: initialTags
@@ -191,6 +194,7 @@ Com esse desempenho, o Brasil reafirma sua posição estratégica no cenário gl
 
   // Local state synced with version history
   const [title, setTitle] = useState(currentContent?.title || '');
+  const [tituloCurto, setTituloCurto] = useState(currentContent?.tituloCurto || '');
   const [linhaFina, setLinhaFina] = useState(currentContent?.linhaFina || '');
   const [content, setContent] = useState(currentContent?.body || '');
   const [tags, setTags] = useState(Array.isArray(currentContent?.tags) ? currentContent.tags : []);
@@ -199,6 +203,7 @@ Com esse desempenho, o Brasil reafirma sua posição estratégica no cenário gl
   useEffect(() => {
     if (currentContent) {
       setTitle(currentContent.title || '');
+      setTituloCurto(currentContent.tituloCurto || '');
       setLinhaFina(currentContent.linhaFina || '');
       setContent(currentContent.body || '');
       setTags(Array.isArray(currentContent.tags) ? currentContent.tags : []);
@@ -237,6 +242,7 @@ Com esse desempenho, o Brasil reafirma sua posição estratégica no cenário gl
       // Reset version history with new content
       resetHistory({
         title: resultado.titulo || '',
+        tituloCurto: resultado.tituloCurto || '',
         linhaFina: resultado.linhaFina || '',
         body: htmlContent,
         tags: Array.isArray(newTags) ? newTags : []
@@ -305,7 +311,7 @@ Com esse desempenho, o Brasil reafirma sua posição estratégica no cenário gl
     rejectEdit,
     requestModification
   } = useChatEditor({
-    articleState: { title, linhaFina, content, tags },
+    articleState: { title, tituloCurto, linhaFina, content, tags },
     onEdit: (newContent, summary, messageId) => {
       // Always convert markdown to HTML
       // Even if content has some HTML, it may have markdown links/formatting that need conversion
@@ -526,6 +532,7 @@ Com esse desempenho, o Brasil reafirma sua posição estratégica no cenário gl
   const buildArticleData = useCallback((status) => {
     return {
       title: title,
+      tituloCurto: tituloCurto,
       linhaFina: linhaFina,
       content: content,
       status: status,
@@ -541,7 +548,7 @@ Com esse desempenho, o Brasil reafirma sua posição estratégica no cenário gl
         geradoEm: resultado?.geradoEm || null
       }
     };
-  }, [title, linhaFina, content, tags, selectedTone, selectedPersona, selectedArticleType, themeContext, resultado]);
+  }, [title, tituloCurto, linhaFina, content, tags, selectedTone, selectedPersona, selectedArticleType, themeContext, resultado]);
 
   // Save as draft handler
   const handleSaveDraft = useCallback(async () => {
@@ -718,10 +725,10 @@ Com esse desempenho, o Brasil reafirma sua posição estratégica no cenário gl
             </span>
           </button>
 
-          <div className="flex-1 max-w-4xl mx-4 md:mx-6">
+          <div className="flex-1 min-w-0 mx-4 md:mx-6 space-y-1.5">
             {/* Título */}
-            <div className="relative">
-              <label htmlFor="post-title" className="sr-only">Título da postagem</label>
+            <div className="flex items-baseline gap-2">
+              <label htmlFor="post-title" className="text-xs font-medium text-medium-gray whitespace-nowrap shrink-0">Título:</label>
               <input
                 id="post-title"
                 type="text"
@@ -729,26 +736,43 @@ Com esse desempenho, o Brasil reafirma sua posição estratégica no cenário gl
                 maxLength={100}
                 value={title}
                 onChange={(e) => setTitle(e.target.value)}
-                className="w-full text-center text-lg md:text-xl font-bold text-dark-gray placeholder:text-light-gray focus:outline-none"
+                className="flex-1 min-w-0 text-base md:text-lg font-bold text-dark-gray placeholder:text-light-gray focus:outline-none bg-transparent"
               />
-              <span className="absolute -bottom-3 right-0 text-xs text-medium-gray">
+              <span className="text-xs text-medium-gray whitespace-nowrap shrink-0">
                 {title.length}/100
               </span>
             </div>
 
+            {/* Título Curto */}
+            <div className="flex items-baseline gap-2">
+              <label htmlFor="post-titulo-curto" className="text-xs font-medium text-medium-gray whitespace-nowrap shrink-0">Título Curto:</label>
+              <input
+                id="post-titulo-curto"
+                type="text"
+                placeholder="Título curto para redes sociais e push"
+                maxLength={70}
+                value={tituloCurto}
+                onChange={(e) => setTituloCurto(e.target.value)}
+                className="flex-1 min-w-0 text-sm font-semibold text-dark-gray/80 placeholder:text-light-gray focus:outline-none bg-transparent"
+              />
+              <span className={`text-xs whitespace-nowrap shrink-0 ${tituloCurto.length > 65 ? 'text-warning' : 'text-medium-gray'}`}>
+                {tituloCurto.length}/70
+              </span>
+            </div>
+
             {/* Linha Fina (Subtítulo) */}
-            <div className="relative mt-4">
-              <label htmlFor="post-linha-fina" className="sr-only">Linha fina (subtítulo)</label>
+            <div className="flex items-baseline gap-2">
+              <label htmlFor="post-linha-fina" className="text-xs font-medium text-medium-gray whitespace-nowrap shrink-0">Linha Fina:</label>
               <input
                 id="post-linha-fina"
                 type="text"
-                placeholder="Linha fina: complemento do título que contextualiza a notícia"
+                placeholder="Complemento do título que contextualiza a notícia"
                 maxLength={200}
                 value={linhaFina}
                 onChange={(e) => setLinhaFina(e.target.value)}
-                className="w-full text-center text-sm md:text-base text-medium-gray placeholder:text-light-gray focus:outline-none italic"
+                className="flex-1 min-w-0 text-sm text-medium-gray placeholder:text-light-gray focus:outline-none italic bg-transparent"
               />
-              <span className="absolute -bottom-3 right-0 text-xs text-medium-gray">
+              <span className="text-xs text-medium-gray whitespace-nowrap shrink-0">
                 {linhaFina.length}/200
               </span>
             </div>
@@ -1726,6 +1750,7 @@ Com esse desempenho, o Brasil reafirma sua posição estratégica no cenário gl
             <div className="flex-1 overflow-hidden p-4">
               <SEOAnalyzerPanel
                 title={title}
+                tituloCurto={tituloCurto}
                 linhaFina={linhaFina}
                 content={content}
                 tags={tags}

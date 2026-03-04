@@ -6,7 +6,7 @@ Gerencia conexoes e operacoes CRUD para sources, articles e logs.
 import os
 import pymssql
 import logging
-from typing import List, Optional, Set, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 from datetime import datetime, timedelta
 from uuid import UUID
 import json
@@ -246,13 +246,24 @@ class DatabaseService:
                                source_id: Optional[str] = None,
                                period: Optional[str] = None,
                                search: Optional[str] = None,
-                               tag: Optional[str] = None) -> Tuple[str, list]:
+                               tag: Optional[str] = None,
+                               classification: Optional[str] = None) -> Tuple[str, list, bool]:
         """
         Build shared WHERE clause and params for article queries.
         Reused by get_articles and get_urgency_counts to avoid duplication.
+
+        Returns:
+            Tuple (where_clause, params, needs_scores_join) - needs_scores_join
+            indicates whether the query needs LEFT JOIN article_scores.
         """
         conditions = []
         params = []
+        needs_scores_join = False
+
+        if classification and classification in ('A', 'B', 'C'):
+            conditions.append("sc.classification = %s")
+            params.append(classification)
+            needs_scores_join = True
 
         if category:
             conditions.append("a.category = %s")
@@ -308,14 +319,15 @@ class DatabaseService:
             params.append(tag_param)
 
         where_clause = "WHERE " + " AND ".join(conditions) if conditions else ""
-        return where_clause, params
+        return where_clause, params, needs_scores_join
 
     def get_articles(self, page: int = 1, limit: int = 20,
                      category: Optional[str] = None,
                      source_id: Optional[str] = None,
                      period: Optional[str] = None,
                      search: Optional[str] = None,
-                     tag: Optional[str] = None) -> Tuple[List[Article], int]:
+                     tag: Optional[str] = None,
+                     classification: Optional[str] = None) -> Tuple[List[Article], int]:
         """
         Lista artigos com filtros e paginacao.
         Also returns urgency_counts in the same DB round-trip.
@@ -326,10 +338,12 @@ class DatabaseService:
         limit = min(limit, 100)
         offset = (page - 1) * limit
 
-        where_clause, params = self._build_article_filters(
+        where_clause, params, needs_scores_join = self._build_article_filters(
             category=category, source_id=source_id, period=period,
-            search=search, tag=tag
+            search=search, tag=tag, classification=classification
         )
+
+        scores_join = "LEFT JOIN article_scores sc ON sc.article_id = a.id" if needs_scores_join else ""
 
         # Combined query: data + count in single round-trip
         query = f"""
@@ -339,6 +353,7 @@ class DatabaseService:
                    s.name as source_name, s.url as source_url, s.favicon_url
             FROM collected_articles a
             JOIN sources s ON a.source_id = s.id
+            {scores_join}
             {where_clause}
             ORDER BY a.published_at DESC
             OFFSET %s ROWS FETCH NEXT %s ROWS ONLY
@@ -347,6 +362,7 @@ class DatabaseService:
         count_query = f"""
             SELECT COUNT(*) FROM collected_articles a
             JOIN sources s ON a.source_id = s.id
+            {scores_join}
             {where_clause}
         """
 
@@ -372,7 +388,9 @@ class DatabaseService:
                                    source_id: Optional[str] = None,
                                    period: Optional[str] = None,
                                    search: Optional[str] = None,
-                                   tag: Optional[str] = None) -> Tuple[List[Article], int, dict]:
+                                   tag: Optional[str] = None,
+                                   classification: Optional[str] = None,
+                                   order_by: Optional[str] = None) -> Tuple[List[Article], int, dict]:
         """
         Combined query: articles + count + urgency counts in a single DB connection.
         Avoids executing the expensive WHERE clause (especially LIKE on content) twice.
@@ -383,15 +401,15 @@ class DatabaseService:
         limit = min(limit, 100)
         offset = (page - 1) * limit
 
-        where_clause, params = self._build_article_filters(
+        where_clause, params, needs_scores_join = self._build_article_filters(
             category=category, source_id=source_id, period=period,
-            search=search, tag=tag
+            search=search, tag=tag, classification=classification
         )
 
         # Build urgency WHERE: same content filters but restricted to last 24h
-        urgency_where, urgency_params = self._build_article_filters(
+        urgency_where, urgency_params, urgency_needs_scores_join = self._build_article_filters(
             category=category, source_id=source_id, period=None,
-            search=search, tag=tag
+            search=search, tag=tag, classification=classification
         )
         # Add 24h constraint for urgency
         if urgency_where:
@@ -399,7 +417,16 @@ class DatabaseService:
         else:
             urgency_where = "WHERE a.published_at >= DATEADD(day, -1, GETUTCDATE())"
 
-        logger.info(f"[get_articles_with_urgency] search={search}")
+        logger.info(f"[get_articles_with_urgency] search={search}, order_by={order_by}")
+
+        scores_join = "LEFT JOIN article_scores sc ON sc.article_id = a.id" if needs_scores_join else ""
+        urgency_scores_join = "LEFT JOIN article_scores sc ON sc.article_id = a.id" if urgency_needs_scores_join else ""
+
+        # Dynamic ORDER BY - score sorts by total_score DESC with nulls last, then by date
+        if order_by == 'score':
+            order_clause = "ORDER BY COALESCE(sc.total_score, 0) DESC, a.published_at DESC"
+        else:
+            order_clause = "ORDER BY a.published_at DESC"
 
         with self.get_connection() as conn:
             cursor = conn.cursor()
@@ -408,21 +435,25 @@ class DatabaseService:
             count_query = f"""
                 SELECT COUNT(*) FROM collected_articles a
                 JOIN sources s ON a.source_id = s.id
+                {scores_join}
                 {where_clause}
             """
             cursor.execute(count_query, params)
             total = cursor.fetchone()[0]
 
-            # 2. Get page of articles
+            # 2. Get page of articles (always joins article_scores for score columns)
             query = f"""
                 SELECT a.id, a.source_id, a.title, a.content, a.preview, a.url,
                        a.image_url, a.author, a.category, a.tags, a.published_at,
                        a.collected_at, a.hash,
-                       s.name as source_name, s.url as source_url, s.favicon_url
+                       s.name as source_name, s.url as source_url, s.favicon_url,
+                       sc.total_score, sc.classification,
+                       sc.score_inesperado, sc.score_impacto, sc.score_busca_agora, sc.score_conversa
                 FROM collected_articles a
                 JOIN sources s ON a.source_id = s.id
+                LEFT JOIN article_scores sc ON sc.article_id = a.id
                 {where_clause}
-                ORDER BY a.published_at DESC
+                {order_clause}
                 OFFSET %s ROWS FETCH NEXT %s ROWS ONLY
             """
             cursor.execute(query, params + [offset, limit])
@@ -438,6 +469,7 @@ class DatabaseService:
                     COUNT(*)
                 FROM collected_articles a
                 JOIN sources s ON a.source_id = s.id
+                {urgency_scores_join}
                 {urgency_where}
             """
             cursor.execute(urgency_query, urgency_params)
@@ -463,7 +495,7 @@ class DatabaseService:
         Returns article counts per urgency cluster using a single SQL query.
         Kept for backward compatibility. Prefer get_articles_with_urgency() for combined calls.
         """
-        urgency_where, urgency_params = self._build_article_filters(
+        urgency_where, urgency_params, urgency_needs_scores = self._build_article_filters(
             category=category, source_id=source_id, period=None,
             search=search, tag=tag
         )
@@ -471,6 +503,8 @@ class DatabaseService:
             urgency_where += " AND a.published_at >= DATEADD(day, -1, GETUTCDATE())"
         else:
             urgency_where = "WHERE a.published_at >= DATEADD(day, -1, GETUTCDATE())"
+
+        scores_join = "LEFT JOIN article_scores sc ON sc.article_id = a.id" if urgency_needs_scores else ""
 
         query = f"""
             SELECT
@@ -480,6 +514,7 @@ class DatabaseService:
                 COUNT(*) as all_count
             FROM collected_articles a
             JOIN sources s ON a.source_id = s.id
+            {scores_join}
             {urgency_where}
         """
 
@@ -503,9 +538,12 @@ class DatabaseService:
             SELECT a.id, a.source_id, a.title, a.content, a.preview, a.url,
                    a.image_url, a.author, a.category, a.tags, a.published_at,
                    a.collected_at, a.hash,
-                   s.name as source_name, s.url as source_url, s.favicon_url
+                   s.name as source_name, s.url as source_url, s.favicon_url,
+                   sc.total_score, sc.classification,
+                   sc.score_inesperado, sc.score_impacto, sc.score_busca_agora, sc.score_conversa
             FROM collected_articles a
             JOIN sources s ON a.source_id = s.id
+            LEFT JOIN article_scores sc ON sc.article_id = a.id
             WHERE a.id = %s
         """
         with self.get_connection() as conn:
@@ -572,17 +610,33 @@ class DatabaseService:
         Returns:
             Numero de artigos inseridos com sucesso
         """
+        result = self.insert_articles_returning(articles)
+        return result[0]
+
+    def insert_articles_returning(self, articles: List[ArticleCreate]) -> Tuple[int, List[Dict[str, Any]]]:
+        """
+        Insere multiplos artigos e retorna dados dos artigos inseridos.
+
+        Args:
+            articles: Lista de artigos para inserir
+
+        Returns:
+            Tuple (count, inserted_articles) onde inserted_articles contem
+            dicts com id, title, content para uso no scoring inline.
+        """
         if not articles:
-            return 0
+            return 0, []
 
         query = """
             INSERT INTO collected_articles
             (source_id, title, content, preview, url, image_url, author,
              category, tags, published_at, collected_at, hash)
+            OUTPUT INSERTED.id, INSERTED.title, INSERTED.content
             VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         """
 
         inserted = 0
+        inserted_articles = []
         with self.get_connection() as conn:
             cursor = conn.cursor()
 
@@ -603,6 +657,13 @@ class DatabaseService:
                         article.collected_at,
                         article.hash
                     ))
+                    row = cursor.fetchone()
+                    if row:
+                        inserted_articles.append({
+                            'id': row[0],
+                            'title': row[1],
+                            'content': row[2] or ''
+                        })
                     inserted += 1
                 except pymssql.IntegrityError as e:
                     # Duplicata (hash ou url ja existe)
@@ -614,7 +675,7 @@ class DatabaseService:
 
             conn.commit()
 
-        return inserted
+        return inserted, inserted_articles
 
     def delete_old_articles(self, hours: int = 24) -> int:
         """
@@ -852,7 +913,7 @@ class DatabaseService:
         Get categories with article counts, filtered by active filters.
         Returns counts that reflect what the user would see with those filters.
         """
-        where_clause, params = self._build_article_filters(
+        where_clause, params, _ = self._build_article_filters(
             search=search, tag=tag, source_id=source_id, period=period
         )
 
@@ -1042,7 +1103,13 @@ class DatabaseService:
             hash=row[12],
             source_name=row[13],
             source_url=row[14],
-            favicon=row[15]
+            favicon=row[15],
+            score=row[16] if len(row) > 16 else None,
+            score_classification=row[17] if len(row) > 17 else None,
+            score_inesperado=row[18] if len(row) > 18 else None,
+            score_impacto=row[19] if len(row) > 19 else None,
+            score_busca_agora=row[20] if len(row) > 20 else None,
+            score_conversa=row[21] if len(row) > 21 else None
         )
 
     # ========================================
@@ -1116,7 +1183,8 @@ class DatabaseService:
         query = f"""
             SELECT id, title, linha_fina, content, preview, status, category,
                    tags, source_article_ids, generation_config, author_name,
-                   created_at, updated_at, published_at, deleted_at
+                   created_at, updated_at, published_at, deleted_at,
+                   titulo_curto, resumo
             FROM user_articles
             {where_clause}
             ORDER BY updated_at DESC
@@ -1155,7 +1223,8 @@ class DatabaseService:
         query = f"""
             SELECT id, title, linha_fina, content, preview, status, category,
                    tags, source_article_ids, generation_config, author_name,
-                   created_at, updated_at, published_at, deleted_at
+                   created_at, updated_at, published_at, deleted_at,
+                   titulo_curto, resumo
             FROM user_articles
             WHERE {' AND '.join(conditions)}
         """
@@ -1186,13 +1255,14 @@ class DatabaseService:
 
         query = """
             INSERT INTO user_articles
-            (title, linha_fina, content, preview, status, category,
+            (title, linha_fina, titulo_curto, resumo, content, preview, status, category,
              tags, source_article_ids, generation_config, author_name, user_id)
             OUTPUT INSERTED.id, INSERTED.created_at, INSERTED.updated_at
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         """
 
         tags_json = json.dumps(article.tags) if article.tags else '[]'
+        resumo_json = json.dumps(article.resumo) if article.resumo else '[]'
         source_ids_json = json.dumps(article.source_article_ids) if article.source_article_ids else '[]'
         config_json = json.dumps(article.generation_config) if article.generation_config else None
 
@@ -1201,6 +1271,8 @@ class DatabaseService:
             cursor.execute(query, (
                 article.title,
                 article.linha_fina,
+                article.titulo_curto,
+                resumo_json,
                 article.content,
                 preview,
                 article.status,
@@ -1218,6 +1290,8 @@ class DatabaseService:
                 id=row[0],
                 title=article.title,
                 linha_fina=article.linha_fina,
+                titulo_curto=article.titulo_curto,
+                resumo=article.resumo,
                 content=article.content,
                 preview=preview,
                 status=article.status,
@@ -1253,6 +1327,12 @@ class DatabaseService:
         if data.linha_fina is not None:
             updates.append("linha_fina = %s")
             params.append(data.linha_fina)
+        if data.titulo_curto is not None:
+            updates.append("titulo_curto = %s")
+            params.append(data.titulo_curto)
+        if data.resumo is not None:
+            updates.append("resumo = %s")
+            params.append(json.dumps(data.resumo))
         if data.content is not None:
             updates.append("content = %s")
             params.append(data.content)
@@ -1362,7 +1442,9 @@ class DatabaseService:
             created_at=row[11],
             updated_at=row[12],
             published_at=row[13],
-            deleted_at=row[14]
+            deleted_at=row[14],
+            titulo_curto=row[15] if len(row) > 15 else None,
+            resumo=row[16] if len(row) > 16 else [],  # Sera parseado pelo validator
         )
 
     # ========================================

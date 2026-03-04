@@ -1511,6 +1511,7 @@ export const analyzeAIOverviewOptimization = (content, title) => {
  */
 export const performSEOAnalysis = ({
   title = '',
+  tituloCurto = '',
   linhaFina = '',
   content = '',
   tags = [],
@@ -1545,6 +1546,30 @@ export const performSEOAnalysis = ({
   const keywordStrategy = analyzeKeywordStrategy(content, title, effectiveKeyword);
   const urlSlug = analyzeSlug(slug, title, effectiveKeyword);
 
+  // Short title (titulo curto) optimization - informational metric (0 pts, not scored)
+  const shortTitleLen = tituloCurto?.length || 0;
+  let shortTitleStatus = 'neutral';
+  let shortTitleMessage = 'Título curto não definido. Recomendado para feeds e redes sociais.';
+  if (shortTitleLen > 0 && shortTitleLen <= 70) {
+    shortTitleStatus = 'success';
+    shortTitleMessage = `Título curto com ${shortTitleLen} caracteres (ideal: até 70)`;
+  } else if (shortTitleLen > 70) {
+    shortTitleStatus = 'error';
+    shortTitleMessage = `Título curto muito longo: ${shortTitleLen} caracteres (máximo: 70)`;
+  } else {
+    shortTitleStatus = 'warning';
+  }
+  const shortTitleOptimization = {
+    score: 0,
+    maxScore: 0,
+    status: shortTitleStatus,
+    message: shortTitleMessage,
+    details: {
+      length: shortTitleLen,
+      maxLength: 70
+    }
+  };
+
   const onPageScore = titleOptimization.score + metaDescription.score + keywordStrategy.score + urlSlug.score;
   const onPageOptimization = {
     score: onPageScore,
@@ -1552,6 +1577,7 @@ export const performSEOAnalysis = ({
     status: onPageScore >= 20 ? 'success' : onPageScore >= 12 ? 'warning' : 'error',
     metrics: {
       titleOptimization,
+      shortTitleOptimization,
       metaDescription,
       keywordStrategy,
       urlSlug

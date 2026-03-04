@@ -1,6 +1,7 @@
 import { memo, useCallback, useMemo } from 'react';
 import { ExternalLink, Check } from 'lucide-react';
 import { formatRelativeTime } from '../../data/mockData';
+import ScoreTooltip from '../ui/ScoreTooltip';
 import PropTypes from 'prop-types';
 
 /**
@@ -12,14 +13,16 @@ import PropTypes from 'prop-types';
  * - Focus Order (2.4.3): Tab order follows logical reading order
  */
 const categoryColors = {
-  'Política': 'bg-blue-500',
-  'Economia': 'bg-emerald-500',
-  'Esportes': 'bg-orange-500',
-  'Tecnologia': 'bg-purple-500',
-  'Entretenimento': 'bg-pink-500',
-  'Saúde': 'bg-red-500',
-  'Ciência': 'bg-cyan-500',
-  'Educação': 'bg-yellow-500'
+  'Política': 'bg-tmc-dark-green',
+  'Economia': 'bg-tmc-orange',
+  'Esportes': 'bg-alert-orange',
+  'Tecnologia': 'bg-tmc-light-green',
+  'Entretenimento': 'bg-[#8B6E4E]',
+  'Saúde': 'bg-[#2C6E8A]',
+  'Ciência': 'bg-[#4A7C6F]',
+  'Educação': 'bg-warning',
+  'Internacional': 'bg-[#5B6A8A]',
+  'Seguranca': 'bg-[#6B5B4E]',
 };
 
 const ArticleCard = ({ article, isSelected, onSelect, selectedTags = new Set(), onTagSelect }) => {
@@ -68,8 +71,24 @@ const ArticleCard = ({ article, isSelected, onSelect, selectedTags = new Set(), 
           {isSelected && <Check className="text-white" style={{ width: '14px', height: '14px' }} aria-hidden="true" />}
         </div>
 
-        {/* Category Tag */}
-        <div className="absolute top-3 right-3 z-10">
+        {/* Score Badge + Category Tag */}
+        <div className="absolute top-3 right-3 z-10 flex items-center gap-1.5">
+          {article.score != null && (
+            <ScoreTooltip article={article}>
+              <span
+                className={`text-white text-xs font-bold px-2 py-1 rounded-md ${
+                  article.scoreClassification === 'A'
+                    ? 'bg-success'
+                    : article.scoreClassification === 'B'
+                    ? 'bg-warning'
+                    : 'bg-medium-gray'
+                }`}
+                aria-label={`Score: ${article.score} - Classificação ${article.scoreClassification}`}
+              >
+                {article.score}
+              </span>
+            </ScoreTooltip>
+          )}
           <span className={`${categoryColor} text-white text-xs font-semibold px-2 py-1 rounded-md`} aria-label={`Categoria: ${article.category}`}>
             {article.category}
           </span>

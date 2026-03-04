@@ -26,16 +26,20 @@ const getApiBaseUrl = () => getBaseUrl();
 // Auth handler registration (avoids circular import with auth.js)
 let _getAuthToken = null;
 let _onUnauthorized = null;
+let _refreshToken = null;
+let _refreshPromise = null; // Singleton to avoid concurrent refresh calls
 
 /**
  * Register auth handlers for token injection and 401 handling.
  * Called by AuthContext on mount to wire up auth without circular imports.
  * @param {() => string|null} getToken - Returns current access token
- * @param {() => void} onUnauth - Called on 401 response
+ * @param {() => void} onUnauth - Called on 401 response (after refresh fails)
+ * @param {() => Promise<string|null>} refreshFn - Attempts to refresh token, returns new token or null
  */
-export function registerAuthHandlers(getToken, onUnauth) {
+export function registerAuthHandlers(getToken, onUnauth, refreshFn) {
   _getAuthToken = getToken;
   _onUnauthorized = onUnauth;
+  _refreshToken = refreshFn || null;
 }
 
 /**
@@ -89,8 +93,38 @@ async function fetchApi(endpoint, options = {}) {
     const response = await fetch(url, config);
 
     if (!response.ok) {
-      if (response.status === 401 && _onUnauthorized) {
-        _onUnauthorized();
+      // On 401, try to refresh the token and retry once (skip for auth endpoints)
+      if (response.status === 401 && !endpoint.startsWith('/auth/')) {
+        console.log('[fetchApi] 401 on', endpoint, '- attempting token refresh. Has refreshFn:', !!_refreshToken, 'Has token:', !!token);
+        if (_refreshToken) {
+          try {
+            // Use singleton promise to avoid concurrent refresh calls
+            if (!_refreshPromise) {
+              _refreshPromise = _refreshToken().finally(() => { _refreshPromise = null; });
+            }
+            const newToken = await _refreshPromise;
+            console.log('[fetchApi] Refresh result:', newToken ? 'got new token' : 'no token returned');
+            if (newToken) {
+              // Retry the original request with the new token
+              const retryHeaders = { ...headers, Authorization: `Bearer ${newToken}` };
+              const retryConfig = { ...restOptions, headers: retryHeaders, signal, credentials: 'include' };
+              const retryResponse = await fetch(url, retryConfig);
+              if (retryResponse.ok) {
+                const ct = retryResponse.headers.get('content-type');
+                if (ct && ct.includes('application/json')) {
+                  return await retryResponse.json();
+                }
+                return null;
+              }
+              console.log('[fetchApi] Retry after refresh failed with status:', retryResponse.status);
+            }
+          } catch (refreshErr) {
+            console.log('[fetchApi] Refresh error:', refreshErr);
+          }
+        }
+        if (_onUnauthorized) {
+          _onUnauthorized();
+        }
       }
       const errorData = await response.json().catch(() => null);
       throw new ApiError(
@@ -165,6 +199,8 @@ export async function getArticles(params = {}, options = {}) {
   if (params.search) queryParams.append('search', params.search);
   if (params.tag) queryParams.append('tag', params.tag);
   if (params.max_hours) queryParams.append('max_hours', params.max_hours.toString());
+  if (params.classification) queryParams.append('classification', params.classification);
+  if (params.order_by) queryParams.append('order_by', params.order_by);
 
   const queryString = queryParams.toString();
   const endpoint = `/articles${queryString ? `?${queryString}` : ''}`;
@@ -326,11 +362,11 @@ export async function getAllTags(params = {}) {
  * @param {string[]} [params.tags] - User-selected tags for SEO optimization
  * @param {string} [params.categoria] - Editorial category (esportes|entretenimento|politica|economia|geral) - NEW
  * @param {boolean} [params.modo_opinativo] - Enable opinion mode for categories that allow it - NEW
- * @returns {Promise<{titulo: string, linha_fina: string, conteudo: string, tags_sugeridas: string[]}>}
+ * @returns {Promise<{titulo: string, titulo_curto: string, linha_fina: string, conteudo: string, tags_sugeridas: string[]}>}
  */
 export async function generateArticle(params) {
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 180000);
+  const timeoutId = setTimeout(() => controller.abort(), 300000);
 
   try {
     const response = await fetchApi('/generate', {
@@ -341,7 +377,7 @@ export async function generateArticle(params) {
     return response;
   } catch (error) {
     if (error.name === 'AbortError') {
-      throw new Error('A geracao demorou mais que o esperado. Tente novamente.');
+      throw new Error('A geração excedeu o tempo limite de 5 minutos. Tente novamente.');
     }
     throw error;
   } finally {
@@ -411,6 +447,7 @@ export async function editArticle({
     body: JSON.stringify({
       current_article: {
         title: currentArticle.title,
+        titulo_curto: currentArticle.tituloCurto || '',
         linha_fina: currentArticle.linhaFina,
         content: currentArticle.content,
         tags: currentArticle.tags || []

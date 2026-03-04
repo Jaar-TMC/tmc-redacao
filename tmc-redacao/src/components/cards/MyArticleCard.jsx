@@ -5,14 +5,16 @@ import { formatRelativeTime } from '../../data/mockData';
 import PropTypes from 'prop-types';
 
 const categoryColors = {
-  'Política': '#3B82F6',
-  'Economia': '#10B981',
-  'Esportes': '#E87722',
-  'Tecnologia': '#8B5CF6',
-  'Entretenimento': '#EC4899',
-  'Saúde': '#E53935',
-  'Ciência': '#06B6D4',
-  'Educação': '#F59E0B'
+  'Política': '#1A4D2E',
+  'Economia': '#E87722',
+  'Esportes': '#FF6B35',
+  'Tecnologia': '#2D5A3D',
+  'Entretenimento': '#8B6E4E',
+  'Saúde': '#2C6E8A',
+  'Ciência': '#4A7C6F',
+  'Educação': '#F59E0B',
+  'Internacional': '#5B6A8A',
+  'Seguranca': '#6B5B4E',
 };
 
 /**

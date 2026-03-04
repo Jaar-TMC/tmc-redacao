@@ -18,6 +18,8 @@ export const FiltersProvider = ({ children }) => {
     category: null,
     source: null,
     urgency: null,
+    scoreClassification: null,
+    sortOrder: 'newest',
   });
 
   const updateFilter = useCallback((filterName, value) => {
@@ -41,6 +43,8 @@ export const FiltersProvider = ({ children }) => {
       category: null,
       source: null,
       urgency: null,
+      scoreClassification: null,
+      sortOrder: 'newest',
     });
   }, []);
 

@@ -282,7 +282,8 @@ ${opinionSection}
 
 1. **Estrutura da Materia:**
    - Titulo: Claro, informativo, 50-60 caracteres para SEO
-   - Linha Fina: Resumo que complementa o titulo, 150-160 caracteres
+   - Linha Fina: Resumo que complementa o titulo, MAXIMO 120 caracteres
+   - Resumo da Materia: 4 bullet points com os pontos mais importantes
    - Corpo: Minimo ${MIN_ARTICLE_LENGTH} caracteres, estrutura de piramide invertida
 
 2. **Formatacao:**
@@ -290,6 +291,8 @@ ${opinionSection}
    - Inclua subtitulos quando apropriado (use ## para subtitulos)
    - Destaque citacoes importantes
    - Mantenha fluidez entre paragrafos
+   - **CTA OBRIGATORIO**: Apos o 2o ou 3o paragrafo do corpo, insira em paragrafo proprio:
+     "Siga a TMC no WhatsApp e fique por dentro das ultimas noticias do Brasil e do mundo."
 
    **NEGRITO - REGRAS DE DESTAQUE (use **texto** em markdown):**
    O negrito guia a leitura e destaca informacoes-chave. Use com moderacao (3-6 destaques por paragrafo longo).
@@ -331,9 +334,12 @@ ${opinionSection}
    \`\`\`json
    {
      "titulo": "Titulo da materia",
-     "linha_fina": "Linha fina descritiva",
-     "conteudo": "Corpo completo da materia com **negritos** para destaques...",
-     "tags_sugeridas": ["tag1", "tag2", "tag3"]
+     "titulo_curto": "Versao curta do titulo (max 70 caracteres)",
+     "linha_fina": "Linha fina descritiva (max 120 caracteres)",
+     "resumo": ["Ponto-chave 1", "Ponto-chave 2", "Ponto-chave 3", "Ponto-chave 4"],
+     "conteudo": "Corpo completo da materia com **negritos** para destaques e CTA apos 2o/3o paragrafo...",
+     "tags_sugeridas": ["tag1", "tag2", "tag3"],
+     "slug_sugerido": "palavras-chave-separadas-por-hifen"
    }
    \`\`\``;
 }

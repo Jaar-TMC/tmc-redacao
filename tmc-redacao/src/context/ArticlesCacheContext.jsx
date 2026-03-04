@@ -20,6 +20,8 @@ export function ArticlesCacheProvider({ children }) {
       category: filters.category || null,
       source: filters.source || null,
       urgency: filters.urgency || null,
+      scoreClassification: filters.scoreClassification || null,
+      sortOrder: filters.sortOrder || 'newest',
       page: page || 1
     });
   }, []);

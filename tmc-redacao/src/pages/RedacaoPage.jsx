@@ -63,6 +63,8 @@ const RedacaoPage = () => {
     category: filters.category,
     source: filters.source,
     urgency: filters.urgency,
+    scoreClassification: filters.scoreClassification,
+    sortOrder: filters.sortOrder,
   });
 
   // Ref to skip redundant fetch after page reset
@@ -87,7 +89,9 @@ const RedacaoPage = () => {
       prevFiltersRef.current.tag !== filters.tag ||
       prevFiltersRef.current.category !== filters.category ||
       prevFiltersRef.current.source !== filters.source ||
-      prevFiltersRef.current.urgency !== filters.urgency;
+      prevFiltersRef.current.urgency !== filters.urgency ||
+      prevFiltersRef.current.scoreClassification !== filters.scoreClassification ||
+      prevFiltersRef.current.sortOrder !== filters.sortOrder;
 
     // Update prev filters ref
     prevFiltersRef.current = {
@@ -96,6 +100,8 @@ const RedacaoPage = () => {
       category: filters.category,
       source: filters.source,
       urgency: filters.urgency,
+      scoreClassification: filters.scoreClassification,
+      sortOrder: filters.sortOrder,
     };
 
     // When filters change, always fetch from page 1 (and sync state)
@@ -141,6 +147,8 @@ const RedacaoPage = () => {
           ...(filters.category && { category: filters.category }),
           ...(filters.source && { source: filters.source }),
           ...(filters.urgency && { max_hours: filters.urgency }),
+          ...(filters.scoreClassification && { classification: filters.scoreClassification }),
+          ...(filters.sortOrder && filters.sortOrder !== 'newest' && { order_by: filters.sortOrder }),
         };
 
         const response = await getArticles(params, { signal: abortController.signal });
@@ -193,7 +201,7 @@ const RedacaoPage = () => {
     return () => {
       abortController.abort();
     };
-  }, [filters.searchQuery, filters.tag, filters.category, filters.source, filters.urgency, currentPage, getCachedData, setCachedData]);
+  }, [filters.searchQuery, filters.tag, filters.category, filters.source, filters.urgency, filters.scoreClassification, filters.sortOrder, currentPage, getCachedData, setCachedData]);
 
   // Retry fetch after error
   const handleRetry = useCallback(async () => {
@@ -208,6 +216,8 @@ const RedacaoPage = () => {
         ...(filters.category && { category: filters.category }),
         ...(filters.source && { source: filters.source }),
         ...(filters.urgency && { max_hours: filters.urgency }),
+        ...(filters.scoreClassification && { classification: filters.scoreClassification }),
+        ...(filters.sortOrder && filters.sortOrder !== 'newest' && { order_by: filters.sortOrder }),
       };
       const response = await getArticles(params);
       const transformedArticles = transformArticles(response?.items);
@@ -348,7 +358,7 @@ const RedacaoPage = () => {
               </button>
             </div>
           ) : articles.length === 0 ? (
-            (filters.searchQuery || filters.tag || filters.category || filters.source) ? (
+            (filters.searchQuery || filters.tag || filters.category || filters.source || filters.scoreClassification) ? (
               <SmartEmptyState />
             ) : (
               <EmptyState

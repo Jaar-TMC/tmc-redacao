@@ -1,4 +1,4 @@
-import { Search, ChevronDown, Building2, Tag, Hash } from 'lucide-react';
+import { Search, ChevronDown, Building2, Tag, Hash, HelpCircle, ArrowDownWideNarrow, Clock } from 'lucide-react';
 import { useState, useCallback, useEffect, useRef, useMemo } from 'react';
 import PropTypes from 'prop-types';
 import { getSources, getCategories, getAllTags } from '../../services/api';
@@ -408,13 +408,155 @@ const FilterBar = ({ urgencyCounts }) => {
         </div>
       </div>
 
-      {/* Urgency Chips - temporal filter */}
-      <div className="mt-3 pt-3 border-t border-dashed border-light-gray">
-        <UrgencyChips
+      {/* Urgency Chips + Score Classification Chips */}
+      <div className="mt-3 pt-3 border-t border-dashed border-light-gray flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-center gap-2">
+          <span className="text-xs font-semibold text-medium-gray whitespace-nowrap">Período:</span>
+          <UrgencyChips
           counts={urgencyCounts}
           activeUrgency={filters.urgency}
           onUrgencyChange={handleUrgencyChange}
         />
+        </div>
+
+        {/* Score Classification Chips */}
+        <div className="flex items-center gap-2">
+          <span className="text-xs font-semibold text-medium-gray whitespace-nowrap">Score:</span>
+          <div className="flex items-center gap-1.5" role="radiogroup" aria-label="Filtrar por score editorial">
+            {[
+              { value: null, label: 'Todos',
+                active: 'bg-medium-gray border-medium-gray text-white font-semibold shadow-sm',
+                hover: 'hover:bg-off-white hover:border-medium-gray hover:text-dark-gray',
+                dot: '', dotActive: '' },
+              { value: 'A', label: 'A', fullLabel: 'Destaque',
+                active: 'bg-success border-success text-white font-semibold shadow-sm',
+                hover: 'hover:bg-success/10 hover:border-success hover:text-success',
+                dot: 'bg-success', dotActive: 'bg-white/70' },
+              { value: 'B', label: 'B', fullLabel: 'Relevante',
+                active: 'bg-warning border-warning text-white font-semibold shadow-sm',
+                hover: 'hover:bg-warning/10 hover:border-warning hover:text-warning',
+                dot: 'bg-warning', dotActive: 'bg-white/70' },
+              { value: 'C', label: 'C', fullLabel: 'Baixo',
+                active: 'bg-medium-gray border-medium-gray text-white font-semibold shadow-sm',
+                hover: 'hover:bg-off-white hover:border-medium-gray hover:text-dark-gray',
+                dot: 'bg-medium-gray', dotActive: 'bg-white/70' },
+            ].map((opt) => {
+              const isActive = filters.scoreClassification === opt.value;
+              return (
+                <button
+                  key={opt.value ?? 'all-scores'}
+                  type="button"
+                  role="radio"
+                  aria-checked={isActive}
+                  aria-label={opt.fullLabel ? `Score ${opt.label} - ${opt.fullLabel}` : 'Todos os scores'}
+                  onClick={() => updateFilter('scoreClassification', isActive && opt.value !== null ? null : opt.value)}
+                  className={`
+                    inline-flex items-center gap-1 rounded-full border text-sm font-medium
+                    transition-all duration-200 cursor-pointer
+                    focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-blue-500
+                    px-3 py-1.5
+                    ${isActive ? opt.active : `bg-white border-light-gray text-medium-gray ${opt.hover}`}
+                  `}
+                >
+                  {opt.value && <span className={`w-2 h-2 rounded-full ${isActive ? opt.dotActive : opt.dot}`} aria-hidden="true" />}
+                  <span>{opt.label}</span>
+                  {opt.fullLabel && <span className="hidden md:inline">{opt.fullLabel}</span>}
+                </button>
+              );
+            })}
+          </div>
+
+          {/* Score Help Tooltip */}
+          <div className="relative group">
+            <button
+              type="button"
+              className="p-1 text-medium-gray hover:text-tmc-orange transition-colors rounded-full hover:bg-off-white"
+              aria-label="Entenda o score editorial"
+            >
+              <HelpCircle style={{ width: '16px', height: '16px' }} />
+            </button>
+            <div className="absolute top-full right-0 mt-2 w-80 bg-dark-gray text-white text-xs rounded-lg p-4 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 z-30 shadow-lg pointer-events-none">
+              <p className="font-bold text-sm mb-2">Score Editorial (0-100)</p>
+              <p className="mb-3 text-white/80">Cada matéria recebe um score baseado em 4 sinais editoriais que medem seu potencial jornalístico:</p>
+              <div className="space-y-2">
+                <div>
+                  <span className="font-semibold text-amber-300">Inesperado (0-25)</span>
+                  <p className="text-white/70">Mede o quão surpreendente é a notícia. Fatos inéditos, reviravoltas e revelações pontuam mais.</p>
+                </div>
+                <div>
+                  <span className="font-semibold text-blue-300">Impacto (0-30)</span>
+                  <p className="text-white/70">Avalia a abrangência do impacto: quantas pessoas são afetadas e a gravidade das consequências.</p>
+                </div>
+                <div>
+                  <span className="font-semibold text-purple-300">Busca Agora (0-25)</span>
+                  <p className="text-white/70">Estima a probabilidade de as pessoas estarem buscando sobre o assunto neste momento.</p>
+                </div>
+                <div>
+                  <span className="font-semibold text-pink-300">Conversa (0-20)</span>
+                  <p className="text-white/70">Mede o potencial de gerar discussão e compartilhamento em redes sociais.</p>
+                </div>
+              </div>
+              <div className="mt-3 pt-2 border-t border-white/20 space-y-1">
+                <div className="flex items-center gap-2">
+                  <span className="w-2 h-2 rounded-full bg-success" />
+                  <span><strong>A</strong> Destaque (75+) — matérias imperdíveis</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="w-2 h-2 rounded-full bg-warning" />
+                  <span><strong>B</strong> Relevante (40-74) — boas pautas</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="w-2 h-2 rounded-full bg-light-gray" />
+                  <span><strong>C</strong> Baixo (&lt;40) — menor relevância</span>
+                </div>
+              </div>
+              {/* Tooltip arrow */}
+              <div className="absolute -top-1 right-3 w-2 h-2 bg-dark-gray rotate-45" />
+            </div>
+          </div>
+
+          {/* Sort Order Divider + Toggle */}
+          <div className="w-px h-5 bg-light-gray mx-1" aria-hidden="true" />
+          <span className="text-xs font-semibold text-medium-gray whitespace-nowrap">Ordenar:</span>
+          <div className="flex items-center gap-1" role="radiogroup" aria-label="Ordenar matérias">
+            <button
+              type="button"
+              role="radio"
+              aria-checked={filters.sortOrder === 'newest'}
+              aria-label="Ordenar por mais recentes"
+              onClick={() => updateFilter('sortOrder', 'newest')}
+              className={`
+                inline-flex items-center gap-1 rounded-full border text-sm font-medium
+                transition-all duration-200 cursor-pointer px-3 py-1.5
+                focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-blue-500
+                ${filters.sortOrder === 'newest'
+                  ? 'bg-tmc-dark-green border-tmc-dark-green text-white font-semibold shadow-sm'
+                  : 'bg-white border-light-gray text-medium-gray hover:bg-off-white hover:border-tmc-dark-green hover:text-tmc-dark-green'}
+              `}
+            >
+              <Clock style={{ width: '14px', height: '14px' }} aria-hidden="true" />
+              <span className="hidden md:inline">Recentes</span>
+            </button>
+            <button
+              type="button"
+              role="radio"
+              aria-checked={filters.sortOrder === 'score'}
+              aria-label="Ordenar por maior score"
+              onClick={() => updateFilter('sortOrder', 'score')}
+              className={`
+                inline-flex items-center gap-1 rounded-full border text-sm font-medium
+                transition-all duration-200 cursor-pointer px-3 py-1.5
+                focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-blue-500
+                ${filters.sortOrder === 'score'
+                  ? 'bg-tmc-dark-green border-tmc-dark-green text-white font-semibold shadow-sm'
+                  : 'bg-white border-light-gray text-medium-gray hover:bg-off-white hover:border-tmc-dark-green hover:text-tmc-dark-green'}
+              `}
+            >
+              <ArrowDownWideNarrow style={{ width: '14px', height: '14px' }} aria-hidden="true" />
+              <span className="hidden md:inline">Score</span>
+            </button>
+          </div>
+        </div>
       </div>
 
       {/* Close dropdown when clicking outside */}

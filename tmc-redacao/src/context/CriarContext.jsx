@@ -80,6 +80,7 @@ const initialState = {
   resultado: (() => {
     const defaultResultado = {
       titulo: '',
+      tituloCurto: '',
       conteudo: '',
       geradoEm: null,
       // Anti-hallucination verification data

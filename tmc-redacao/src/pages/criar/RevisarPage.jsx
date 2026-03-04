@@ -83,11 +83,11 @@ const RevisarPage = () => {
 
   // Pipeline phases with realistic timing based on production measurements
   const PHASES = useMemo(() => [
-    { id: 'enrichment', label: 'Enriquecimento', description: 'Buscando fontes e verificando fatos...', Icon: Search, targetProgress: 15, durationMs: 7000 },
-    { id: 'generation', label: 'Geração', description: 'Escrevendo matéria com IA Claude...', Icon: Sparkles, targetProgress: 50, durationMs: 20000 },
-    { id: 'verification', label: 'Verificação', description: 'Conferindo claims e informações...', Icon: ShieldCheck, targetProgress: 70, durationMs: 12000 },
-    { id: 'refinement', label: 'Refinamento', description: 'Corrigindo e aprimorando automaticamente...', Icon: Sparkles, targetProgress: 90, durationMs: 15000 },
-    { id: 'finishing', label: 'Finalização', description: 'Aplicando SEO e revisão final...', Icon: CheckCircle2, targetProgress: 95, durationMs: 3000 },
+    { id: 'enrichment', label: 'Enriquecimento', description: 'Buscando fontes e verificando fatos...', Icon: Search, targetProgress: 15, durationMs: 15000 },
+    { id: 'generation', label: 'Geração', description: 'Escrevendo matéria com IA...', Icon: Sparkles, targetProgress: 45, durationMs: 40000 },
+    { id: 'verification', label: 'Verificação', description: 'Conferindo claims e informações...', Icon: ShieldCheck, targetProgress: 65, durationMs: 30000 },
+    { id: 'refinement', label: 'Refinamento', description: 'Corrigindo e aprimorando automaticamente...', Icon: Sparkles, targetProgress: 85, durationMs: 40000 },
+    { id: 'finishing', label: 'Finalização', description: 'Aplicando SEO e revisão final...', Icon: CheckCircle2, targetProgress: 95, durationMs: 10000 },
   ], []);
 
   // Build review data from context or use mock
@@ -312,7 +312,9 @@ const RevisarPage = () => {
       if (setResultado) {
         setResultado({
           titulo: result.titulo,
+          tituloCurto: result.titulo_curto || '',
           linhaFina: result.linha_fina,
+          resumo: result.resumo || [],
           conteudo: result.conteudo,
           tagsSugeridas: result.tags_sugeridas || [],
           geradoEm: new Date().toISOString(),
@@ -481,6 +483,10 @@ const RevisarPage = () => {
 
           <p className="text-center text-xs text-gray-500">
             {Math.round(generationProgress)}% concluído
+          </p>
+
+          <p className="text-center text-xs text-gray-500 mt-6">
+            Não atualize ou saia da página durante a geração.
           </p>
         </div>
       </div>

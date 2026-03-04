@@ -14,6 +14,8 @@ class UserArticleBase(BaseModel):
     """Campos base para UserArticle."""
     title: str = Field(..., min_length=1, max_length=1000)
     linha_fina: Optional[str] = Field(None, max_length=500)
+    titulo_curto: Optional[str] = Field(None, max_length=70)
+    resumo: List[str] = Field(default_factory=list)
     content: str = Field(..., min_length=1)
     preview: Optional[str] = Field(None, max_length=500)
     category: Optional[str] = Field(None, max_length=100)
@@ -32,6 +34,8 @@ class UserArticleUpdate(BaseModel):
     """Schema para atualizar um artigo de usuario (todos campos opcionais)."""
     title: Optional[str] = Field(None, max_length=1000)
     linha_fina: Optional[str] = Field(None, max_length=500)
+    titulo_curto: Optional[str] = Field(None, max_length=70)
+    resumo: Optional[List[str]] = None
     content: Optional[str] = None
     preview: Optional[str] = Field(None, max_length=500)
     status: Optional[Literal['draft', 'published']] = None
@@ -61,6 +65,17 @@ class UserArticle(UserArticleBase):
     @classmethod
     def parse_tags(cls, v):
         """Parse tags de JSON string para lista."""
+        if isinstance(v, str):
+            try:
+                return json.loads(v)
+            except json.JSONDecodeError:
+                return []
+        return v or []
+
+    @field_validator('resumo', mode='before')
+    @classmethod
+    def parse_resumo(cls, v):
+        """Parse resumo de JSON string para lista."""
         if isinstance(v, str):
             try:
                 return json.loads(v)
@@ -146,6 +161,8 @@ class UserArticle(UserArticleBase):
             "views": 0,  # Placeholder - could be tracked separately
             "tags": self.tags,
             "linhaFina": self.linha_fina,
+            "tituloCurto": self.titulo_curto,
+            "resumo": self.resumo,
             "content": self.content,
             "sourceArticleIds": self.source_article_ids,
             "generationConfig": self.generation_config

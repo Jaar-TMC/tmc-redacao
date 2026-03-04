@@ -1349,14 +1349,22 @@ Regras:
         try:
             llm = self._get_llm()
 
-            # Build verification context
+            # Build verification context - enrichment as AUTHORIZED MATERIAL
             source_context = texto_base
+            enrichment_section = ""
             if enrichment and enrichment.success:
+                enrichment_parts = []
                 if enrichment.key_facts:
                     facts_text = "\n".join(f"- {f}" for f in enrichment.key_facts)
+                    enrichment_parts.append(f"FATOS VERIFICADOS por fontes externas:\n{facts_text}")
                     source_context += f"\n\nFATOS VERIFICADOS (fontes externas):\n{facts_text}"
-                elif enrichment.context_text:
-                    source_context += f"\n\nCONTEXTO DE FONTES EXTERNAS (material bruto):\n{enrichment.context_text[:2000]}"
+                if enrichment.context_text:
+                    ctx_budget = 3000 if not enrichment.key_facts else 2000
+                    enrichment_parts.append(f"CONTEXTO BRUTO de fontes externas:\n{enrichment.context_text[:ctx_budget]}")
+                    if not enrichment.key_facts:
+                        source_context += f"\n\nCONTEXTO DE FONTES EXTERNAS (material bruto):\n{enrichment.context_text[:ctx_budget]}"
+                if enrichment_parts:
+                    enrichment_section = "\n\n".join(enrichment_parts)
 
             # Truncation warning (4A)
             source_for_verification = texto_base[:6000]
@@ -1366,18 +1374,18 @@ Regras:
             if len(generated_article) > 3000:
                 logger.warning(f"Article truncated for verification: {len(generated_article)} -> 3000 chars ({len(generated_article)-3000} chars unverified)")
 
-            system = ("Voce e um verificador factual EXTREMAMENTE rigoroso de artigos "
-                      "jornalisticos. Seu papel e proteger o leitor contra desinformacao. "
-                      "Na duvida, erre para o lado da cautela.")
-            prompt = f"""Compare o ARTIGO GERADO com o TEXTO-FONTE e verifique a fidelidade factual.
+            system = ("Voce e um verificador factual rigoroso de artigos "
+                      "jornalisticos. Seu papel e proteger o leitor contra desinformacao, "
+                      "mas tambem reconhecer informacoes legitimas de fontes verificadas.")
+            prompt = f"""Compare o ARTIGO GERADO com o MATERIAL AUTORIZADO (texto-fonte + contexto verificado) e verifique a fidelidade factual.
 
 TEXTO-FONTE (material original):
 {source_for_verification}
 
+{f"MATERIAL AUTORIZADO - CONTEXTO VERIFICADO (fontes jornalisticas externas - informacoes abaixo sao VALIDAS para fundamentar o artigo):{chr(10)}{enrichment_section}" if enrichment_section else ""}
+
 ARTIGO GERADO (para verificar):
 {article_for_verification}
-
-{f"CONTEXTO VERIFICADO (fontes externas):{chr(10)}{source_context[len(texto_base):]}" if enrichment and enrichment.success else ""}
 
 Extraia ate {MAX_CLAIMS} afirmacoes do artigo gerado e classifique cada uma:
 
@@ -1388,8 +1396,8 @@ Responda em JSON:
     {{
       "text": "Afirmacao extraida do artigo",
       "verdict": "grounded|fabricated|unverifiable|inaccurate|opinion|context",
-      "source_evidence": "Trecho do texto-fonte que sustenta (ou contradiz) a afirmacao",
-      "source_reference": "Sentenca EXATA do texto-fonte que sustenta esta afirmacao (copiar literal)",
+      "source_evidence": "Trecho do texto-fonte OU contexto verificado que sustenta (ou contradiz) a afirmacao",
+      "source_reference": "Sentenca EXATA do material autorizado que sustenta esta afirmacao (copiar literal)",
       "category": "fact|statistic|quote|outcome|attribution|opinion"
     }}
   ]
@@ -1397,12 +1405,12 @@ Responda em JSON:
 ```
 
 Regras de classificacao:
-- **grounded**: Informacao factual presente no texto-fonte ou contexto verificado
+- **grounded**: Informacao factual presente no texto-fonte OU no contexto verificado acima
 - **fabricated**: Informacao factual INCORRETA, DESCONEXA do tema, ou dados especificos inventados que CONTRADIZEM ou DISTORCEM os fatos (ex: inventar placar, atribuir fala a pessoa errada, criar evento que nao aconteceu)
 - **inaccurate**: Informacao factual distorcida (ex: numeros errados, nomes trocados)
-- **unverifiable**: Informacao factual impossivel de confirmar com o material disponivel
-- **opinion**: Opiniao subjetiva, analise valorativa, previsao ("o cenario e preocupante", "analistas esperam"), comentarios editoriais. NAO verificavel factualmente.
-- **context**: Contexto factual que enriquece a materia: background de organizacoes, dados historicos de conhecimento publico, inferencias logicas RAZOAVEIS dos fatos. DEVE ser factualmente correto.
+- **unverifiable**: Informacao factual especifica (nomes, numeros, datas, eventos concretos) que NAO aparece em NENHUM material autorizado acima E nao e conhecimento publico obvio
+- **opinion**: Opiniao subjetiva, analise valorativa, previsao, enquadramento editorial ("o cenario e preocupante", "analistas esperam", "a decisao e considerada importante", "o caso ganha destaque"). NAO verificavel factualmente.
+- **context**: Contexto factual que enriquece a materia: background de organizacoes, dados historicos de conhecimento publico, inferencias logicas RAZOAVEIS e DIRETAS dos fatos, descricoes fatuais corretas. DEVE ser factualmente correto.
 
 IMPORTANTE - REGRAS DE CLASSIFICACAO:
 - "fabricated" deve ser usado APENAS para informacoes que sao INCORRETAS, DESCONEXAS do tema, ou que DISTORCEM os fatos. Informacao factualmente correta que enriquece a materia com coesao tematica e "context", NAO "fabricated"
@@ -1415,11 +1423,23 @@ IMPORTANTE - REGRAS DE CLASSIFICACAO:
   * "O cenario e preocupante" -> opinion
   * "Analistas esperam melhoras" -> opinion
   * "Isso sugere que o caso e prioritario" -> opinion
+  * "A decisao pode afetar o mercado" -> opinion
+  * "O tema ganha relevancia" -> opinion
+  * "A medida e considerada positiva" -> opinion
+  * Frases de ENQUADRAMENTO jornalistico que dao tom a materia -> opinion
 - Exemplos de "context" (factual correto, enriquece materia):
   * Descrever uma organizacao mencionada na fonte ("e um dos maiores jornais") -> context
   * Contexto historico/geografico correto e relevante ao tema -> context
   * Generalizacoes fatuais de conhecimento publico ("ataques a oficiais sao raros") -> context
-- NA DUVIDA entre "context" e "fabricated": se a informacao e factualmente correta e tem coesao com o tema, prefira "context"
+  * Informacao presente no CONTEXTO VERIFICADO acima (fontes externas) -> context
+  * Inferencia logica DIRETA e OBVIA dos fatos na fonte -> context
+- Exemplos de "unverifiable" (RESTRITO - usar com parcimonia):
+  * Numeros, datas ou nomes especificos que NAO aparecem em nenhum material autorizado -> unverifiable
+  * Eventos concretos nao mencionados em nenhuma fonte -> unverifiable
+  * NAO classificar como "unverifiable" se: a informacao e uma inferencia logica dos fatos, e opiniao/enquadramento editorial, ou e conhecimento publico basico
+- PRIORIDADE DE CLASSIFICACAO: Antes de marcar como "unverifiable", verifique se a afirmacao se encaixa melhor como "opinion" (subjetiva) ou "context" (factual correta de conhecimento publico). Use "unverifiable" APENAS para dados especificos sem fonte.
+- NA DUVIDA entre "context" e "unverifiable": se a informacao e factualmente plausivel, tem coesao com o tema, e nao contem dados especificos inventados, prefira "context"
+- NA DUVIDA entre "opinion" e "unverifiable": se a afirmacao e subjetiva, valorativa ou de enquadramento editorial, classifique como "opinion"
 - Afirmacoes "opinion" NAO contam na avaliacao de precisao factual
 - Afirmacoes "context" CONTAM na avaliacao (devem ser factualmente corretas)"""
 

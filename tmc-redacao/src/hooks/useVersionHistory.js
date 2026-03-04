@@ -52,6 +52,7 @@ export function useVersionHistory(initialContent, options = {}) {
         chatMessageId: null,
         content: {
           title: initialContent?.title || '',
+          tituloCurto: initialContent?.tituloCurto || '',
           linhaFina: initialContent?.linhaFina || '',
           body: initialContent?.body || initialContent?.content || '',
           tags: initialContent?.tags || []
@@ -137,6 +138,7 @@ export function useVersionHistory(initialContent, options = {}) {
         chatMessageId,
         content: {
           title: content.title ?? '',
+          tituloCurto: content.tituloCurto ?? '',
           linhaFina: content.linhaFina ?? '',
           body: content.body ?? content.content ?? '',
           tags: content.tags ?? []
@@ -206,6 +208,7 @@ export function useVersionHistory(initialContent, options = {}) {
           chatMessageId: null,
           content: {
             title: newInitialContent?.title || '',
+            tituloCurto: newInitialContent?.tituloCurto || '',
             linhaFina: newInitialContent?.linhaFina || '',
             body: newInitialContent?.body || newInitialContent?.content || '',
             tags: newInitialContent?.tags || []

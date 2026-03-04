@@ -1,4 +1,4 @@
-import { X, Search, Hash, Tag, Building2, XCircle } from 'lucide-react';
+import { X, Search, Hash, Tag, Building2, XCircle, Award, Clock } from 'lucide-react';
 import { useFilters } from '../../context';
 import { addAccents, formatTagDisplay } from '../../utils/accentMap';
 import PropTypes from 'prop-types';
@@ -11,8 +11,19 @@ import PropTypes from 'prop-types';
 const ActiveFiltersBar = ({ className = '' }) => {
   const { filters, updateFilter, resetFilters } = useFilters();
 
-  // Build list of active filters (exclude urgency - it has its own UI)
+  // Build list of active filters
   const activeFilters = [];
+
+  if (filters.urgency) {
+    const urgencyLabels = { 1: 'Última hora', 3: 'Últimas 3h', 8: 'Últimas 8h' };
+    activeFilters.push({
+      key: 'urgency',
+      label: urgencyLabels[filters.urgency] || `${filters.urgency}h`,
+      icon: Clock,
+      color: 'bg-sky-50 text-sky-700 border-sky-200',
+      hoverColor: 'hover:bg-sky-100',
+    });
+  }
 
   if (filters.searchQuery) {
     activeFilters.push({
@@ -51,6 +62,23 @@ const ActiveFiltersBar = ({ className = '' }) => {
       icon: Building2,
       color: 'bg-emerald-50 text-emerald-700 border-emerald-200',
       hoverColor: 'hover:bg-emerald-100',
+    });
+  }
+
+  if (filters.scoreClassification) {
+    const classLabels = { A: 'A - Destaque', B: 'B - Relevante', C: 'C - Baixo' };
+    const classColors = {
+      A: { color: 'bg-success/10 text-success border-success/30', hoverColor: 'hover:bg-success/20' },
+      B: { color: 'bg-warning/10 text-warning border-warning/30', hoverColor: 'hover:bg-warning/20' },
+      C: { color: 'bg-medium-gray/10 text-medium-gray border-medium-gray/30', hoverColor: 'hover:bg-medium-gray/20' },
+    };
+    const colors = classColors[filters.scoreClassification] || classColors.B;
+    activeFilters.push({
+      key: 'scoreClassification',
+      label: classLabels[filters.scoreClassification] || filters.scoreClassification,
+      icon: Award,
+      color: colors.color,
+      hoverColor: colors.hoverColor,
     });
   }
 

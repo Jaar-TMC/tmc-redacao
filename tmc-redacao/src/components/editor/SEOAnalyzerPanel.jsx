@@ -320,6 +320,7 @@ const MetricItem = ({ metricKey, metric, explanation }) => {
     contentStructure: 'Estrutura do Conteúdo',
     readability: 'Legibilidade',
     titleOptimization: 'Título',
+    shortTitleOptimization: 'Título Curto',
     metaDescription: 'Meta Description',
     keywordStrategy: 'Palavras-chave',
     urlSlug: 'URL/Slug',
@@ -374,6 +375,14 @@ const MetricItem = ({ metricKey, metric, explanation }) => {
         {metricKey === 'internalLinks' || metricKey === 'mediaOptimization' ? (
           <span className="text-[10px] font-medium text-amber-600">
             ação manual
+          </span>
+        ) : metricKey === 'shortTitleOptimization' ? (
+          <span className={`text-[10px] font-medium ${
+            metric.status === 'success' ? 'text-success' :
+            metric.status === 'warning' ? 'text-warning' :
+            metric.status === 'error' ? 'text-error' : 'text-medium-gray'
+          }`}>
+            {metric.details?.length || 0}/70
           </span>
         ) : (
           <span className={`text-[10px] font-medium ${
@@ -576,6 +585,7 @@ ManualTasksPanel.propTypes = {
 
 const SEOAnalyzerPanel = ({
   title,
+  tituloCurto,
   linhaFina,
   content,
   tags,
@@ -597,6 +607,7 @@ const SEOAnalyzerPanel = ({
   const analysis = useMemo(() => {
     return performSEOAnalysis({
       title,
+      tituloCurto,
       linhaFina,
       content,
       tags,
@@ -605,7 +616,7 @@ const SEOAnalyzerPanel = ({
       targetKeyword,
       hasAuthor
     });
-  }, [title, linhaFina, content, tags, slug, articleType, targetKeyword, hasAuthor]);
+  }, [title, tituloCurto, linhaFina, content, tags, slug, articleType, targetKeyword, hasAuthor]);
 
   // Get optimization summary for potential improvement display (with AI/manual split)
   const optimizationSummary = useMemo(() => {
@@ -772,6 +783,7 @@ const SEOAnalyzerPanel = ({
 
 SEOAnalyzerPanel.propTypes = {
   title: PropTypes.string,
+  tituloCurto: PropTypes.string,
   linhaFina: PropTypes.string,
   content: PropTypes.string,
   tags: PropTypes.arrayOf(PropTypes.string),

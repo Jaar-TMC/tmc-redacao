@@ -61,6 +61,20 @@ function validateSEOCompliance(result) {
     }
   }
 
+  // Titulo curto validation: max 70 characters
+  if (result.titulo_curto) {
+    const tituloCurtoLen = result.titulo_curto.length;
+    if (tituloCurtoLen > 70) {
+      warnings.push({
+        field: 'titulo_curto',
+        message: `Título curto com ${tituloCurtoLen} caracteres (máximo: 70)`,
+        severity: tituloCurtoLen > 80 ? 'error' : 'warning',
+        suggestion: 'Título curto será truncado em feeds e redes sociais. Encurte para até 70 caracteres.'
+      });
+      isCompliant = false;
+    }
+  }
+
   // Linha fina validation: 120-155 characters is ideal for SEO
   if (result.linha_fina) {
     const linhaFinaLen = result.linha_fina.length;
@@ -159,6 +173,7 @@ export function useChatEditor({
       const result = await editArticle({
         currentArticle: {
           title: articleState.title || '',
+          tituloCurto: articleState.tituloCurto || '',
           linhaFina: articleState.linhaFina || '',
           content: articleState.content || '',
           tags: articleState.tags || []
@@ -180,6 +195,7 @@ export function useChatEditor({
       const aiMessageId = addMessage('ai', result.changes_summary || 'Proposta de edição:', {
         editResult: {
           titulo: result.titulo,
+          titulo_curto: result.titulo_curto || '',
           linha_fina: result.linha_fina,
           conteudo: result.conteudo,
           tags: result.tags
@@ -246,6 +262,7 @@ export function useChatEditor({
           onEdit(
             {
               title: msg.editResult.titulo,
+              tituloCurto: msg.editResult.titulo_curto || '',
               linhaFina: msg.editResult.linha_fina,
               body: msg.editResult.conteudo,
               tags: msg.editResult.tags
@@ -322,6 +339,7 @@ export function useChatEditor({
       const result = await editArticle({
         currentArticle: {
           title: pendingMessage.editResult.titulo || '',
+          tituloCurto: pendingMessage.editResult.titulo_curto || '',
           linhaFina: pendingMessage.editResult.linha_fina || '',
           content: pendingMessage.editResult.conteudo || '',
           tags: pendingMessage.editResult.tags || []
@@ -341,6 +359,7 @@ export function useChatEditor({
       addMessage('ai', result.changes_summary || 'Proposta ajustada:', {
         editResult: {
           titulo: result.titulo,
+          titulo_curto: result.titulo_curto || '',
           linha_fina: result.linha_fina,
           conteudo: result.conteudo,
           tags: result.tags

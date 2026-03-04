@@ -203,6 +203,7 @@ Cada dado facutal (nome, numero, data, resultado, declaracao) DEVE ter atribuica
 - NAO abstraia fontes: "O Ministerio da Fazenda" em vez de "o governo"
 - NAO invente fontes ou especialistas para dar atribuicao
 - Quando citar orgaos oficiais, use nome completo na primeira mencao: "Banco Central do Brasil"
+- OPINIAO E ANALISE: Frases que expressem juizo de valor, projecao ou interpretacao (ex: "o produto pode ficar mais caro", "tem conquistado o publico") DEVEM ser atribuidas a uma fonte nomeada ("segundo analistas do mercado", "conforme pesquisa da Datafolha"). Se nao ha fonte para atribuir, OMITA a frase — opiniao sem fonte e fabricacao editorial.
 """
 
 EEAT_ENFORCEMENT = """
@@ -305,13 +306,22 @@ Se houver conflito entre SEO e precisao factual, SEMPRE priorize a precisao.
 - EXEMPLO CALIBRADO (8 palavras, 56 caracteres):
   "Governo revela novo plano para conter inflacao em 2026"
 
-### LINHA FINA (20 a 25 palavras | EXATAMENTE 150-160 caracteres)
+### TITULO CURTO (MAXIMO 70 caracteres)
+- Versao compacta e impactante do titulo principal
+- Usado para redes sociais, push notifications e displays compactos
+- Deve ser direto e conter a informacao essencial da noticia
+- PODE ser diferente do titulo principal, mas DEVE cobrir o mesmo fato
+- CONTE os caracteres ANTES de finalizar. Se >70, CORTE.
+- EXEMPLO CALIBRADO (62 caracteres):
+  "Governo anuncia plano para conter inflacao com corte de impostos"
+
+### LINHA FINA (MAXIMO 120 caracteres)
 - COMPLEMENTE o titulo - nao repita as mesmas palavras
 - Inclua a palavra-chave principal
-- DEVE terminar com CTA + pontuacao: "Confira.", "Entenda.", "Saiba mais.", "Veja."
-- CONTE os caracteres ANTES de finalizar. Se >160, CORTE.
-- EXEMPLO CALIBRADO (23 palavras, 155 caracteres):
-  "Medida inclui reducao de impostos e novos incentivos fiscais para pequenas empresas; especialistas avaliam impacto no bolso do consumidor. Confira."
+- Frase unica, direta e informativa. NAO termine com CTA ("Confira.", "Entenda.", etc.)
+- CONTE os caracteres ANTES de finalizar. Se >120, CORTE.
+- EXEMPLO CALIBRADO (15 palavras, 108 caracteres):
+  "Medida inclui reducao de impostos e novos incentivos fiscais para pequenas empresas do pais"
 
 ### PRIMEIRO PARAGRAFO (40 a 60 palavras)
 - Responda O QUE, QUEM, QUANDO, ONDE em 40-60 palavras
@@ -332,6 +342,7 @@ Se houver conflito entre SEO e precisao factual, SEMPRE priorize a precisao.
 - Inclua 2-4 hyperlinks para fontes VERIFICADAS usando markdown: [nome da fonte](url)
 - Prefira fontes autoritativas (.gov.br, .edu.br, .org.br, veiculos conhecidos)
 - O texto do link deve ser descritivo (nome da fonte ou titulo da materia)
+- OBRIGATORIO: O texto-ancora (anchor text) DEVE corresponder ao nome REAL da fonte/dominio do URL. Se o URL aponta para "cnnbrasil.com.br", o texto DEVE ser "[CNN Brasil]", NUNCA "[Barchart]" ou outro nome. Verifique CADA link antes de finalizar.
 - Distribua os links naturalmente pelo corpo do texto
 - NUNCA invente URLs. Use APENAS URLs das <verified-sources> fornecidas
 - Se nao houver fontes verificadas, NAO inclua links
@@ -1103,7 +1114,9 @@ def get_system_prompt(
 
 1. **Estrutura da Matéria:**
    - Título: 7-10 palavras, 50-60 caracteres (veja regras SEO abaixo)
-   - Linha Fina: 20-25 palavras, 150-160 caracteres (veja regras SEO abaixo)
+   - Título Curto: máximo 70 caracteres, versão compacta para redes sociais
+   - Linha Fina: MAXIMO 120 caracteres (veja regras SEO abaixo)
+   - Resumo da Matéria: 4 bullet points com os pontos mais importantes da matéria
    - Corpo: Tamanho proporcional ao texto-base (veja instrucoes no prompt do usuario)
 
 2. **Formatação:**
@@ -1111,6 +1124,12 @@ def get_system_prompt(
    - Use ## (H2) para subtitulos principais e ### (H3) para sub-secoes. NUNCA use # (H1) no corpo.
    - Destaque citações importantes
    - Mantenha fluidez entre parágrafos
+   - **CTA OBRIGATÓRIO**: NUNCA apos o 1o paragrafo. SEMPRE apos o 2o ou 3o paragrafo do corpo, insira em paragrafo proprio:
+     "Siga a TMC no WhatsApp e fique por dentro das últimas notícias do Brasil e do mundo."
+
+   - **TRADUCAO DE JARGAO (OBRIGATORIO)**: Sempre que um termo tecnico, juridico, economico ou politico for usado (ex: "delacao premiada", "superavit", "posicoes vendidas", "Estreito de Ormuz"), OBRIGATORIAMENTE faca uma traducao contextual rapida na mesma frase ou entre parenteses. Exemplo: "a delacao premiada (acordo em que o reu confessa e entrega comparsas em troca de pena menor)". NUNCA presuma que o leitor conhece jargao especializado.
+
+   - **POR QUE ISSO IMPORTA (OBRIGATORIO)**: Inclua pelo menos UMA frase que conecte a noticia ao dia a dia do leitor. A pergunta interna do publico e sempre: "Como isso afeta a minha rotina, o meu bolso ou o meu futuro?". Exemplo: "Na pratica, segundo [Fonte], a medida pode afetar o preco dos combustiveis para o consumidor." Essa frase deve aparecer no corpo da materia, preferencialmente apos o contexto principal.
 
    **NEGRITO - REGRAS DE DESTAQUE (use **texto** em markdown):**
    O negrito guia a leitura e destaca informações-chave. Use com moderação (3-6 destaques por parágrafo longo).
@@ -1149,8 +1168,10 @@ def get_system_prompt(
    ```json
    {{
      "titulo": "Título da matéria",
-     "linha_fina": "Linha fina descritiva",
-     "conteudo": "Corpo completo da matéria com **negritos** para destaques...",
+     "titulo_curto": "Versão curta do título (max 70 caracteres)",
+     "linha_fina": "Linha fina descritiva (max 120 caracteres)",
+     "resumo": ["Ponto-chave 1 da matéria", "Ponto-chave 2", "Ponto-chave 3", "Ponto-chave 4"],
+     "conteudo": "Corpo completo da matéria com **negritos** para destaques e CTA após 2º/3º parágrafo...",
      "tags_sugeridas": ["tag1", "tag2", "tag3"],
      "slug_sugerido": "palavras-chave-separadas-por-hifen"
    }}
@@ -1254,7 +1275,9 @@ Mantenha os vetos universais (sem preconceito, ataques pessoais, etc.)"""
 
 1. **Estrutura da Matéria:**
    - Título: 7-10 palavras, 50-60 caracteres (veja regras SEO abaixo)
-   - Linha Fina: 20-25 palavras, 150-160 caracteres (veja regras SEO abaixo)
+   - Título Curto: máximo 70 caracteres, versão compacta para redes sociais
+   - Linha Fina: MAXIMO 120 caracteres (veja regras SEO abaixo)
+   - Resumo da Matéria: 4 bullet points com os pontos mais importantes da matéria
    - Corpo: Tamanho proporcional ao texto-base (veja instrucoes no prompt do usuario)
 
 2. **Formatação:**
@@ -1262,6 +1285,12 @@ Mantenha os vetos universais (sem preconceito, ataques pessoais, etc.)"""
    - Use ## (H2) para subtitulos principais e ### (H3) para sub-secoes. NUNCA use # (H1) no corpo.
    - Destaque citações importantes
    - Mantenha fluidez entre parágrafos
+   - **CTA OBRIGATÓRIO**: NUNCA apos o 1o paragrafo. SEMPRE apos o 2o ou 3o paragrafo do corpo, insira em paragrafo proprio:
+     "Siga a TMC no WhatsApp e fique por dentro das últimas notícias do Brasil e do mundo."
+
+   - **TRADUCAO DE JARGAO (OBRIGATORIO)**: Sempre que um termo tecnico, juridico, economico ou politico for usado (ex: "delacao premiada", "superavit", "posicoes vendidas", "Estreito de Ormuz"), OBRIGATORIAMENTE faca uma traducao contextual rapida na mesma frase ou entre parenteses. Exemplo: "a delacao premiada (acordo em que o reu confessa e entrega comparsas em troca de pena menor)". NUNCA presuma que o leitor conhece jargao especializado.
+
+   - **POR QUE ISSO IMPORTA (OBRIGATORIO)**: Inclua pelo menos UMA frase que conecte a noticia ao dia a dia do leitor. A pergunta interna do publico e sempre: "Como isso afeta a minha rotina, o meu bolso ou o meu futuro?". Exemplo: "Na pratica, segundo [Fonte], a medida pode afetar o preco dos combustiveis para o consumidor." Essa frase deve aparecer no corpo da materia, preferencialmente apos o contexto principal.
 
    **NEGRITO - REGRAS DE DESTAQUE (use **texto** em markdown):**
    O negrito guia a leitura e destaca informações-chave. Use com moderação (3-6 destaques por parágrafo longo).
@@ -1299,8 +1328,10 @@ Mantenha os vetos universais (sem preconceito, ataques pessoais, etc.)"""
    ```json
    {{
      "titulo": "Título da matéria",
-     "linha_fina": "Linha fina descritiva",
-     "conteudo": "Corpo completo da matéria com **negritos** para destaques...",
+     "titulo_curto": "Versão curta do título (max 70 caracteres)",
+     "linha_fina": "Linha fina descritiva (max 120 caracteres)",
+     "resumo": ["Ponto-chave 1 da matéria", "Ponto-chave 2", "Ponto-chave 3", "Ponto-chave 4"],
+     "conteudo": "Corpo completo da matéria com **negritos** para destaques e CTA após 2º/3º parágrafo...",
      "tags_sugeridas": ["tag1", "tag2", "tag3"],
      "slug_sugerido": "palavras-chave-separadas-por-hifen"
    }}
@@ -1428,7 +1459,8 @@ Inclua a atribuição de créditos apropriadamente.""")
         seo_checklist = f"""
 - CHECKLIST SEO + LEGIBILIDADE (valide antes de finalizar):
   [ ] Titulo tem 7-10 palavras, 50-60 caracteres, e contem "{kw}" no inicio?
-  [ ] Linha fina tem 20-25 palavras, 150-160 caracteres, inclui "{kw}" e termina com CTA?
+  [ ] Titulo curto tem no maximo 70 caracteres e cobre o fato principal?
+  [ ] Linha fina tem MAXIMO 120 caracteres, inclui "{kw}", SEM CTA no final?
   [ ] Primeiro paragrafo tem 40-60 palavras com a informacao principal?
   [ ] Corpo tem subtitulos ## a cada 2-3 paragrafos?
   [ ] FLESCH 60+: Media de frases <= 15 palavras? NENHUMA frase > 20 palavras (exceto citacoes)?
@@ -1439,17 +1471,26 @@ Inclua a atribuição de créditos apropriadamente.""")
   [ ] Minimo 3 atribuicoes de fonte ("segundo X", "conforme Y")?
   [ ] Minimo 2 verbos de reporte ("disse", "afirmou", "declarou")?
   [ ] Slug sugerido com 3-6 palavras, sem acentos, minusculas?
+  [ ] Todos os termos tecnicos/jargao tem traducao contextual na mesma frase?
+  [ ] Ha pelo menos UMA frase "por que isso importa" conectando a noticia ao dia a dia do leitor?
+  [ ] CTA esta apos o 2o ou 3o paragrafo (NUNCA apos o 1o)?
+  [ ] Anchor text dos links corresponde ao nome real da fonte/dominio?
   [ ] >>> CORPO TEM NO MINIMO {min_chars} CARACTERES? (conte antes de responder!) <<<"""
     else:
         seo_checklist = f"""
 - CHECKLIST SEO + LEGIBILIDADE (valide antes de finalizar):
   [ ] Titulo tem 7-10 palavras, 50-60 caracteres, com power word jornalistica?
-  [ ] Linha fina tem 20-25 palavras, 150-160 caracteres, e termina com CTA?
+  [ ] Titulo curto tem no maximo 70 caracteres e cobre o fato principal?
+  [ ] Linha fina tem MAXIMO 120 caracteres, SEM CTA no final?
   [ ] Primeiro paragrafo tem 40-60 palavras com a informacao principal?
   [ ] Corpo tem subtitulos ## e paragrafos curtos (max 3 frases)?
   [ ] FLESCH 60+: Media de frases <= 15 palavras? NENHUMA frase > 20 palavras?
   [ ] FLESCH 60+: Palavras curtas (1-3 silabas)? Voz ativa em todas as frases?
   [ ] Minimo 3 atribuicoes de fonte e 2 verbos de reporte?
+  [ ] Todos os termos tecnicos/jargao tem traducao contextual na mesma frase?
+  [ ] Ha pelo menos UMA frase "por que isso importa" conectando a noticia ao dia a dia do leitor?
+  [ ] CTA esta apos o 2o ou 3o paragrafo (NUNCA apos o 1o)?
+  [ ] Anchor text dos links corresponde ao nome real da fonte/dominio?
   [ ] >>> CORPO TEM NO MINIMO {min_chars} CARACTERES? (conte antes de responder!) <<<"""
 
     # Build the "write less" caveat — only for "nota" type where brevity is acceptable
@@ -1699,6 +1740,11 @@ class LLMService:
                 if not all(key in result for key in ["titulo", "linha_fina", "conteudo"]):
                     raise ValueError("Response missing required fields")
 
+                # Ensure titulo_curto exists (fallback: truncate titulo to 70 chars)
+                if "titulo_curto" not in result or not result["titulo_curto"]:
+                    titulo = result.get("titulo", "")
+                    result["titulo_curto"] = titulo[:70] if len(titulo) > 70 else titulo
+
                 # Ensure tags_sugeridas exists
                 if "tags_sugeridas" not in result:
                     result["tags_sugeridas"] = []
@@ -1773,37 +1819,65 @@ class LLMService:
             List of topics with type and content
         """
         system = "Você é um assistente especializado em análise de texto jornalístico."
-        prompt = f"""Analise o seguinte texto e extraia os principais tópicos/pontos-chave.
+        prompt = f"""Analise o seguinte texto e extraia TODOS os principais tópicos/pontos-chave. Extraia pelo menos 5 tópicos quando o texto for longo o suficiente.
 
 TEXTO:
 {texto}
 
 Para cada tópico identificado, classifique como:
-- fato: Informação factual objetiva
+- fato: Informação factual objetiva (fato principal da notícia)
 - contexto: Informação de contexto/background
-- citacao: Declaração ou citação de fonte
+- causa: Causa ou motivo do evento
+- consequencia: Consequência ou desdobramento
+- acao: Ação ou reação de envolvidos
+- declaracao: Declaração ou citação de fonte
 - dado: Número, estatística ou dado quantitativo
-- opiniao: Opinião ou análise
 
-Responda em JSON:
-```json
+IMPORTANTE: Cada tópico deve conter a informação COMPLETA. Nunca corte uma frase no meio. Cada "content" deve ser uma frase completa e auto-contida.
+
+Responda APENAS com JSON válido, sem markdown:
 {{
   "topics": [
-    {{"type": "fato", "content": "..."}},
-    {{"type": "contexto", "content": "..."}}
+    {{"type": "fato", "content": "frase completa aqui"}},
+    {{"type": "contexto", "content": "frase completa aqui"}}
   ]
-}}
-```"""
+}}"""
 
         try:
-            response_text = await self._call_api(system, prompt, 2048)
+            response_text = await self._call_api(system, prompt, 4096)
 
             json_start = response_text.find("{")
             json_end = response_text.rfind("}") + 1
 
             if json_start != -1 and json_end > json_start:
-                result = json.loads(response_text[json_start:json_end])
-                return result.get("topics", [])
+                json_str = response_text[json_start:json_end]
+                try:
+                    result = json.loads(json_str)
+                except json.JSONDecodeError:
+                    # LLM response may have been truncated - try to repair
+                    # Find last complete topic object by finding last "},"
+                    last_complete = json_str.rfind("},")
+                    if last_complete > 0:
+                        repaired = json_str[:last_complete + 1] + "]}"
+                        try:
+                            result = json.loads(repaired)
+                            logger.warning("extract_topics: repaired truncated JSON response")
+                        except json.JSONDecodeError:
+                            logger.error("extract_topics: could not repair truncated JSON")
+                            return []
+                    else:
+                        return []
+
+                topics = result.get("topics", [])
+                # Filter out any topics with incomplete content (cut mid-sentence)
+                valid_topics = []
+                for t in topics:
+                    content = t.get("content", "")
+                    # Skip empty or very short topics
+                    if len(content) < 10:
+                        continue
+                    valid_topics.append(t)
+                return valid_topics
 
             return []
 
@@ -2038,6 +2112,8 @@ Responda em JSON:
                 # Ensure all required fields exist
                 if "titulo" not in result:
                     result["titulo"] = current_article.get('titulo', current_article.get('title', ''))
+                if "titulo_curto" not in result:
+                    result["titulo_curto"] = current_article.get('titulo_curto', current_article.get('tituloCurto', ''))
                 if "linha_fina" not in result:
                     result["linha_fina"] = current_article.get('linha_fina', current_article.get('linhaFina', ''))
                 if "conteudo" not in result:
@@ -2125,19 +2201,21 @@ EDIT_ARTICLE_SYSTEM = """Você é um editor de texto jornalístico especializado
 Sua tarefa é editar artigos existentes seguindo instruções específicas do usuário.
 
 ## REGRAS IMPORTANTES:
-1. MANTENHA a estrutura básica do artigo (título, linha fina, conteúdo, tags)
+1. MANTENHA a estrutura básica do artigo (título, título curto, linha fina, conteúdo, tags)
 2. APENAS modifique o que foi solicitado na instrução
 3. PRESERVE informações factuais a menos que seja pedido para alterá-las
 4. MANTENHA o tom e estilo consistentes com o original, a menos que seja pedido para mudar
 5. Se a instrução for sobre SEO, foque em títulos mais chamativos e palavras-chave relevantes
 6. Se a instrução for sobre tom, ajuste a linguagem mantendo a informação
 7. Se a instrução for sobre tamanho, resuma ou expanda conforme pedido
+8. O título curto (titulo_curto) tem no máximo 70 caracteres — versão compacta para redes sociais e push notifications
 
 ## FORMATO DE RESPOSTA:
 Responda SEMPRE em JSON válido com a estrutura:
 ```json
 {
   "titulo": "Título editado",
+  "titulo_curto": "Título curto editado (max 70 caracteres)",
   "linha_fina": "Linha fina editada",
   "conteudo": "Conteúdo editado...",
   "tags": ["tag1", "tag2"],
@@ -2163,14 +2241,17 @@ def get_edit_article_prompt(current_article: dict, instruction: str, edit_scope:
     scope_guidance = {
         "full": "Você pode editar TODOS os campos conforme necessário.",
         "title": "Foque APENAS no título. Mantenha os outros campos inalterados.",
+        "titulo_curto": "Foque APENAS no título curto (max 70 caracteres). Mantenha os outros campos inalterados.",
         "linha_fina": "Foque APENAS na linha fina. Mantenha os outros campos inalterados.",
-        "content": "Foque APENAS no conteúdo/corpo. Mantenha título, linha fina e tags inalterados.",
-        "tags": "Foque APENAS nas tags. Mantenha título, linha fina e conteúdo inalterados."
+        "content": "Foque APENAS no conteúdo/corpo. Mantenha título, título curto, linha fina e tags inalterados.",
+        "tags": "Foque APENAS nas tags. Mantenha título, título curto, linha fina e conteúdo inalterados."
     }
 
     return f"""## ARTIGO ATUAL
 
 **Título:** {current_article.get('titulo', current_article.get('title', ''))}
+
+**Título Curto:** {current_article.get('titulo_curto', current_article.get('tituloCurto', ''))}
 
 **Linha Fina:** {current_article.get('linha_fina', current_article.get('linhaFina', ''))}
 

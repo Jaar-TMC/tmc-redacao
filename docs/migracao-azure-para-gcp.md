@@ -233,7 +233,7 @@ Habilitadas em: **Console → APIs & Services → Enable APIs** (buscar pelo nom
 5. Adicionar roles:
    - `Cloud SQL Client` — acesso ao banco
    - `Secret Manager Secret Accessor` — ler secrets
-   - `Vertex AI User` — usar Claude e embeddings
+   - `Vertex AI User` — usar Claude e embeddings=0,0
    - `Logging Writer` — escrever logs
    - `Monitoring Metric Writer` — escrever métricas
 6. Clicar **Done**

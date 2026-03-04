@@ -49,7 +49,13 @@ export const transformArticle = (article) => {
     url: article.link || article.url,
     favicon,
     publishedAt,
-    tags: article.tags || []
+    tags: article.tags || [],
+    score: article.score ?? null,
+    scoreClassification: article.scoreClassification ?? null,
+    scoreInesperado: article.scoreInesperado ?? null,
+    scoreImpacto: article.scoreImpacto ?? null,
+    scoreBuscaAgora: article.scoreBuscaAgora ?? null,
+    scoreConversa: article.scoreConversa ?? null
   };
 };
 

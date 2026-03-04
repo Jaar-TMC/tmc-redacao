@@ -28,6 +28,7 @@ async def list_articles_handler(req: func.HttpRequest) -> func.HttpResponse:
         period: str - 'today', 'week', 'month'
         search: str - Busca em titulo/conteudo
         tag: str - Filtrar por tag exata
+        classification: str - Filtrar por classificacao de score (A, B, ou C)
     """
     try:
         # Parse query params
@@ -38,6 +39,8 @@ async def list_articles_handler(req: func.HttpRequest) -> func.HttpResponse:
         period = req.params.get('period')
         search = req.params.get('search')
         tag = req.params.get('tag')
+        classification = req.params.get('classification')  # A, B, or C
+        order_by = req.params.get('order_by')  # 'score' or 'newest' (default)
 
         # Parse max_hours for urgency filter (1-24)
         max_hours = req.params.get('max_hours')
@@ -50,7 +53,7 @@ async def list_articles_handler(req: func.HttpRequest) -> func.HttpResponse:
                 pass
 
         # Debug logging
-        logger.info(f"[list_articles] Received params: page={page}, limit={limit}, category={category}, source={source}, search='{search}', tag={tag}, max_hours={max_hours}")
+        logger.info(f"[list_articles] Received params: page={page}, limit={limit}, category={category}, source={source}, search='{search}', tag={tag}, max_hours={max_hours}, classification={classification}")
 
         # Validar page
         if page < 1:
@@ -65,7 +68,9 @@ async def list_articles_handler(req: func.HttpRequest) -> func.HttpResponse:
             source_id=source,
             period=period,
             search=search,
-            tag=tag
+            tag=tag,
+            classification=classification,
+            order_by=order_by
         )
 
         # Calcular total de paginas

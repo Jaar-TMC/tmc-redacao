@@ -51,9 +51,11 @@ DECONTAMINATION_ENABLED = os.environ.get("DECONTAMINATION_ENABLED", "true").lowe
 QUALITY_LOOP_ENABLED = os.environ.get("QUALITY_LOOP_ENABLED", "true").lower() == "true"
 QUALITY_LOOP_MAX_ATTEMPTS = int(os.environ.get("QUALITY_LOOP_MAX_ATTEMPTS", "3"))
 QUALITY_LOOP_MAX_CLAIM_SEARCHES = int(os.environ.get("QUALITY_LOOP_MAX_CLAIM_SEARCHES", "5"))
-QUALITY_LOOP_FLESCH_THRESHOLD = float(os.environ.get("QUALITY_LOOP_FLESCH_THRESHOLD", "42"))
+QUALITY_LOOP_FLESCH_THRESHOLD = float(os.environ.get("QUALITY_LOOP_FLESCH_THRESHOLD", "50"))
 QUALITY_LOOP_CONFIDENCE_THRESHOLD = float(os.environ.get("QUALITY_LOOP_CONFIDENCE_THRESHOLD", "0.50"))
 QUALITY_LOOP_NOVEL_ENTITY_THRESHOLD = float(os.environ.get("QUALITY_LOOP_NOVEL_ENTITY_THRESHOLD", "0.60"))
+QUALITY_LOOP_UNVERIFIABLE_THRESHOLD = int(os.environ.get("QUALITY_LOOP_UNVERIFIABLE_THRESHOLD", "3"))
+QUALITY_LOOP_UNVERIFIABLE_RATIO = float(os.environ.get("QUALITY_LOOP_UNVERIFIABLE_RATIO", "0.40"))
 
 # Enrichment cache (TTL 5 minutes) - avoids redundant Exa calls on regen
 _enrichment_cache = {}
@@ -393,6 +395,27 @@ def evaluate_quality_criteria(
                     "NAO introduza nomes de pessoas, lugares ou organizacoes "
                     "que nao estejam no texto-fonte original. "
                     f"Entidades problematicas: {', '.join(novel[:5])}"
+                ),
+            })
+
+    # 5. Unverifiable claims check
+    total_claims = verification_data.get("total_claims", 0)
+    unverifiable = verification_data.get("unverifiable_claims", 0)
+    unverifiable_claims_list = [
+        c for c in verification_data.get("claims", [])
+        if (isinstance(c, dict) and c.get("verdict") == "unverifiable")
+    ]
+    if total_claims > 0 and unverifiable >= QUALITY_LOOP_UNVERIFIABLE_THRESHOLD:
+        unverifiable_ratio = unverifiable / total_claims
+        if unverifiable_ratio > QUALITY_LOOP_UNVERIFIABLE_RATIO:
+            failures.append({
+                "criterion": "unverifiable",
+                "detail": f"{unverifiable}/{total_claims} afirmacoes inverificaveis ({unverifiable_ratio:.0%})",
+                "claims": unverifiable_claims_list,
+                "instruction": (
+                    "Remova ou reescreva afirmacoes que nao podem ser verificadas pelas fontes. "
+                    "Prefira OMITIR do que afirmar sem fonte. "
+                    "Se a informacao e importante, atribua a uma fonte especifica ('segundo [Fonte]')."
                 ),
             })
 
@@ -742,6 +765,8 @@ async def generate_article_handler(req: func.HttpRequest) -> func.HttpResponse:
             "quality_loop_claims_corrected": 0,
             "quality_loop_claims_removed": 0,
             "quality_loop_claims_confirmed": 0,
+            "quality_loop_unverifiable_verified": 0,
+            "quality_loop_unverifiable_removed": 0,
         }
 
         # Compute initial readability
@@ -807,18 +832,74 @@ async def generate_article_handler(req: func.HttpRequest) -> func.HttpResponse:
                     except Exception as e:
                         logger.warning(f"[{correlation_id}] Exa claim verification failed: {e}")
 
-                # If ALL fabricated claims were confirmed by Exa, skip regeneration
-                if (fabrication_failure
-                        and not exa_corrections
-                        and quality_loop_result["quality_loop_claims_confirmed"] > 0
-                        and len([f for f in quality_eval["failures"] if f["criterion"] != "fabrication"]) == 0):
+                # Step 1b: Exa verification for unverifiable claims
+                unverifiable_failure = next(
+                    (f for f in quality_eval["failures"] if f["criterion"] == "unverifiable"),
+                    None,
+                )
+                unverifiable_corrections = []
+                if unverifiable_failure:
+                    try:
+                        fact_checker = get_fact_check_service()
+                        unverifiable_to_check = unverifiable_failure.get("claims", [])[:QUALITY_LOOP_MAX_CLAIM_SEARCHES]
+
+                        for claim_dict in unverifiable_to_check:
+                            claim_obj = ExtractedClaim(
+                                text=claim_dict.get("text", ""),
+                                verdict=claim_dict.get("verdict", "unverifiable"),
+                            )
+                            exa_result = await fact_checker.verify_claim_with_exa(claim_obj)
+
+                            if exa_result["verdict"] == "confirmed":
+                                quality_loop_result["quality_loop_unverifiable_verified"] += 1
+                                # Claim is actually verifiable - tell LLM to add attribution
+                                evidence = exa_result.get("evidence", "")
+                                unverifiable_corrections.append(
+                                    f'ATRIBUIR: "{claim_obj.text}" foi confirmada por fontes externas. '
+                                    f'Adicione atribuicao explicita (ex: "segundo fontes"). Evidencia: {evidence[:200]}'
+                                )
+                                logger.info(f"[{correlation_id}] Unverifiable CONFIRMED by Exa: {claim_obj.text[:60]}")
+                            elif exa_result["verdict"] == "contradicted":
+                                quality_loop_result["quality_loop_unverifiable_removed"] += 1
+                                if exa_result.get("corrective_instruction"):
+                                    unverifiable_corrections.append(exa_result["corrective_instruction"])
+                                logger.info(f"[{correlation_id}] Unverifiable CONTRADICTED by Exa: {claim_obj.text[:60]}")
+                            else:  # inconclusive
+                                quality_loop_result["quality_loop_unverifiable_removed"] += 1
+                                unverifiable_corrections.append(
+                                    f'REMOVER: "{claim_obj.text}" nao pode ser verificada por nenhuma fonte. '
+                                    f'Omita esta informacao ou reescreva usando APENAS dados do texto-base.'
+                                )
+                                logger.info(f"[{correlation_id}] Unverifiable INCONCLUSIVE: {claim_obj.text[:60]}")
+                    except Exception as e:
+                        logger.warning(f"[{correlation_id}] Exa unverifiable claim verification failed: {e}")
+
+                # Combine all Exa corrections
+                all_exa_corrections = exa_corrections + unverifiable_corrections
+
+                # If ALL problematic claims were confirmed by Exa and no other failures remain, skip regeneration
+                non_claim_failures = [
+                    f for f in quality_eval["failures"]
+                    if f["criterion"] not in ("fabrication", "unverifiable")
+                ]
+                all_confirmed = (
+                    not exa_corrections  # no fabricated corrections needed
+                    and not any(  # no unverifiable removals needed
+                        c.startswith('REMOVER:') or c.startswith('CORRIGIR:')
+                        for c in unverifiable_corrections
+                    )
+                    and (quality_loop_result["quality_loop_claims_confirmed"] > 0
+                         or quality_loop_result["quality_loop_unverifiable_verified"] > 0)
+                    and not non_claim_failures
+                )
+                if all_confirmed:
                     logger.info(f"[{correlation_id}] All claims confirmed by Exa, skipping regeneration")
                     quality_eval = {"all_passed": True, "failures": []}
                     break
 
                 # Step 2: Build corrective instructions
                 corrective_prompt = build_corrective_instructions(
-                    quality_eval["failures"], exa_corrections
+                    quality_eval["failures"], all_exa_corrections
                 )
 
                 # Step 3: Regenerate with corrective instructions
@@ -1122,6 +1203,14 @@ async def generate_article_handler(req: func.HttpRequest) -> func.HttpResponse:
                 logger.error(f"[{correlation_id}] Audit persist failed: {e}", exc_info=True)
         except Exception as e:
             logger.warning(f"[{correlation_id}] Audit trail prep failed (non-blocking): {e}")
+
+        # Ensure titulo_curto is present in response
+        if "titulo_curto" not in result:
+            result["titulo_curto"] = result.get("titulo_curto", "")
+
+        # Ensure resumo (bullet points) is present in response
+        if "resumo" not in result:
+            result["resumo"] = []
 
         return create_success_response(result)
 

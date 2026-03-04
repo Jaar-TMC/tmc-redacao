@@ -41,6 +41,14 @@ class Article(ArticleBase):
     source_url: Optional[str] = None
     favicon: Optional[str] = None
 
+    # Score (preenchido via LEFT JOIN com article_scores)
+    score: Optional[int] = None
+    score_classification: Optional[str] = None
+    score_inesperado: Optional[int] = None
+    score_impacto: Optional[int] = None
+    score_busca_agora: Optional[int] = None
+    score_conversa: Optional[int] = None
+
     model_config = {
         "from_attributes": True
     }
@@ -107,7 +115,13 @@ class Article(ArticleBase):
             "url": self.url,
             "imageUrl": self.image_url,
             "author": self.author,
-            "collectedAt": self.collected_at.isoformat() if self.collected_at else None
+            "collectedAt": self.collected_at.isoformat() if self.collected_at else None,
+            "score": self.score,
+            "scoreClassification": self.score_classification,
+            "scoreInesperado": self.score_inesperado,
+            "scoreImpacto": self.score_impacto,
+            "scoreBuscaAgora": self.score_busca_agora,
+            "scoreConversa": self.score_conversa
         }
 
 

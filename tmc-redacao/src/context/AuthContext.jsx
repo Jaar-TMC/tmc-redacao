@@ -12,11 +12,24 @@ export function AuthProvider({ children }) {
 
   const isAuthenticated = !!user;
 
-  // Register auth handlers for api.js 401 handling
+  // Register auth handlers for api.js 401 handling + auto-refresh
   useEffect(() => {
     registerAuthHandlers(
       () => getAuthToken(),
-      () => { clearAuthToken(); setUser(null); }
+      () => { clearAuthToken(); setUser(null); },
+      async () => {
+        // Try to refresh the token silently
+        try {
+          const data = await authRefresh();
+          if (data?.access_token) {
+            setAuthToken(data.access_token);
+            return data.access_token;
+          }
+        } catch {
+          // Refresh failed
+        }
+        return null;
+      }
     );
   }, []);
 

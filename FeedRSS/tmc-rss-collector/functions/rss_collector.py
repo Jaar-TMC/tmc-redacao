@@ -15,6 +15,7 @@ from services.rss_parser import RSSParser
 from services.deduplication import deduplicate_with_db
 from services.enrichment import enrich_article_image
 from services.ai_enrichment import enrich_articles_with_ai, is_ai_enrichment_enabled
+from services.scoring_service import get_scoring_service
 from models import Source
 
 logger = logging.getLogger(__name__)
@@ -81,6 +82,7 @@ async def rss_collector_handler(timer: func.TimerRequest) -> None:
     total_new = 0
     total_found = 0
     total_errors = 0
+    total_scored = 0
 
     for result in results:
         if isinstance(result, Exception):
@@ -88,13 +90,14 @@ async def rss_collector_handler(timer: func.TimerRequest) -> None:
         elif isinstance(result, dict):
             total_new += result.get('new', 0)
             total_found += result.get('found', 0)
+            total_scored += result.get('scored', 0)
 
     # Log final
     duration = (datetime.utcnow() - start_time).total_seconds()
     logger.info(
         f"[{execution_id}] RSS Collector finished: "
         f"{len(sources)} sources, {total_found} found, {total_new} new, "
-        f"{total_errors} errors, {duration:.2f}s"
+        f"{total_scored} scored, {total_errors} errors, {duration:.2f}s"
     )
 
 
@@ -165,10 +168,26 @@ async def process_single_source(source: Source, db, parser: RSSParser,
             logger.warning(f"[{execution_id}] {source_name}: AI enrichment failed, using RSS data: {e}")
             # Graceful degradation - continue with RSS metadata
 
-        # 5. Inserir no banco
-        articles_new = db.insert_articles(unique_articles)
+        # 5. Inserir no banco (retornando IDs para scoring inline)
+        articles_new, inserted_articles = db.insert_articles_returning(unique_articles)
 
         logger.info(f"[{execution_id}] {source_name}: Inserted {articles_new} new articles")
+
+        # 5b. Scoring inline - score articles immediately after insertion
+        articles_scored = 0
+        if inserted_articles:
+            try:
+                scoring_service = get_scoring_service()
+                scores = await scoring_service.score_articles_batch(
+                    inserted_articles,
+                    use_heuristic_fallback=True,
+                    batch_delay=0.3
+                )
+                if scores:
+                    articles_scored = await scoring_service._save_scores(scores)
+                    logger.info(f"[{execution_id}] {source_name}: Scored {articles_scored}/{articles_new} articles inline")
+            except Exception as e:
+                logger.warning(f"[{execution_id}] {source_name}: Inline scoring failed, will be picked up by scoring_calculator: {e}")
 
         # 6. Atualizar fonte
         db.update_source_last_fetch(source.id, articles_new)
@@ -187,7 +206,8 @@ async def process_single_source(source: Source, db, parser: RSSParser,
         return {
             'found': articles_found,
             'new': articles_new,
-            'duplicate': articles_duplicate
+            'duplicate': articles_duplicate,
+            'scored': articles_scored
         }
 
     except Exception as e:

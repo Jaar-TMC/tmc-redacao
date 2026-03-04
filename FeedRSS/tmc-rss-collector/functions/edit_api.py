@@ -21,6 +21,7 @@ class CurrentArticle(BaseModel):
     titulo: Optional[str] = Field(default="", description="Current title (PT)")
     linha_fina: Optional[str] = Field(default="", description="Current subtitle")
     linhaFina: Optional[str] = Field(default="", description="Current subtitle (camelCase)")
+    titulo_curto: Optional[str] = Field(default="", description="Current short title")
     content: Optional[str] = Field(default="", description="Current content")
     conteudo: Optional[str] = Field(default="", description="Current content (PT)")
     tags: List[str] = Field(default=[], description="Current tags")
@@ -130,6 +131,10 @@ async def edit_article_handler(req: func.HttpRequest) -> func.HttpResponse:
             categoria=request_data.categoria,
             tom=request_data.tom
         )
+
+        # Ensure titulo_curto is present in response
+        if "titulo_curto" not in result:
+            result["titulo_curto"] = result.get("titulo_curto", "")
 
         logger.info(f"Article edited successfully: {result.get('changes_summary', 'No summary')}")
         return create_success_response(result)
