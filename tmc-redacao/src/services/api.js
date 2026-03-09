@@ -531,6 +531,45 @@ export async function mergeTopics(articles) {
 }
 
 // ============================================
+// Transcription API
+// ============================================
+
+/**
+ * Transcribe a YouTube video by fetching its captions
+ * @param {Object} params - Transcription parameters
+ * @param {string} params.url - YouTube video URL
+ * @param {string[]} [params.languages] - Preferred languages (default: ["pt", "en", "es"])
+ * @param {number} [params.segment_duration] - Target segment duration in seconds (default: 45)
+ * @param {Object} [options] - Fetch options
+ * @param {AbortSignal} [options.signal] - AbortController signal for cancellation
+ * @returns {Promise<{
+ *   video: { videoId: string, url: string, title: string, channel: string, thumbnail: string },
+ *   transcription: Array<{ id: string, startTime: string, endTime: string, text: string, topic: string }>,
+ *   metadata: { language: string, total_segments: number, total_duration_seconds: number, caption_type: string }
+ * }>}
+ */
+export async function transcribeVideo(params, options = {}) {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 30000);
+
+  try {
+    const response = await fetchApi('/transcribe', {
+      method: 'POST',
+      body: JSON.stringify(params),
+      signal: options.signal || controller.signal,
+    });
+    return response;
+  } catch (error) {
+    if (error.name === 'AbortError') {
+      throw new Error('A transcrição excedeu o tempo limite. Tente novamente.');
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
+// ============================================
 // User Articles API (Minhas Matérias)
 // ============================================
 
@@ -663,6 +702,7 @@ export default {
   generateTags,
   mergeTopics,
   editArticle,
+  transcribeVideo,
   getUserArticles,
   getUserArticle,
   createUserArticle,

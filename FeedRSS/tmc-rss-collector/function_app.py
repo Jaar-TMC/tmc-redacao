@@ -607,6 +607,45 @@ async def edit_article(req: func.HttpRequest) -> func.HttpResponse:
 
 
 # ========================================
+# HTTP TRIGGERS - TRANSCRIPTION API
+# ========================================
+
+@app.route(route="transcribe", methods=["POST", "OPTIONS"])
+@with_cors
+@require_auth
+async def transcribe_video(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    POST /api/transcribe - Fetch YouTube captions for a video URL.
+
+    Body:
+        {
+            "url": "https://www.youtube.com/watch?v=VIDEO_ID",
+            "languages": ["pt", "en"],  // optional
+            "segment_duration": 45.0     // optional, seconds per merged segment
+        }
+
+    Returns:
+        {
+            "video": { videoId, url, title, channel, thumbnail },
+            "transcription": [ { id, startTime, endTime, text, topic } ],
+            "metadata": { language, total_segments, total_duration_seconds, caption_type }
+        }
+    """
+    from services.rate_limiter import RateLimiter
+    retry_after = RateLimiter.get().check("transcribe")
+    if retry_after is not None:
+        import json as _json
+        return func.HttpResponse(
+            _json.dumps({"error": "Rate limit exceeded", "retry_after_seconds": round(retry_after, 1)}),
+            status_code=429,
+            headers={"Retry-After": str(int(retry_after) + 1)},
+            mimetype="application/json",
+        )
+    from functions.transcription_api import transcribe_handler
+    return await transcribe_handler(req)
+
+
+# ========================================
 # HTTP TRIGGERS - USER ARTICLES API
 # ========================================
 
@@ -931,6 +970,7 @@ logger.info("  - POST /api/extract-topics")
 logger.info("  - POST /api/generate-tags")
 logger.info("  - POST /api/merge-topics")
 logger.info("  - POST /api/edit-article")
+logger.info("  - POST /api/transcribe")
 logger.info("  - GET  /api/user-articles")
 logger.info("  - GET  /api/user-articles/{id}")
 logger.info("  - POST /api/user-articles")

@@ -2,6 +2,11 @@ import { useState, useCallback, useEffect } from 'react';
 import PropTypes from 'prop-types';
 import { Link2, Check, X, Loader2 } from 'lucide-react';
 
+// Regex para URLs do YouTube (module-level to avoid recreation on each render)
+// Supports: watch?v=, youtu.be/, embed/, shorts/
+const YOUTUBE_REGEX = /^(https?:\/\/)?(www\.)?(youtube\.com\/(?:watch\?v=|embed\/|shorts\/)|youtu\.be\/)([\w-]{11})/;
+const VIDEO_ID_REGEX = /(?:youtube\.com\/(?:watch\?v=|embed\/|shorts\/)|youtu\.be\/)([\w-]{11})/;
+
 /**
  * YouTubeInput - Input para URL do YouTube com validação
  * @param {Object} props
@@ -14,11 +19,8 @@ function YouTubeInput({ value, onChange, onValidURL, disabled = false }) {
   const [status, setStatus] = useState('idle'); // idle, validating, valid, invalid
   const [error, setError] = useState('');
 
-  // Regex para URLs do YouTube
-  const youtubeRegex = /^(https?:\/\/)?(www\.)?(youtube\.com\/watch\?v=|youtu\.be\/)([\w-]{11})/;
-
   const extractVideoId = useCallback((url) => {
-    const match = url.match(/(?:youtube\.com\/watch\?v=|youtu\.be\/)([\w-]{11})/);
+    const match = url.match(VIDEO_ID_REGEX);
     return match ? match[1] : null;
   }, []);
 
@@ -30,7 +32,7 @@ function YouTubeInput({ value, onChange, onValidURL, disabled = false }) {
       return;
     }
 
-    if (!youtubeRegex.test(url)) {
+    if (!YOUTUBE_REGEX.test(url)) {
       setStatus('invalid');
       setError('URL inválida. Cole um link válido do YouTube.');
       onValidURL(null);
@@ -42,30 +44,35 @@ function YouTubeInput({ value, onChange, onValidURL, disabled = false }) {
 
     const videoId = extractVideoId(url);
 
-    // Simular validação (em produção, chamar API do YouTube)
+    // Validate video exists via YouTube oembed (free, no API key needed)
     try {
-      await new Promise(resolve => setTimeout(resolve, 800));
+      const oembedRes = await fetch(
+        `https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v=${videoId}&format=json`
+      );
 
-      // Mock de dados do vídeo
-      const mockVideoData = {
-        videoId,
-        url,
-        title: 'Exemplo de Vídeo do YouTube',
-        channel: 'Canal de Exemplo',
-        thumbnail: `https://img.youtube.com/vi/${videoId}/maxresdefault.jpg`,
-        duration: '15:32',
-        views: '1.2M',
-        publishedAt: 'há 3 dias'
-      };
+      if (!oembedRes.ok) {
+        setStatus('invalid');
+        setError('Vídeo não encontrado ou é privado.');
+        onValidURL(null);
+        return;
+      }
+
+      const oembed = await oembedRes.json();
 
       setStatus('valid');
-      onValidURL(mockVideoData);
+      onValidURL({
+        videoId,
+        url,
+        title: oembed.title,
+        channel: oembed.author_name,
+        thumbnail: `https://img.youtube.com/vi/${videoId}/maxresdefault.jpg`,
+      });
     } catch {
       setStatus('invalid');
-      setError('Não foi possível encontrar este vídeo.');
+      setError('Não foi possível verificar este vídeo.');
       onValidURL(null);
     }
-  }, [extractVideoId, onValidURL, youtubeRegex]);
+  }, [extractVideoId, onValidURL]);
 
   // Debounce da validação
   useEffect(() => {
@@ -149,7 +156,7 @@ function YouTubeInput({ value, onChange, onValidURL, disabled = false }) {
       )}
 
       <p id="youtube-url-help" className="mt-2 text-sm text-medium-gray">
-        Formatos aceitos: youtube.com/watch?v=xxx ou youtu.be/xxx
+        Formatos aceitos: youtube.com/watch?v=xxx, youtu.be/xxx, shorts e embed
       </p>
     </div>
   );

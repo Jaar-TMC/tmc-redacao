@@ -21,11 +21,11 @@ function ProgressOverlay({
   const [currentMessage, setCurrentMessage] = useState(0);
 
   const messages = [
-    'Extraindo áudio do vídeo...',
-    'Processando faixas de áudio...',
-    'Convertendo áudio para texto...',
-    'Identificando speakers...',
-    'Formatando transcrição...'
+    'Conectando ao YouTube...',
+    'Buscando legendas do vídeo...',
+    'Processando transcrição...',
+    'Organizando segmentos...',
+    'Finalizando...'
   ];
 
   // Rotacionar mensagens baseado no progresso com intervalos especificados
@@ -33,15 +33,18 @@ function ProgressOverlay({
     if (!isVisible) return;
 
     let messageIndex = 0;
-    if (progress >= 90) messageIndex = 4;      // 90-100%: Formatando
-    else if (progress >= 70) messageIndex = 3; // 70-90%: Identificando speakers
-    else if (progress >= 40) messageIndex = 2; // 40-70%: Convertendo
-    else if (progress >= 20) messageIndex = 1; // 20-40%: Processando
-    else messageIndex = 0;                     // 0-20%: Extraindo
+    if (progress >= 90) messageIndex = 4;      // 90-100%: Finalizando
+    else if (progress >= 70) messageIndex = 3; // 70-90%: Organizando segmentos
+    else if (progress >= 40) messageIndex = 2; // 40-70%: Processando transcrição
+    else if (progress >= 20) messageIndex = 1; // 20-40%: Buscando legendas
+    else messageIndex = 0;                     // 0-20%: Conectando ao YouTube
 
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setCurrentMessage(messageIndex);
   }, [progress, isVisible]);
+
+  // Round progress for display
+  const displayProgress = Math.round(progress);
 
   // Estimar tempo restante
   const estimatedSeconds = Math.max(0, Math.ceil((100 - progress) / 2));
@@ -111,19 +114,19 @@ function ProgressOverlay({
         <div className="mb-4">
           <div
             role="progressbar"
-            aria-valuenow={progress}
+            aria-valuenow={displayProgress}
             aria-valuemin={0}
             aria-valuemax={100}
-            aria-label={`Progresso: ${progress}%`}
+            aria-label={`Progresso: ${displayProgress}%`}
             className="w-full h-2 bg-light-gray rounded overflow-hidden"
           >
             <div
               className="h-full bg-[#2563EB] rounded transition-all duration-300 ease-out"
-              style={{ width: `${progress}%` }}
+              style={{ width: `${displayProgress}%` }}
             />
           </div>
           <div className="flex justify-between mt-1 text-xs text-medium-gray">
-            <span>{progress}%</span>
+            <span>{displayProgress}%</span>
             <span>~{estimatedSeconds}s restantes</span>
           </div>
         </div>

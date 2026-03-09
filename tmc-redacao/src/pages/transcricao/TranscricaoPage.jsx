@@ -1,10 +1,11 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useRef } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { ArrowLeft, Youtube, AlertTriangle } from 'lucide-react';
 
 import { useDocumentTitle } from '../../hooks';
 import { useCriar } from '../../context';
 import TipBox from '../../components/ui/TipBox';
+import { transcribeVideo } from '../../services/api';
 
 import {
   YouTubeInput,
@@ -13,45 +14,6 @@ import {
 } from './components';
 
 import { useSteps } from './hooks';
-
-// Mock de transcrição (em produção, viria da API)
-const MOCK_TRANSCRIPTION = [
-  {
-    id: '1',
-    startTime: '00:00',
-    endTime: '00:45',
-    text: 'Olá, sejam bem-vindos ao nosso canal. Hoje vamos falar sobre um tema muito importante que tem chamado a atenção de todos.',
-    topic: 'Introdução'
-  },
-  {
-    id: '2',
-    startTime: '00:45',
-    endTime: '02:12',
-    text: 'Nos últimos meses, observamos uma mudança significativa no comportamento do mercado. As empresas estão cada vez mais focadas em inovação.',
-    topic: 'Tendências de Mercado'
-  },
-  {
-    id: '3',
-    startTime: '02:12',
-    endTime: '04:30',
-    text: 'Especialistas apontam que essa tendência deve continuar pelos próximos anos. A tecnologia está transformando todos os setores da economia.',
-    topic: 'Transformação Digital'
-  },
-  {
-    id: '4',
-    startTime: '04:30',
-    endTime: '06:15',
-    text: 'Os dados mostram um crescimento de 45% em investimentos nessa área. Isso representa uma oportunidade única para quem está atento.',
-    topic: 'Dados e Investimentos'
-  },
-  {
-    id: '5',
-    startTime: '06:15',
-    endTime: '08:00',
-    text: 'Para finalizar, gostaria de destacar três pontos principais que discutimos hoje e como eles podem impactar o seu dia a dia.',
-    topic: 'Conclusão'
-  }
-];
 
 /**
  * TranscricaoPage - Página de transcrição de vídeos do YouTube
@@ -78,6 +40,9 @@ function TranscricaoPage() {
   const [transcriptionProgress, setTranscriptionProgress] = useState(0);
   const [transcriptionError, setTranscriptionError] = useState(null);
 
+  // AbortController ref for cancelling in-flight API requests
+  const abortControllerRef = useRef(null);
+
   // Handler para URL válida
   const handleValidURL = useCallback((data) => {
     setVideoData(data);
@@ -87,64 +52,85 @@ function TranscricaoPage() {
   const handleStartTranscription = useCallback(async () => {
     if (!videoData) return;
 
+    // Create AbortController for this request
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+
     setIsTranscribing(true);
     setTranscriptionProgress(0);
     setTranscriptionError(null);
     nextStep(); // Vai para step 2 (loading)
 
-    // Simular progresso da transcrição
+    // Simular progresso suave enquanto aguarda API
     const progressInterval = setInterval(() => {
       setTranscriptionProgress(prev => {
-        if (prev >= 100) {
-          clearInterval(progressInterval);
-          return 100;
-        }
-        return prev + Math.random() * 15;
+        if (prev >= 90) return prev; // Cap at 90% until API responds
+        return Math.min(90, Math.round(prev + Math.random() * 12));
       });
-    }, 500);
+    }, 400);
 
-    // Simular tempo de transcrição
     try {
-      await new Promise(resolve => setTimeout(resolve, 4000));
+      const result = await transcribeVideo(
+        { url: videoData.url },
+        { signal: controller.signal }
+      );
 
       clearInterval(progressInterval);
       setTranscriptionProgress(100);
 
-      // Converter transcrição para formato de seleções (todos os trechos)
-      const allSelections = MOCK_TRANSCRIPTION.map(segment => ({
+      // Converter transcrição para formato de seleções
+      const allSelections = result.transcription.map(segment => ({
         id: `card-${segment.id}`,
         text: segment.text,
         source: 'cards',
         topic: segment.topic,
-        timestamp: segment.startTime
+        timestamp: segment.startTime,
       }));
 
-      // Salvar no contexto e navegar para Texto-Base
       setTimeout(() => {
         setIsTranscribing(false);
 
-        // Salvar vídeo + todos os trechos transcritos
         setFonte('transcription', {
-          video: videoData,
-          transcription: MOCK_TRANSCRIPTION,
-          selections: allSelections
+          video: result.video,
+          transcription: result.transcription,
+          selections: allSelections,
         });
 
-        // Navegar para Texto-Base onde o usuário vai revisar/editar
         navigate('/criar/texto-base');
       }, 500);
     } catch (err) {
       clearInterval(progressInterval);
       setIsTranscribing(false);
-      setTranscriptionError(
-        err?.message || 'Ocorreu um erro ao transcrever o vídeo. Tente novamente.'
-      );
+
+      // If user cancelled, don't show error
+      if (err.name === 'AbortError') {
+        goToStep(1);
+        return;
+      }
+
+      // Map API error codes to user-friendly messages
+      let errorMessage = 'Ocorreu um erro ao transcrever o vídeo. Tente novamente.';
+      if (err?.status === 422) {
+        errorMessage = err.data?.error || 'Este vídeo não possui legendas disponíveis.';
+      } else if (err?.status === 404) {
+        errorMessage = 'Vídeo não encontrado ou é privado.';
+      } else if (err?.status === 429) {
+        errorMessage = 'Muitas requisições. Aguarde um momento e tente novamente.';
+      }
+
+      setTranscriptionError(errorMessage);
       goToStep(1);
+    } finally {
+      abortControllerRef.current = null;
     }
   }, [videoData, nextStep, goToStep, setFonte, navigate]);
 
   // Cancelar transcrição
   const handleCancelTranscription = useCallback(() => {
+    // Abort the in-flight API request
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
     setIsTranscribing(false);
     setTranscriptionProgress(0);
     goToStep(1);
@@ -268,8 +254,7 @@ function TranscricaoPage() {
 
             {/* Dica */}
             <TipBox className="mt-6">
-              Funciona melhor com vídeos que possuem legendas
-              ou áudio claro em português/inglês
+              Funciona com vídeos que possuem legendas (automáticas ou manuais) em português, inglês ou espanhol
             </TipBox>
           </div>
         )}
