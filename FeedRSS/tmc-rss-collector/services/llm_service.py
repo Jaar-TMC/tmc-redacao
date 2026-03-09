@@ -126,7 +126,7 @@ ANTHROPIC_ENDPOINT = "https://api.anthropic.com/v1/messages"
 
 # Model configuration
 ANTHROPIC_MODEL = os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-4-5")
-MAX_TOKENS = 4096
+MAX_TOKENS = 8192
 MIN_ARTICLE_LENGTH = 2000  # TMC standard for columnists
 
 # =============================================================================

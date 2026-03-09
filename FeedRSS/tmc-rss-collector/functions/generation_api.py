@@ -22,6 +22,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 import azure.functions as func
 from pydantic import BaseModel, Field, field_validator
+from cachetools import TTLCache
 
 logger = logging.getLogger(__name__)
 
@@ -69,26 +70,22 @@ QUALITY_LOOP_NOVEL_ENTITY_THRESHOLD = float(os.environ.get("QUALITY_LOOP_NOVEL_E
 QUALITY_LOOP_UNVERIFIABLE_THRESHOLD = int(os.environ.get("QUALITY_LOOP_UNVERIFIABLE_THRESHOLD", "3"))
 QUALITY_LOOP_UNVERIFIABLE_RATIO = float(os.environ.get("QUALITY_LOOP_UNVERIFIABLE_RATIO", "0.40"))
 
-# Enrichment cache (TTL 5 minutes) - avoids redundant Exa calls on regen
-_enrichment_cache = {}
+# Enrichment cache (TTL 5 minutes, max 50 entries) - avoids redundant Exa calls on regen
+_enrichment_cache = TTLCache(maxsize=50, ttl=300)
 _enrichment_cache_lock = threading.Lock()
-_ENRICHMENT_CACHE_TTL = 300  # seconds
 
 
 def _get_cached_enrichment(cache_key: str):
     with _enrichment_cache_lock:
-        entry = _enrichment_cache.get(cache_key)
-        if entry and (time.time() - entry["ts"]) < _ENRICHMENT_CACHE_TTL:
+        result = _enrichment_cache.get(cache_key)
+        if result is not None:
             logger.info(f"Enrichment cache HIT for key={cache_key[:8]}...")
-            return entry["data"]
-        return None
+        return result
 
 
 def _set_cached_enrichment(cache_key: str, enrichment):
     with _enrichment_cache_lock:
-        if len(_enrichment_cache) > 50:
-            _enrichment_cache.clear()
-        _enrichment_cache[cache_key] = {"data": enrichment, "ts": time.time()}
+        _enrichment_cache[cache_key] = enrichment
 
 
 # Sensitive Topic Detection (2B)
@@ -141,12 +138,19 @@ class GenerateRequest(BaseModel):
     author_name: Optional[str] = Field(default=None, description="Nome do jornalista responsavel")
     author_url: Optional[str] = Field(default=None, description="URL do perfil do jornalista")
 
-    @field_validator('texto_base', 'orientacao_lide', 'contexto', 'creditos', mode='before')
+    @field_validator('texto_base', 'orientacao_lide', 'contexto', 'creditos', 'citacoes', mode='before')
     @classmethod
     def sanitize_input(cls, v):
         """Strip HTML tags, control characters, and prompt injection patterns from text inputs."""
+        if isinstance(v, list):
+            return [cls._sanitize_string(item) if isinstance(item, str) else item for item in v]
         if not isinstance(v, str):
             return v
+        return cls._sanitize_string(v)
+
+    @staticmethod
+    def _sanitize_string(v: str) -> str:
+        """Sanitize a single string value."""
         v = re.sub(r'<[^>]+>', '', v)  # Strip HTML tags
         v = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f]', '', v)  # Strip control chars
         for pattern in _INJECTION_PATTERNS:
@@ -156,12 +160,12 @@ class GenerateRequest(BaseModel):
 
 class ExtractTopicsRequest(BaseModel):
     """Request model for topic extraction."""
-    texto: str = Field(..., min_length=50, description="Text to analyze")
+    texto: str = Field(..., min_length=50, max_length=50000, description="Text to analyze")
 
 
 class GenerateTagsRequest(BaseModel):
     """Request model for tag generation."""
-    texto: str = Field(..., min_length=50, description="Content to analyze")
+    texto: str = Field(..., min_length=50, max_length=50000, description="Content to analyze")
     max_tags: int = Field(default=10, ge=1, le=20, description="Maximum tags")
 
 
@@ -869,10 +873,15 @@ async def generate_article_handler(req: func.HttpRequest) -> func.HttpResponse:
             except Exception as e:
                 logger.warning(f"[{correlation_id}] Readability measurement failed: {e}")
 
+        # Skip quality loop for nota/servico — short, source-constrained formats
+        # with minimal fabrication risk. Saves 30-90s per article.
+        quality_loop_skip_types = ("nota", "servico")
+
         if (QUALITY_LOOP_ENABLED
                 and is_fact_check_enabled()
                 and not request_data.skip_verification
-                and result.get("verification", {}).get("is_verified")):
+                and result.get("verification", {}).get("is_verified")
+                and request_data.tipo_materia not in quality_loop_skip_types):
 
             quality_loop_start = time.time()
             verification_data = result.get("verification", {})
@@ -903,12 +912,25 @@ async def generate_article_handler(req: func.HttpRequest) -> func.HttpResponse:
                         fact_checker = get_fact_check_service()
                         claims_to_check = fabrication_failure.get("claims", [])[:QUALITY_LOOP_MAX_CLAIM_SEARCHES]
 
-                        for claim_dict in claims_to_check:
-                            claim_obj = ExtractedClaim(
-                                text=claim_dict.get("text", ""),
-                                verdict=claim_dict.get("verdict", "fabricated"),
+                        # Build claim objects for parallel verification
+                        claim_objects = [
+                            ExtractedClaim(
+                                text=cd.get("text", ""),
+                                verdict=cd.get("verdict", "fabricated"),
                             )
-                            exa_result = await fact_checker.verify_claim_with_exa(claim_obj)
+                            for cd in claims_to_check
+                        ]
+
+                        # Verify all claims in parallel (same searches, just concurrent)
+                        exa_results = await asyncio.gather(
+                            *(fact_checker.verify_claim_with_exa(co) for co in claim_objects),
+                            return_exceptions=True,
+                        )
+
+                        for claim_obj, exa_result in zip(claim_objects, exa_results):
+                            if isinstance(exa_result, Exception):
+                                logger.warning(f"[{correlation_id}] Exa claim check failed: {exa_result}")
+                                continue
 
                             if exa_result["verdict"] == "confirmed":
                                 quality_loop_result["quality_loop_claims_confirmed"] += 1
@@ -937,16 +959,28 @@ async def generate_article_handler(req: func.HttpRequest) -> func.HttpResponse:
                         fact_checker = get_fact_check_service()
                         unverifiable_to_check = unverifiable_failure.get("claims", [])[:QUALITY_LOOP_MAX_CLAIM_SEARCHES]
 
-                        for claim_dict in unverifiable_to_check:
-                            claim_obj = ExtractedClaim(
-                                text=claim_dict.get("text", ""),
-                                verdict=claim_dict.get("verdict", "unverifiable"),
+                        # Build claim objects for parallel verification
+                        unverif_objects = [
+                            ExtractedClaim(
+                                text=cd.get("text", ""),
+                                verdict=cd.get("verdict", "unverifiable"),
                             )
-                            exa_result = await fact_checker.verify_claim_with_exa(claim_obj)
+                            for cd in unverifiable_to_check
+                        ]
+
+                        # Verify all unverifiable claims in parallel
+                        unverif_results = await asyncio.gather(
+                            *(fact_checker.verify_claim_with_exa(co) for co in unverif_objects),
+                            return_exceptions=True,
+                        )
+
+                        for claim_obj, exa_result in zip(unverif_objects, unverif_results):
+                            if isinstance(exa_result, Exception):
+                                logger.warning(f"[{correlation_id}] Exa unverifiable check failed: {exa_result}")
+                                continue
 
                             if exa_result["verdict"] == "confirmed":
                                 quality_loop_result["quality_loop_unverifiable_verified"] += 1
-                                # Claim is actually verifiable - tell LLM to add attribution
                                 evidence = exa_result.get("evidence", "")
                                 unverifiable_corrections.append(
                                     f'ATRIBUIR: "{claim_obj.text}" foi confirmada por fontes externas. '

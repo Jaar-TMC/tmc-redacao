@@ -27,11 +27,15 @@ ARTICLE_IDS = [
 
 # Conexao com o banco
 def get_connection():
+    server = os.environ.get("SQL_SERVER", "")
+    database = os.environ.get("SQL_DATABASE", "")
+    username = os.environ.get("SQL_USERNAME", "")
+    password = os.environ.get("SQL_PASSWORD", "")
     return pymssql.connect(
-        server='bi4ia-tmc.database.windows.net',
-        database='tmc',
-        user='admjaar',
-        password='mbfb)Zxkxehpv%NQD8ba',
+        server=server,
+        database=database,
+        user=username,
+        password=password,
         as_dict=True
     )
 

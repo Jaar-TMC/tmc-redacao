@@ -58,6 +58,21 @@ export default defineConfig({
         // Default build: standard Vite output
         outDir: 'dist',
         sourcemap: false,
+        rollupOptions: {
+          output: {
+            manualChunks: {
+              tiptap: [
+                '@tiptap/react',
+                '@tiptap/starter-kit',
+                '@tiptap/extension-link',
+                '@tiptap/extension-image',
+                '@tiptap/extension-underline',
+                '@tiptap/extension-placeholder',
+              ],
+              'vendor-sanitize': ['dompurify'],
+            },
+          },
+        },
       },
 
   // Server configuration for development

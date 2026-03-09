@@ -30,7 +30,7 @@ class CurrentArticle(BaseModel):
 class EditArticleRequest(BaseModel):
     """Request model for article editing."""
     current_article: dict = Field(..., description="Current article data (title, linha_fina, content, tags)")
-    instruction: str = Field(..., min_length=3, description="User's edit instruction")
+    instruction: str = Field(..., min_length=3, max_length=50000, description="User's edit instruction")
     edit_scope: str = Field(default="full", description="Scope: full|title|linha_fina|content|tags")
     categoria: Optional[str] = Field(default="geral", description="Editorial category")
     tom: Optional[str] = Field(default="conversacional", description="Writing tone")

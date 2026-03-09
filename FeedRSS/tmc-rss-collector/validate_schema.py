@@ -1,10 +1,16 @@
+import os
 import pymssql
 
+server = os.environ.get("SQL_SERVER", "")
+database = os.environ.get("SQL_DATABASE", "")
+username = os.environ.get("SQL_USERNAME", "")
+password = os.environ.get("SQL_PASSWORD", "")
+
 conn = pymssql.connect(
-    server='bi4ia-tmc.database.windows.net',
-    user='admjaar',
-    password='mbfb)Zxkxehpv%NQD8ba',
-    database='tmc'
+    server=server,
+    user=username,
+    password=password,
+    database=database
 )
 
 cursor = conn.cursor()

@@ -27,14 +27,28 @@ class ErrorBoundary extends Component {
 
   componentDidCatch(error, errorInfo) {
     // Log error details for debugging
-    console.error('Error caught by ErrorBoundary:', error, errorInfo);  
+    console.error('Error caught by ErrorBoundary:', error, errorInfo);
     this.setState({
       error,
       errorInfo
     });
 
-    // You can also log the error to an error reporting service here
-    // logErrorToService(error, errorInfo);
+    // Store error for debugging/monitoring
+    try {
+      const errorReport = {
+        error: error?.message || String(error),
+        stack: error?.stack?.substring(0, 2000),
+        component: errorInfo?.componentStack?.substring(0, 1000),
+        url: window.location.href,
+        timestamp: new Date().toISOString(),
+        userAgent: navigator.userAgent
+      };
+      sessionStorage.setItem('tmc_last_error', JSON.stringify(errorReport));
+      // Structured log for any future log aggregation
+      console.error('[TMC_ERROR_REPORT]', JSON.stringify(errorReport));
+    } catch (e) {
+      // Ignore storage errors
+    }
   }
 
   handleReset = () => {

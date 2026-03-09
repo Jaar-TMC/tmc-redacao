@@ -6,10 +6,13 @@ Gerencia conexoes e operacoes CRUD para sources, articles e logs.
 import os
 import pymssql
 import logging
+import queue
+import threading
 from typing import Any, Dict, List, Optional, Set, Tuple
 from datetime import datetime, timedelta
 from uuid import UUID
 import json
+from contextlib import contextmanager
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
 from models import (
@@ -26,6 +29,57 @@ EmbeddingVector = List[float]
 logger = logging.getLogger(__name__)
 
 
+class ConnectionPool:
+    """Simple connection pool for pymssql."""
+
+    def __init__(self, create_conn_func, max_size=10):
+        self._create_conn = create_conn_func
+        self._pool = queue.Queue(maxsize=max_size)
+        self._max_size = max_size
+        self._current_size = 0
+        self._lock = threading.Lock()
+
+    def get_connection(self):
+        try:
+            conn = self._pool.get_nowait()
+            # Test if connection is still alive
+            try:
+                cursor = conn.cursor()
+                cursor.execute("SELECT 1")
+                cursor.fetchone()
+                return conn
+            except Exception:
+                # Connection is dead, create a new one
+                self.close_bad_connection(conn)
+                return self._create_conn()
+        except queue.Empty:
+            with self._lock:
+                if self._current_size < self._max_size:
+                    self._current_size += 1
+                    return self._create_conn()
+            # Pool is full, wait for a connection
+            return self._pool.get(timeout=30)
+
+    def return_connection(self, conn):
+        try:
+            self._pool.put_nowait(conn)
+        except queue.Full:
+            try:
+                conn.close()
+            except Exception:
+                pass
+            with self._lock:
+                self._current_size -= 1
+
+    def close_bad_connection(self, conn):
+        try:
+            conn.close()
+        except Exception:
+            pass
+        with self._lock:
+            self._current_size -= 1
+
+
 class DatabaseService:
     """Servico de acesso ao banco de dados."""
 
@@ -40,15 +94,11 @@ class DatabaseService:
             raise ValueError(
                 "Database not configured. Set SQL_SERVER and SQL_DATABASE environment variables."
             )
+        pool_size = int(os.environ.get('SQL_POOL_SIZE', '10'))
+        self._pool = ConnectionPool(self._create_raw_connection, max_size=pool_size)
 
-    @retry(
-        stop=stop_after_attempt(3),
-        wait=wait_exponential(multiplier=1, min=1, max=10),
-        retry=retry_if_exception_type((pymssql.OperationalError, pymssql.InterfaceError)),
-        reraise=True
-    )
-    def get_connection(self) -> pymssql.Connection:
-        """Obtem uma conexao com o banco de dados. Retries on transient errors."""
+    def _create_raw_connection(self) -> pymssql.Connection:
+        """Create a new raw pymssql connection (used by pool internally)."""
         query_timeout = int(os.environ.get('SQL_QUERY_TIMEOUT', '30'))
         return pymssql.connect(
             server=self.server,
@@ -60,6 +110,33 @@ class DatabaseService:
             as_dict=False,
             charset='UTF-8'
         )
+
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=1, max=10),
+        retry=retry_if_exception_type((pymssql.OperationalError, pymssql.InterfaceError)),
+        reraise=True
+    )
+    def _get_pooled_connection(self) -> pymssql.Connection:
+        """Get a connection from the pool with retry logic."""
+        return self._pool.get_connection()
+
+    @contextmanager
+    def get_connection(self):
+        """Context manager that gets a connection from the pool and returns it after use."""
+        conn = self._get_pooled_connection()
+        try:
+            yield conn
+        except (pymssql.OperationalError, pymssql.InterfaceError):
+            # Connection went bad during use; discard it
+            self._pool.close_bad_connection(conn)
+            raise
+        except Exception:
+            # Non-connection error; connection is likely still good, return it
+            self._pool.return_connection(conn)
+            raise
+        else:
+            self._pool.return_connection(conn)
 
     def test_connection(self) -> bool:
         """Testa a conexao com o banco de dados."""
@@ -297,10 +374,12 @@ class DatabaseService:
                     pass
 
         if search:
-            search_with_spaces = search.replace('-', ' ')
-            search_param = f"%{search}%"
+            # Escape LIKE wildcards to prevent injection via special characters
+            search_escaped = search.replace('[', '[[]').replace('%', '[%]').replace('_', '[_]')
+            search_with_spaces = search_escaped.replace('-', ' ')
+            search_param = f"%{search_escaped}%"
 
-            if search_with_spaces != search:
+            if search_with_spaces != search_escaped:
                 search_param_spaces = f"%{search_with_spaces}%"
                 conditions.append("""(
                     a.title COLLATE Latin1_General_CI_AI LIKE %s COLLATE Latin1_General_CI_AI
@@ -562,6 +641,7 @@ class DatabaseService:
     def check_existing_hashes(self, hashes: List[str]) -> Set[str]:
         """
         Verifica quais hashes ja existem no banco.
+        Batches into chunks of 1000 to avoid SQL Server's 2100 parameter limit.
 
         Args:
             hashes: Lista de hashes MD5 para verificar
@@ -572,18 +652,19 @@ class DatabaseService:
         if not hashes:
             return set()
 
-        # Criar placeholders para IN clause
-        placeholders = ','.join(['%s' for _ in hashes])
-        query = f"""
-            SELECT hash FROM collected_articles
-            WHERE hash IN ({placeholders})
-        """
+        existing = set()
+        BATCH_SIZE = 1000
 
         with self.get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute(query, hashes)
-            rows = cursor.fetchall()
-            return {row[0] for row in rows}
+            for i in range(0, len(hashes), BATCH_SIZE):
+                batch = hashes[i:i + BATCH_SIZE]
+                placeholders = ','.join(['%s'] * len(batch))
+                query = f"SELECT hash FROM collected_articles WHERE hash IN ({placeholders})"
+                cursor.execute(query, tuple(batch))
+                existing.update(row[0] for row in cursor.fetchall())
+
+        return existing
 
     def get_recent_titles(self, hours: int = 24) -> List[str]:
         """
@@ -862,7 +943,8 @@ class DatabaseService:
         params = []
         if search:
             search_filter = "AND tag LIKE %s"
-            params.append(f"%{search}%")
+            search_escaped = search.replace('[', '[[]').replace('%', '[%]').replace('_', '[_]')
+            params.append(f"%{search_escaped}%")
 
         query = f"""
             WITH ArticleTags AS (
@@ -961,7 +1043,8 @@ class DatabaseService:
             conditions.append("s.name = %s")
             params.append(source_id)
         if search:
-            search_param = f"%{search}%"
+            search_escaped = search.replace('[', '[[]').replace('%', '[%]').replace('_', '[_]')
+            search_param = f"%{search_escaped}%"
             conditions.append("""(
                 a.title COLLATE Latin1_General_CI_AI LIKE %s COLLATE Latin1_General_CI_AI
                 OR a.content COLLATE Latin1_General_CI_AI LIKE %s COLLATE Latin1_General_CI_AI
@@ -1170,7 +1253,8 @@ class DatabaseService:
 
         if search:
             conditions.append("(title LIKE %s OR content LIKE %s)")
-            search_param = f"%{search}%"
+            search_escaped = search.replace('[', '[[]').replace('%', '[%]').replace('_', '[_]')
+            search_param = f"%{search_escaped}%"
             params.extend([search_param, search_param])
 
         if date_range:
@@ -1434,7 +1518,15 @@ class DatabaseService:
             return affected > 0
 
     def _row_to_user_article(self, row) -> UserArticle:
-        """Converte uma row do cursor para UserArticle."""
+        """Converte uma row do cursor para UserArticle.
+
+        SELECT column order:
+          0: id, 1: title, 2: linha_fina, 3: content, 4: preview,
+          5: status, 6: category, 7: tags, 8: source_article_ids,
+          9: generation_config, 10: author_name, 11: created_at,
+          12: updated_at, 13: published_at, 14: deleted_at,
+          15: titulo_curto, 16: resumo
+        """
         return UserArticle(
             id=row[0],
             title=row[1],
@@ -2953,7 +3045,8 @@ class DatabaseService:
 
         if search:
             conditions.append("(name LIKE %s OR email LIKE %s)")
-            search_param = f"%{search}%"
+            search_escaped = search.replace('[', '[[]').replace('%', '[%]').replace('_', '[_]')
+            search_param = f"%{search_escaped}%"
             params.extend([search_param, search_param])
 
         if role:
@@ -3179,7 +3272,6 @@ class DatabaseService:
 
 
 # Singleton para uso global (thread-safe)
-import threading
 _db_service: Optional[DatabaseService] = None
 _db_service_lock = threading.Lock()
 

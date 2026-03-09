@@ -222,6 +222,7 @@ async def stats(req: func.HttpRequest) -> func.HttpResponse:
 
 @app.route(route="articles", methods=["GET", "OPTIONS"])
 @with_cors
+@require_auth
 async def list_articles(req: func.HttpRequest) -> func.HttpResponse:
     """
     GET /api/articles - Lista artigos coletados.
@@ -244,6 +245,7 @@ async def list_articles(req: func.HttpRequest) -> func.HttpResponse:
 
 @app.route(route="articles/{id}", methods=["GET", "OPTIONS"])
 @with_cors
+@require_auth
 async def get_article(req: func.HttpRequest) -> func.HttpResponse:
     """GET /api/articles/{id} - Retorna um artigo específico."""
     from functions.articles_api import get_article_handler
@@ -260,6 +262,7 @@ async def get_categories(req: func.HttpRequest) -> func.HttpResponse:
 
 @app.route(route="trending-tags", methods=["GET", "OPTIONS"])
 @with_cors
+@require_auth
 async def get_trending_tags(req: func.HttpRequest) -> func.HttpResponse:
     """
     GET /api/trending-tags - Retorna tags em alta com contagem de artigos.
@@ -280,6 +283,7 @@ async def get_trending_tags(req: func.HttpRequest) -> func.HttpResponse:
 
 @app.route(route="tags", methods=["GET", "OPTIONS"])
 @with_cors
+@require_auth
 async def get_all_tags(req: func.HttpRequest) -> func.HttpResponse:
     """
     GET /api/tags - Retorna TODAS as tags com contagem de artigos.
@@ -310,22 +314,22 @@ async def sources_handler(req: func.HttpRequest) -> func.HttpResponse:
     GET: Lista todas as fontes RSS.
     POST: Cria uma nova fonte RSS (admin only).
     """
+    from utils.auth import get_current_user
+    user = get_current_user(req)
+    if not user:
+        return func.HttpResponse(
+            json.dumps({"error": "Authentication required"}),
+            status_code=401,
+            mimetype="application/json"
+        )
+    req.user = user
     if req.method == "POST":
-        from utils.auth import get_current_user
-        user = get_current_user(req)
-        if not user:
-            return func.HttpResponse(
-                json.dumps({"error": "Authentication required"}),
-                status_code=401,
-                mimetype="application/json"
-            )
         if user["role"] != "admin":
             return func.HttpResponse(
                 json.dumps({"error": "Admin access required"}),
                 status_code=403,
                 mimetype="application/json"
             )
-        req.user = user
     if req.method == "GET":
         from functions.sources_api import list_sources_handler
         return await list_sources_handler(req)
@@ -344,22 +348,22 @@ async def source_by_id_handler(req: func.HttpRequest) -> func.HttpResponse:
     PUT: Atualiza uma fonte existente (admin only).
     DELETE: Desativa uma fonte (admin only, soft delete).
     """
+    from utils.auth import get_current_user
+    user = get_current_user(req)
+    if not user:
+        return func.HttpResponse(
+            json.dumps({"error": "Authentication required"}),
+            status_code=401,
+            mimetype="application/json"
+        )
+    req.user = user
     if req.method in ("PUT", "DELETE"):
-        from utils.auth import get_current_user
-        user = get_current_user(req)
-        if not user:
-            return func.HttpResponse(
-                json.dumps({"error": "Authentication required"}),
-                status_code=401,
-                mimetype="application/json"
-            )
         if user["role"] != "admin":
             return func.HttpResponse(
                 json.dumps({"error": "Admin access required"}),
                 status_code=403,
                 mimetype="application/json"
             )
-        req.user = user
     if req.method == "GET":
         from functions.sources_api import get_source_handler
         return await get_source_handler(req)
@@ -652,6 +656,7 @@ async def user_article_by_id_handler(req: func.HttpRequest) -> func.HttpResponse
 
 @app.route(route="semantic-themes", methods=["GET", "OPTIONS"])
 @with_cors
+@require_auth
 async def list_themes(req: func.HttpRequest) -> func.HttpResponse:
     """
     GET /api/semantic-themes - Lista temas semanticos com classificacao A/B/C.
@@ -678,6 +683,7 @@ async def list_themes(req: func.HttpRequest) -> func.HttpResponse:
 
 @app.route(route="semantic-themes/{id}", methods=["GET", "OPTIONS"])
 @with_cors
+@require_auth
 async def get_theme(req: func.HttpRequest) -> func.HttpResponse:
     """
     GET /api/semantic-themes/{id} - Retorna detalhes de um tema com artigos.

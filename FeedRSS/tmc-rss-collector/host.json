@@ -23,7 +23,8 @@
     "http": {
       "routePrefix": "api",
       "maxConcurrentRequests": 50,
-      "dynamicThrottlesEnabled": true
+      "dynamicThrottlesEnabled": true,
+      "maxRequestBodySize": 1048576
     }
   }
 }

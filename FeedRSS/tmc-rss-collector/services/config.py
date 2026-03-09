@@ -194,11 +194,24 @@ def load_config() -> AppConfig:
         )
 
     # Validate JWT secret in production (mandatory - prevents forged tokens)
-    if config.production_safety_mode and not config.jwt_secret_key:
-        raise RuntimeError(
-            "JWT_SECRET_KEY is required in production mode. "
-            "Set it as an environment variable."
+    if config.production_safety_mode:
+        if not config.jwt_secret_key:
+            raise RuntimeError(
+                "JWT_SECRET_KEY is required in production mode. "
+                "Set it as an environment variable."
+            )
+        if len(config.jwt_secret_key) < 32:
+            raise RuntimeError(
+                "JWT_SECRET_KEY must be at least 32 characters in production mode."
+            )
+
+    # Force fact-checking in production mode - never allow it to be disabled
+    if config.production_safety_mode and not config.fact_check_enabled:
+        log.warning(
+            "FACT_CHECK_ENABLED was False but PRODUCTION_SAFETY_MODE is True. "
+            "Forcing fact_check_enabled=True."
         )
+        object.__setattr__(config, 'fact_check_enabled', True)
 
     return config
 

@@ -1334,6 +1334,15 @@ Regras:
                         f"Low quote verification: {quote_result.verification_rate:.0%}"
                     )
 
+            # Force human review when article was truncated for verification (4A)
+            if article_truncated_for_review:
+                metadata.requires_human_review = True
+                unverified_chars = len(generated_article) - 5000
+                metadata.review_reasons.append(
+                    f"Article truncated for verification: {unverified_chars} chars unverified (tail content not checked)"
+                )
+                logger.warning(f"Article flagged for mandatory human review due to truncation ({unverified_chars} chars unverified)")
+
             metadata.is_verified = True
             metadata.enrichment_used = bool(enrichment and enrichment.success)
 
@@ -1397,10 +1406,12 @@ Regras:
             # Truncation warning (4A) — increased limits for better verification coverage
             source_for_verification = texto_base[:8000]
             article_for_verification = generated_article[:5000]
+            article_truncated_for_review = False
             if len(texto_base) > 8000:
                 logger.warning(f"Source truncated for verification: {len(texto_base)} -> 8000 chars")
             if len(generated_article) > 5000:
                 logger.warning(f"Article truncated for verification: {len(generated_article)} -> 5000 chars ({len(generated_article)-5000} chars unverified)")
+                article_truncated_for_review = True
 
             system = ("Voce e um verificador factual rigoroso de artigos "
                       "jornalisticos. Seu papel e proteger o leitor contra desinformacao, "
@@ -2339,7 +2350,13 @@ Regras:
         else:
             # Empty claims fallback (4B): penalize if extraction failed
             if metadata.claim_extraction_failed:
-                claim_score = 0.35  # pessimistic, not neutral
+                config = get_config()
+                if config.production_safety_mode:
+                    # In production, zero verification = hard block
+                    claim_score = 0.0
+                    logger.warning("Claim extraction failed in production mode - setting claim_score=0.0 for hard block")
+                else:
+                    claim_score = 0.35  # pessimistic, not neutral
                 metadata.risk_level = "high"
                 metadata.requires_human_review = True
                 if "Claim extraction failed — zero claims extracted" not in metadata.review_reasons:

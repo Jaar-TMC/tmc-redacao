@@ -2,10 +2,10 @@ import pymssql, json, os
 from datetime import datetime
 
 SQ = chr(39)
-SERVER = "bi4ia-tmc.database.windows.net"
-DATABASE = "tmc"
-USER = "admjaar"
-PASSWORD = "mbfb)Zxkxehpv%NQD8ba"
+SERVER = os.environ.get("SQL_SERVER", "")
+DATABASE = os.environ.get("SQL_DATABASE", "")
+USER = os.environ.get("SQL_USERNAME", "")
+PASSWORD = os.environ.get("SQL_PASSWORD", "")
 
 conn = pymssql.connect(server=SERVER, database=DATABASE, user=USER, password=PASSWORD, timeout=120, login_timeout=30)
 cursor = conn.cursor()

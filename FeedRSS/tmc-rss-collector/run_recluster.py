@@ -4,6 +4,7 @@ Threshold: 0.58 (era 0.62)
 EMA Alpha: 0.25 (era 0.1)
 """
 
+import os
 import pymssql
 import json
 import numpy as np
@@ -64,11 +65,15 @@ def extract_theme_name(title):
 
 def main():
     # Conectar
+    server = os.environ.get("SQL_SERVER", "")
+    database = os.environ.get("SQL_DATABASE", "")
+    username = os.environ.get("SQL_USERNAME", "")
+    password = os.environ.get("SQL_PASSWORD", "")
     conn = pymssql.connect(
-        server='bi4ia-tmc.database.windows.net',
-        database='tmc',
-        user='admjaar',
-        password='mbfb)Zxkxehpv%NQD8ba',
+        server=server,
+        database=database,
+        user=username,
+        password=password,
         as_dict=True
     )
     cursor = conn.cursor()

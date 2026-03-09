@@ -27,6 +27,9 @@ const RevisarPage = lazy(() => import('./pages/criar/RevisarPage'));
 // Auth page
 const LoginPage = lazy(() => import('./pages/auth/LoginPage'));
 
+// 404 page
+const NotFoundPage = lazy(() => import('./pages/NotFoundPage'));
+
 // Component to handle document title updates on route changes
 function DocumentTitleUpdater() {
   const location = useLocation();
@@ -172,8 +175,8 @@ function AppContent() {
                       <Route path="usuarios" element={<ProtectedRoute permission="manage_users"><UsuariosPage /></ProtectedRoute>} />
                     </Route>
 
-                    {/* Catch-all: redirect to login if not authenticated, home if authenticated */}
-                    <Route path="*" element={<Navigate to={isAuthenticated ? "/" : "/login"} replace />} />
+                    {/* Catch-all: show 404 for authenticated users, redirect to login otherwise */}
+                    <Route path="*" element={isAuthenticated ? <NotFoundPage /> : <Navigate to="/login" replace />} />
                   </Routes>
                 </Suspense>
               </main>
