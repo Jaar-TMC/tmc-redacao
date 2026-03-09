@@ -26,11 +26,11 @@ class ArticleScoreBase(BaseModel):
     sinal_busca_agora: SinalBuscaAgora = Field(..., description="Leitor vai buscar agora? (yes/maybe/no)")
     sinal_conversa: SinalConversa = Field(..., description="Leitor vai comentar? (yes/no)")
 
-    # Scores numericos (0-25 cada, total 0-100)
+    # Scores numericos (max varies per signal, total 0-100)
     score_inesperado: int = Field(..., ge=0, le=25, description="Pontuacao Inesperado (0-25)")
-    score_impacto: int = Field(..., ge=0, le=25, description="Pontuacao Impacto (0-25)")
+    score_impacto: int = Field(..., ge=0, le=30, description="Pontuacao Impacto (0-30)")
     score_busca_agora: int = Field(..., ge=0, le=25, description="Pontuacao Busca Agora (0-25)")
-    score_conversa: int = Field(..., ge=0, le=25, description="Pontuacao Conversa (0-25)")
+    score_conversa: int = Field(..., ge=0, le=20, description="Pontuacao Conversa (0-20)")
 
 
 class ArticleScoreCreate(ArticleScoreBase):
@@ -52,9 +52,9 @@ class ArticleScoreUpdate(BaseModel):
     sinal_busca_agora: Optional[SinalBuscaAgora] = None
     sinal_conversa: Optional[SinalConversa] = None
     score_inesperado: Optional[int] = Field(None, ge=0, le=25)
-    score_impacto: Optional[int] = Field(None, ge=0, le=25)
+    score_impacto: Optional[int] = Field(None, ge=0, le=30)
     score_busca_agora: Optional[int] = Field(None, ge=0, le=25)
-    score_conversa: Optional[int] = Field(None, ge=0, le=25)
+    score_conversa: Optional[int] = Field(None, ge=0, le=20)
     scored_by: Optional[ScoredBy] = None
 
 

@@ -33,6 +33,7 @@ from datetime import datetime
 from models import (
     ArticleScore, ArticleScoreCreate, Article
 )
+from services.config import get_config
 
 logger = logging.getLogger(__name__)
 
@@ -369,7 +370,9 @@ class ScoringService:
             response_text = await self.llm_service._call_api(
                 SCORING_SYSTEM_PROMPT,
                 user_prompt,
-                SCORING_MAX_TOKENS
+                SCORING_MAX_TOKENS,
+                model=get_config().scoring_model,
+                task_type='scoring'
             )
 
             # Extract JSON from response
@@ -465,6 +468,57 @@ class ScoringService:
 
         return score
 
+    def _create_default_score(self, article_id: UUID, title: str, content: str) -> ArticleScore:
+        """
+        Create a guaranteed default score using heuristic.
+        This NEVER fails — if even heuristic breaks, returns a baseline C score.
+
+        Args:
+            article_id: UUID of the article
+            title: Article title
+            content: Article content
+
+        Returns:
+            ArticleScore with at minimum a C classification
+        """
+        try:
+            signals = _heuristic_score_article(title, content or '')
+            scores, total_score, classification = self._calculate_scores(signals)
+            return ArticleScore(
+                article_id=article_id,
+                sinal_inesperado=signals['sinal_inesperado'],
+                sinal_impacto=signals['sinal_impacto'],
+                sinal_busca_agora=signals['sinal_busca_agora'],
+                sinal_conversa=signals['sinal_conversa'],
+                score_inesperado=scores['score_inesperado'],
+                score_impacto=scores['score_impacto'],
+                score_busca_agora=scores['score_busca_agora'],
+                score_conversa=scores['score_conversa'],
+                total_score=total_score,
+                classification=classification,
+                scored_by='manual',
+                reasoning='Classificado por heuristica (fallback garantido)',
+                scored_at=datetime.utcnow()
+            )
+        except Exception as e:
+            logger.error(f"Even heuristic scoring failed for {article_id}, using baseline C: {e}")
+            return ArticleScore(
+                article_id=article_id,
+                sinal_inesperado='no',
+                sinal_impacto='low',
+                sinal_busca_agora='no',
+                sinal_conversa='no',
+                score_inesperado=0,
+                score_impacto=0,
+                score_busca_agora=0,
+                score_conversa=0,
+                total_score=0,
+                classification='C',
+                scored_by='manual',
+                reasoning='Score padrao C (fallback de emergencia)',
+                scored_at=datetime.utcnow()
+            )
+
     async def score_articles_batch(
         self,
         articles: List[Dict[str, Any]],
@@ -472,7 +526,7 @@ class ScoringService:
         batch_delay: float = 0.5
     ) -> List[ArticleScore]:
         """
-        Score multiple articles in batch.
+        Score multiple articles in batch. GUARANTEED to return a score for every article.
 
         Args:
             articles: List of dicts with 'id', 'title', 'content' keys
@@ -480,15 +534,16 @@ class ScoringService:
             batch_delay: Delay between API calls in seconds (rate limiting)
 
         Returns:
-            List of ArticleScore objects
+            List of ArticleScore objects (same length as input)
         """
         logger.info(f"Scoring batch of {len(articles)} articles")
 
         results = []
         for i, article in enumerate(articles):
+            article_id = article['id'] if isinstance(article['id'], UUID) else UUID(str(article['id']))
             try:
                 score = await self.score_article(
-                    article_id=article['id'] if isinstance(article['id'], UUID) else UUID(str(article['id'])),
+                    article_id=article_id,
                     title=article['title'],
                     content=article.get('content', ''),
                     use_heuristic_fallback=use_heuristic_fallback
@@ -500,9 +555,12 @@ class ScoringService:
                     await asyncio.sleep(batch_delay)
 
             except Exception as e:
-                logger.error(f"Error scoring article {article.get('id')}: {e}")
-                # Continue with next article
-                continue
+                logger.error(f"Error scoring article {article.get('id')}: {e}, using guaranteed fallback")
+                # GUARANTEED: never skip an article — always produce a score
+                fallback_score = self._create_default_score(
+                    article_id, article.get('title', ''), article.get('content', '')
+                )
+                results.append(fallback_score)
 
         logger.info(f"Batch scoring complete: {len(results)}/{len(articles)} scored")
         return results

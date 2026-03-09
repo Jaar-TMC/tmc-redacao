@@ -173,21 +173,26 @@ async def process_single_source(source: Source, db, parser: RSSParser,
 
         logger.info(f"[{execution_id}] {source_name}: Inserted {articles_new} new articles")
 
-        # 5b. Scoring inline - score articles immediately after insertion
+        # 5b. Scoring inline - GUARANTEED: every article gets a score
         articles_scored = 0
         if inserted_articles:
-            try:
-                scoring_service = get_scoring_service()
-                scores = await scoring_service.score_articles_batch(
-                    inserted_articles,
-                    use_heuristic_fallback=True,
-                    batch_delay=0.3
-                )
-                if scores:
+            scoring_service = get_scoring_service()
+            scores = await scoring_service.score_articles_batch(
+                inserted_articles,
+                use_heuristic_fallback=True,
+                batch_delay=0.3
+            )
+            if scores:
+                try:
                     articles_scored = await scoring_service._save_scores(scores)
                     logger.info(f"[{execution_id}] {source_name}: Scored {articles_scored}/{articles_new} articles inline")
-            except Exception as e:
-                logger.warning(f"[{execution_id}] {source_name}: Inline scoring failed, will be picked up by scoring_calculator: {e}")
+                except Exception as e:
+                    logger.error(f"[{execution_id}] {source_name}: Failed to save scores to DB: {e}")
+            if articles_scored < len(inserted_articles):
+                logger.warning(
+                    f"[{execution_id}] {source_name}: Only {articles_scored}/{len(inserted_articles)} "
+                    f"scores saved — scoring_calculator will backfill"
+                )
 
         # 6. Atualizar fonte
         db.update_source_last_fetch(source.id, articles_new)
