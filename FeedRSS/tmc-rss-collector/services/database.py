@@ -492,16 +492,13 @@ class DatabaseService:
             search=search, tag=tag, classification=classification
         )
 
-        # Build urgency WHERE: same content filters but restricted to last 24h
+        # Build urgency WHERE: same content filters WITHOUT time restriction.
+        # The CASE expressions handle time bucketing (1h, 3h, 8h),
+        # and COUNT(*) gives the true "all" total for the "Todas" chip.
         urgency_where, urgency_params, urgency_needs_scores_join = self._build_article_filters(
             category=category, source_id=source_id, period=None,
             search=search, tag=tag, classification=classification
         )
-        # Add 24h constraint for urgency
-        if urgency_where:
-            urgency_where += " AND a.published_at >= DATEADD(day, -1, GETUTCDATE())"
-        else:
-            urgency_where = "WHERE a.published_at >= DATEADD(day, -1, GETUTCDATE())"
 
         logger.info(f"[get_articles_with_urgency] search={search}, order_by={order_by}")
 
@@ -581,14 +578,12 @@ class DatabaseService:
         Returns article counts per urgency cluster using a single SQL query.
         Kept for backward compatibility. Prefer get_articles_with_urgency() for combined calls.
         """
+        # No time restriction — CASE expressions handle time bucketing,
+        # COUNT(*) gives the true "all" total for the "Todas" chip.
         urgency_where, urgency_params, urgency_needs_scores = self._build_article_filters(
             category=category, source_id=source_id, period=None,
             search=search, tag=tag
         )
-        if urgency_where:
-            urgency_where += " AND a.published_at >= DATEADD(day, -1, GETUTCDATE())"
-        else:
-            urgency_where = "WHERE a.published_at >= DATEADD(day, -1, GETUTCDATE())"
 
         scores_join = "LEFT JOIN article_scores sc ON sc.article_id = a.id" if urgency_needs_scores else ""
 
@@ -881,7 +876,7 @@ class DatabaseService:
         period_filter = ""
         params = []
         if period_hours:
-            period_filter = "WHERE collected_at >= DATEADD(hour, -%s, GETUTCDATE())"
+            period_filter = "WHERE a.published_at >= DATEADD(hour, -%s, GETUTCDATE())"
             params.append(period_hours)
 
         # SQL Server approach: Parse JSON tags and count distinct articles
