@@ -75,6 +75,16 @@ async function fetchApi(endpoint, options = {}) {
   // Extract signal separately to ensure it's passed through
   const { signal, headers: customHeaders, ...restOptions } = options;
 
+  // Default 30s timeout for requests that don't provide their own signal
+  const DEFAULT_TIMEOUT_MS = 30000;
+  let timeoutId;
+  let effectiveSignal = signal;
+  if (!signal) {
+    const controller = new AbortController();
+    effectiveSignal = controller.signal;
+    timeoutId = setTimeout(() => controller.abort(), DEFAULT_TIMEOUT_MS);
+  }
+
   // Only add Content-Type for requests with body (POST, PUT, etc.)
   const headers = { ...customHeaders };
   if (restOptions.body) {
@@ -87,7 +97,7 @@ async function fetchApi(endpoint, options = {}) {
     headers['Authorization'] = `Bearer ${token}`;
   }
 
-  const config = { ...restOptions, headers, signal, credentials: 'include' };
+  const config = { ...restOptions, headers, signal: effectiveSignal, credentials: 'include' };
 
   try {
     const response = await fetch(url, config);
@@ -105,7 +115,7 @@ async function fetchApi(endpoint, options = {}) {
             if (newToken) {
               // Retry the original request with the new token
               const retryHeaders = { ...headers, Authorization: `Bearer ${newToken}` };
-              const retryConfig = { ...restOptions, headers: retryHeaders, signal, credentials: 'include' };
+              const retryConfig = { ...restOptions, headers: retryHeaders, signal: effectiveSignal, credentials: 'include' };
               const retryResponse = await fetch(url, retryConfig);
               if (retryResponse.ok) {
                 const ct = retryResponse.headers.get('content-type');
@@ -154,6 +164,8 @@ async function fetchApi(endpoint, options = {}) {
       0,
       null
     );
+  } finally {
+    if (timeoutId) clearTimeout(timeoutId);
   }
 }
 
@@ -563,6 +575,8 @@ export async function getUserArticle(articleId) {
  * @param {Object} articleData - Article data
  * @param {string} articleData.title - Article title
  * @param {string} [articleData.linhaFina] - Subtitle
+ * @param {string} [articleData.tituloCurto] - Short title (max 70 chars)
+ * @param {string[]} [articleData.resumo] - Summary bullet points
  * @param {string} articleData.content - Article content
  * @param {string} [articleData.status='draft'] - 'draft' or 'published'
  * @param {string} [articleData.category] - Category

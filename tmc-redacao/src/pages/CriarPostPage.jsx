@@ -36,6 +36,7 @@ import { mockTones, mockPersonas } from '../data/mockData';
 import Tooltip from '../components/ui/Tooltip';
 import { SEOAnalyzerPanel, calculateSEOScore, RichTextEditor, EditorToolbar } from '../components/editor';
 import VerificationBanner from '../components/ui/VerificationBanner';
+import ResumoEditor from '../components/editor/ResumoEditor';
 import { useCriar } from '../context';
 import { useVersionHistory, useChatEditor } from '../hooks';
 import { createUserArticle, updateUserArticle, getUserArticle, generateTags, editArticle } from '../services/api';
@@ -83,11 +84,13 @@ const CriarPostPage = () => {
   const correlationId = resultado?.correlationId || null;
   const qualityLoopPassed = resultado?.qualityLoop?.quality_loop_passed ?? false;
   const sourceUrls = resultado?.sourceUrls || [];
+  const resumoFromResult = resultado?.resumo || [];
   const [showSchemaOrg, setShowSchemaOrg] = useState(false);
   const [schemaCopied, setSchemaCopied] = useState(false);
 
   // State for loading existing article
   const [isLoadingArticle, setIsLoadingArticle] = useState(false);
+  const [resumoBullets, setResumoBullets] = useState([]);
   const [loadedArticle, setLoadedArticle] = useState(null);
 
   // Double-submit protection refs
@@ -105,7 +108,7 @@ const CriarPostPage = () => {
     return {
       tema,
       fonte,
-      links: linksParam ? JSON.parse(linksParam) : [],
+      links: (() => { try { return linksParam ? JSON.parse(linksParam) : []; } catch { return []; } })(),
       instrucoes,
       tipo
     };
@@ -156,6 +159,9 @@ const CriarPostPage = () => {
       setLinhaFina(loadedArticle.linhaFina || '');
       setContent(loadedArticle.content || '');
       setTags(Array.isArray(loadedArticle.tags) ? loadedArticle.tags : []);
+      if (Array.isArray(loadedArticle.resumo)) {
+        setResumoBullets(loadedArticle.resumo);
+      }
     }
   }, [loadedArticle]);
 
@@ -199,6 +205,18 @@ const CriarPostPage = () => {
     }
   }, [currentContent]);
 
+  // Warn user before navigating away from unsaved work
+  useEffect(() => {
+    const handleBeforeUnload = (e) => {
+      if (title || content) {
+        e.preventDefault();
+        e.returnValue = '';
+      }
+    };
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [title, content]);
+
   const [selectedTone, setSelectedTone] = useState(null);
   const [selectedPersona, setSelectedPersona] = useState(null);
   const [selectedArticleType, setSelectedArticleType] = useState(null);
@@ -236,6 +254,10 @@ const CriarPostPage = () => {
         body: htmlContent,
         tags: Array.isArray(newTags) ? newTags : []
       });
+      // Initialize resumo bullets from generation result
+      if (Array.isArray(resultado.resumo) && resultado.resumo.length > 0) {
+        setResumoBullets(resultado.resumo);
+      }
     }
   }, [resultado?.geradoEm, resetHistory]);
   const [newTagInput, setNewTagInput] = useState('');
@@ -369,10 +391,20 @@ const CriarPostPage = () => {
     return textContent ? textContent.split(/\s+/).filter(Boolean).length : 0;
   }, [content]);
 
-  // Score SEO sincronizado com o painel SEO
+  // Score SEO sincronizado com o painel SEO (same inputs as SEOAnalyzerPanel)
   const seoScore = useMemo(() => {
-    return calculateSEOScore({ title, linhaFina, content, tags });
-  }, [title, linhaFina, content, tags]);
+    return calculateSEOScore({
+      title,
+      tituloCurto,
+      linhaFina,
+      content,
+      tags,
+      slug: slugValue,
+      articleType: selectedArticleType?.id || 'default',
+      targetKeyword: tags?.[0] || '',
+      hasAuthor: true
+    });
+  }, [title, tituloCurto, linhaFina, content, tags, slugValue, selectedArticleType]);
 
   // Funções para gerenciar tags
   const handleAddTag = () => {
@@ -476,25 +508,34 @@ const CriarPostPage = () => {
 
   // Função para copiar matéria para área de transferência
   const handleCopyToClipboard = async (format = 'text') => {
-    let bodyContent;
+    let formattedContent;
 
     if (format === 'html') {
       // Manter tags HTML para colar em editores rich text
-      bodyContent = content;
+      const resumoHtml = resumoBullets.length > 0
+        ? `<ul style="margin:0 0 1em 1.5em;padding:0;">${resumoBullets.map(b => `<li>${b}</li>`).join('')}</ul>`
+        : '';
+      formattedContent = [
+        `<h1>${title}</h1>`,
+        linhaFina ? `<p><em>${linhaFina}</em></p>` : '',
+        resumoHtml,
+        content,
+        tags.length > 0 ? `<p>Tags: ${tags.join(', ')}</p>` : ''
+      ].filter(Boolean).join('\n');
     } else {
       // Remover tags HTML para texto simples
-      bodyContent = stripHtmlTags(content);
+      const bodyContent = stripHtmlTags(content);
+      const resumoText = resumoBullets.length > 0 ? '\n' + resumoBullets.map(b => '• ' + b).join('\n') + '\n' : '';
+      formattedContent = [
+        title,
+        '',
+        linhaFina,
+        resumoText,
+        bodyContent,
+        '',
+        tags.length > 0 ? `Tags: ${tags.join(', ')}` : ''
+      ].filter(Boolean).join('\n');
     }
-
-    const formattedContent = [
-      title,
-      '',
-      linhaFina,
-      '',
-      bodyContent,
-      '',
-      tags.length > 0 ? `Tags: ${tags.join(', ')}` : ''
-    ].filter(Boolean).join('\n');
 
     try {
       await navigator.clipboard.writeText(formattedContent);
@@ -523,6 +564,7 @@ const CriarPostPage = () => {
       tituloCurto: tituloCurto,
       linhaFina: linhaFina,
       content: content,
+      resumo: resumoBullets,
       status: status,
       category: selectedPersona?.name || selectedArticleType?.name || null,
       tags: tags,
@@ -536,7 +578,7 @@ const CriarPostPage = () => {
         geradoEm: resultado?.geradoEm || null
       }
     };
-  }, [title, tituloCurto, linhaFina, content, tags, selectedTone, selectedPersona, selectedArticleType, themeContext, resultado]);
+  }, [title, tituloCurto, linhaFina, content, resumoBullets, tags, selectedTone, selectedPersona, selectedArticleType, themeContext, resultado]);
 
   // Save as draft handler
   const handleSaveDraft = useCallback(async () => {
@@ -1316,6 +1358,18 @@ const CriarPostPage = () => {
 
           {/* Editor */}
           <div className="flex-1 p-4 md:p-8 overflow-y-auto bg-white">
+            {/* Resumo da Matéria - bullet points */}
+            {(resumoBullets.length > 0 || resumoFromResult.length > 0) && (
+              <div className="mb-6">
+                <ResumoEditor
+                  bullets={resumoBullets}
+                  onChange={setResumoBullets}
+                  onRegenerate={null}
+                  isRegenerating={false}
+                  disabled={false}
+                />
+              </div>
+            )}
             <RichTextEditor
               ref={editorRef}
               content={content}
