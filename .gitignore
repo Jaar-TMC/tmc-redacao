@@ -1,0 +1,9 @@
+.env
+.env.*
+*.zip
+local.settings.json
+scratchpad/
+*.log
+tmpclaude-*
+__pycache__/
+node_modules/

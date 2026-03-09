@@ -137,8 +137,9 @@ async def create_source_handler(req: func.HttpRequest) -> func.HttpResponse:
                 category=body.get('category')
             )
         except ValueError as e:
+            logger.warning(f"Source create validation error: {e}")
             return func.HttpResponse(
-                json.dumps({"error": f"Validation error: {e}"}),
+                json.dumps({"error": "Erro de validacao nos dados da fonte"}),
                 status_code=400,
                 mimetype="application/json"
             )
@@ -199,8 +200,9 @@ async def update_source_handler(req: func.HttpRequest) -> func.HttpResponse:
                 category=body.get('category')
             )
         except ValueError as e:
+            logger.warning(f"Source update validation error: {e}")
             return func.HttpResponse(
-                json.dumps({"error": f"Validation error: {e}"}),
+                json.dumps({"error": "Erro de validacao nos dados da fonte"}),
                 status_code=400,
                 mimetype="application/json"
             )
@@ -301,8 +303,9 @@ async def collect_source_handler(req: func.HttpRequest) -> func.HttpResponse:
         )
 
     except ValueError as e:
+        logger.warning(f"Source collection error: {e}")
         return func.HttpResponse(
-            json.dumps({"error": str(e)}),
+            json.dumps({"error": "Fonte nao encontrada"}),
             status_code=404,
             mimetype="application/json"
         )

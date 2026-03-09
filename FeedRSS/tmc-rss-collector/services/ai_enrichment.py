@@ -12,12 +12,13 @@ import asyncio
 from typing import List, Optional, Dict, Any
 
 from models.article import ArticleCreate
-from services.llm_service import LLMService, is_llm_configured
+from services.llm_service import LLMService, is_llm_configured, get_llm_service
+from services.config import get_config
 
 logger = logging.getLogger(__name__)
 
 # Configuration from environment
-AI_ENRICHMENT_ENABLED = os.environ.get("AI_ENRICHMENT_ENABLED", "false").lower() == "true"
+AI_ENRICHMENT_ENABLED = os.environ.get("AI_ENRICHMENT_ENABLED", "true").lower() == "true"
 AI_ENRICHMENT_BATCH_SIZE = int(os.environ.get("AI_ENRICHMENT_BATCH_SIZE", "5"))
 AI_ENRICHMENT_MAX_ARTICLES_PER_SOURCE = int(os.environ.get("AI_ENRICHMENT_MAX_ARTICLES_PER_SOURCE", "20"))
 AI_ENRICHMENT_TIMEOUT = int(os.environ.get("AI_ENRICHMENT_TIMEOUT", "60"))
@@ -226,7 +227,9 @@ async def _classify_batch(
             llm._call_api(
                 system=CLASSIFICATION_SYSTEM_PROMPT,
                 user_content=user_prompt,
-                max_tokens=1024
+                max_tokens=1024,
+                model=get_config().classification_model,
+                task_type='classification'
             ),
             timeout=timeout
         )
@@ -309,7 +312,7 @@ async def enrich_articles_with_ai(
         logger.info(f"AI enrichment: processing {len(articles_to_process)} articles, skipping {len(articles_skipped)}")
 
     try:
-        llm = LLMService()
+        llm = get_llm_service()
     except Exception as e:
         logger.warning(f"Failed to initialize LLM service: {e}")
         return articles

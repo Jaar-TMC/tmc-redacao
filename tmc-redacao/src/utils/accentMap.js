@@ -206,11 +206,57 @@ const ACCENT_MAP = {
   'libano': 'líbano', 'mexico': 'méxico',
   'peru': 'peru', // no accent
   'panama': 'panamá', 'canada': 'canadá',
+  'ira': 'irã', 'siria': 'síria', 'turquia': 'turquia',
+  'india': 'índia', 'russia': 'rússia',
+
+  // Palavras comuns faltantes
+  'medio': 'médio', 'media': 'média', 'medios': 'médios',
+  'lider': 'líder', 'lideres': 'líderes',
+  'obstaculo': 'obstáculo',
+  'recem': 'recém',
+  'juridico': 'jurídico', 'juridica': 'jurídica',
+  'periodo': 'período', 'periodos': 'períodos',
+  'solido': 'sólido', 'solida': 'sólida',
+  'fragil': 'frágil', 'dificil': 'difícil',
+  'facil': 'fácil', 'util': 'útil',
+  'movel': 'móvel', 'imovel': 'imóvel',
+  'automovel': 'automóvel', 'automoveis': 'automóveis',
+  'midia': 'mídia', 'midias': 'mídias',
+  'polemica': 'polêmica', 'polemico': 'polêmico',
+  'indigena': 'indígena', 'indigenas': 'indígenas',
+  'etnico': 'étnico', 'etnica': 'étnica',
+  'cronico': 'crônico', 'cronica': 'crônica',
+  'epidemia': 'epidemia', 'pandemia': 'pandemia',
+  'saudavel': 'saudável',
+  'acessivel': 'acessível', 'inacessivel': 'inacessível',
+  'rodoviario': 'rodoviário', 'rodoviaria': 'rodoviária',
+  'ferroviario': 'ferroviário', 'ferroviaria': 'ferroviária',
+  'aeroportuario': 'aeroportuário', 'aeroportuaria': 'aeroportuária',
+  'comercial': 'comercial', 'industrial': 'industrial',
+  'perigoso': 'perigoso', 'misterioso': 'misterioso',
+  'proximo': 'próximo', 'proxima': 'próxima',
+  'minimo': 'mínimo', 'minima': 'mínima',
+  'maximo': 'máximo', 'maxima': 'máxima',
+  'otimo': 'ótimo', 'otima': 'ótima',
+  'pessimo': 'péssimo', 'pessima': 'péssima',
+  'tecnologia': 'tecnologia', 'biologico': 'biológico',
+  'geologico': 'geológico', 'ecologico': 'ecológico',
+  'patria': 'pátria', 'vitima': 'vítima', 'vitimas': 'vítimas',
+  'orbita': 'órbita', 'satelite': 'satélite',
+  'transicao': 'transição', 'negociacoes': 'negociações',
 };
+
+// Portuguese prepositions/articles that should be lowercase in Title Case
+const LOWERCASE_WORDS = new Set([
+  'de', 'do', 'da', 'dos', 'das', 'no', 'na', 'nos', 'nas',
+  'em', 'por', 'para', 'com', 'sem', 'sob', 'sobre',
+  'ao', 'aos', 'à', 'às', 'e', 'ou',
+]);
 
 /**
  * Adiciona acentos a um texto de exibição (theme name).
  * Preserva a capitalização original (Title Case, UPPER, lower).
+ * Fixes Portuguese prepositions that were wrongly capitalized (e.g. "Rio De Janeiro" → "Rio de Janeiro").
  * Idempotente: se o texto já tem acentos, não altera.
  *
  * @param {string} text - Texto sem acentos (ex: "Empresario Brasileiro")
@@ -219,8 +265,14 @@ const ACCENT_MAP = {
 export function addAccents(text) {
   if (!text) return text;
 
-  return text.split(' ').map(word => {
+  return text.split(' ').map((word, index) => {
     const lower = word.toLowerCase();
+
+    // Lowercase prepositions/articles (except first word)
+    if (index > 0 && LOWERCASE_WORDS.has(lower)) {
+      return lower;
+    }
+
     const accented = ACCENT_MAP[lower];
     if (!accented) return word;
 

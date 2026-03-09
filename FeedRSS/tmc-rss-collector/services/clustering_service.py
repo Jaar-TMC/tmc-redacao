@@ -11,6 +11,7 @@ import json
 import logging
 import asyncio
 import math
+import threading
 from typing import List, Optional, Tuple, Dict, Any
 from datetime import datetime
 from uuid import UUID, uuid4
@@ -18,6 +19,7 @@ from uuid import UUID, uuid4
 import numpy as np
 
 from models.theme import Theme, ThemeCreate
+from services.config import get_config
 from services.llm_service import LLMService, is_llm_configured
 
 logger = logging.getLogger(__name__)
@@ -170,6 +172,7 @@ class ClusteringService:
         # Cache for active themes with centroids (avoid repeated DB queries)
         self._theme_cache: Dict[str, Dict[str, Any]] = {}
         self._cache_loaded = False
+        self._cache_lock = threading.Lock()
 
         logger.info(
             f"ClusteringService initialized: threshold={self.similarity_threshold}, "
@@ -185,7 +188,7 @@ class ClusteringService:
         try:
             # Use get_all_themes with status='active' instead of non-existent method
             themes = self.db.get_all_themes(status='active')
-            self._theme_cache = {
+            new_cache = {
                 str(theme['id']): {
                     'id': theme['id'],
                     'name': theme['name'],
@@ -197,16 +200,20 @@ class ClusteringService:
                 for theme in themes
                 if theme.get('centroid') is not None
             }
-            self._cache_loaded = True
-            logger.info(f"Loaded {len(self._theme_cache)} themes into cache")
+            with self._cache_lock:
+                self._theme_cache = new_cache
+                self._cache_loaded = True
+            logger.info(f"Loaded {len(new_cache)} themes into cache")
         except Exception as e:
             logger.error(f"Failed to load theme cache: {e}")
-            self._theme_cache = {}
+            with self._cache_lock:
+                self._theme_cache = {}
 
     def _invalidate_cache(self) -> None:
         """Invalidate the theme cache to force reload."""
-        self._theme_cache = {}
-        self._cache_loaded = False
+        with self._cache_lock:
+            self._theme_cache = {}
+            self._cache_loaded = False
 
     def find_best_theme(
         self,
@@ -319,14 +326,15 @@ class ClusteringService:
 
             # Update cache
             now = datetime.utcnow()
-            self._theme_cache[str(theme_dict['id'])] = {
-                'id': theme_dict['id'],
-                'name': name,
-                'centroid': centroid,
-                'article_count': 1,
-                'avg_score': 0,
-                'last_article_at': now
-            }
+            with self._cache_lock:
+                self._theme_cache[str(theme_dict['id'])] = {
+                    'id': theme_dict['id'],
+                    'name': name,
+                    'centroid': centroid,
+                    'article_count': 1,
+                    'avg_score': 0,
+                    'last_article_at': now
+                }
 
             logger.info(f"Created new theme '{name}' (ID: {theme_dict['id']})")
 
@@ -565,10 +573,11 @@ class ClusteringService:
             self.db.update_theme(theme_id, centroid=new_centroid, article_count=new_count)
 
         # Update cache
-        if theme_key in self._theme_cache:
-            self._theme_cache[theme_key]['centroid'] = new_centroid
-            self._theme_cache[theme_key]['article_count'] = current_count + 1
-            self._theme_cache[theme_key]['last_article_at'] = datetime.utcnow()
+        with self._cache_lock:
+            if theme_key in self._theme_cache:
+                self._theme_cache[theme_key]['centroid'] = new_centroid
+                self._theme_cache[theme_key]['article_count'] = current_count + 1
+                self._theme_cache[theme_key]['last_article_at'] = datetime.utcnow()
 
         logger.debug(f"Updated centroid for theme {theme_id}")
         return new_centroid
@@ -963,14 +972,15 @@ class ClusteringService:
 
             # Update cache
             now = datetime.utcnow()
-            self._theme_cache[str(theme_dict['id'])] = {
-                'id': theme_dict['id'],
-                'name': name,
-                'centroid': centroid,
-                'article_count': 1,
-                'avg_score': 0,
-                'last_article_at': now
-            }
+            with self._cache_lock:
+                self._theme_cache[str(theme_dict['id'])] = {
+                    'id': theme_dict['id'],
+                    'name': name,
+                    'centroid': centroid,
+                    'article_count': 1,
+                    'avg_score': 0,
+                    'last_article_at': now
+                }
 
             logger.info(
                 f"Created new theme '{name}' (ID: {theme_dict['id']}) "
@@ -1075,8 +1085,9 @@ class ClusteringService:
 
             # Remove from cache
             source_key = str(source_theme_id)
-            if source_key in self._theme_cache:
-                del self._theme_cache[source_key]
+            with self._cache_lock:
+                if source_key in self._theme_cache:
+                    del self._theme_cache[source_key]
 
             logger.info(f"Merged theme {source_theme_id} into {target_theme_id}")
             return True
@@ -1133,7 +1144,9 @@ Responda APENAS com o nome do tema (maximo 50 caracteres):"""
             response = await self.llm._call_api(
                 system=system_prompt,
                 user_content=user_prompt,
-                max_tokens=100
+                max_tokens=100,
+                model=get_config().theme_naming_model,
+                task_type='theme_naming'
             )
 
             # Clean response

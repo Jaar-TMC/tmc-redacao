@@ -462,8 +462,8 @@ async def generate_quality_metrics(
             cursor.execute("""
                 SELECT
                     CASE
-                        WHEN avg_score >= 70 THEN 'A'
-                        WHEN avg_score >= 40 THEN 'B'
+                        WHEN avg_score >= 75 THEN 'A'
+                        WHEN avg_score >= 35 THEN 'B'
                         ELSE 'C'
                     END as classification,
                     COUNT(*) as count
@@ -471,8 +471,8 @@ async def generate_quality_metrics(
                 WHERE status = 'active' AND avg_score IS NOT NULL
                 GROUP BY
                     CASE
-                        WHEN avg_score >= 70 THEN 'A'
-                        WHEN avg_score >= 40 THEN 'B'
+                        WHEN avg_score >= 75 THEN 'A'
+                        WHEN avg_score >= 35 THEN 'B'
                         ELSE 'C'
                     END
             """)
@@ -678,7 +678,7 @@ async def clustering_maintenance_manual_handler(req: func.HttpRequest) -> func.H
         logger.error(f"[{execution_id}] Manual maintenance error: {e}")
         return func.HttpResponse(
             json.dumps({
-                'error': str(e),
+                'error': 'Erro interno ao executar manutenção',
                 'message': 'Maintenance failed'
             }),
             status_code=500,

@@ -93,7 +93,7 @@ async def list_articles_handler(req: func.HttpRequest) -> func.HttpResponse:
 
     except ValueError as e:
         return func.HttpResponse(
-            json.dumps({"error": f"Invalid parameter: {e}"}),
+            json.dumps({"error": "Parâmetro inválido"}),
             status_code=400,
             mimetype="application/json"
         )
@@ -258,7 +258,7 @@ async def get_trending_tags_handler(req: func.HttpRequest) -> func.HttpResponse:
 
     except ValueError as e:
         return func.HttpResponse(
-            json.dumps({"error": f"Invalid parameter: {e}"}),
+            json.dumps({"error": "Parâmetro inválido"}),
             status_code=400,
             mimetype="application/json"
         )

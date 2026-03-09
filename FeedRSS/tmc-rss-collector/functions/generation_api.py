@@ -15,7 +15,8 @@ import time
 import hashlib
 import asyncio
 import uuid
-import re as _re
+import threading
+
 from typing import Optional
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -32,14 +33,25 @@ _INJECTION_PATTERNS = [
     re.compile(r'you\s+are\s+now\s+a', re.IGNORECASE),
     re.compile(r'<\s*/?system', re.IGNORECASE),
     re.compile(r'INSTRUC[AÃ]O\s*:', re.IGNORECASE),
+    re.compile(r'Human\s*:', re.IGNORECASE),
+    re.compile(r'Assistant\s*:', re.IGNORECASE),
+    re.compile(r'\[INST\]', re.IGNORECASE),
+    re.compile(r'<<SYS>>', re.IGNORECASE),
+    re.compile(r'esquec[ea]\s+tudo', re.IGNORECASE),
+    re.compile(r'sua\s+nova\s+tarefa', re.IGNORECASE),
+    re.compile(r'responda\s+apenas\s+com', re.IGNORECASE),
+    re.compile(r'nao\s+siga\s+as\s+regras', re.IGNORECASE),
+    re.compile(r'<!--.*?-->', re.IGNORECASE | re.DOTALL),
+    re.compile(r'nova\s+instru[cç][aã]o', re.IGNORECASE),
 ]
 
 # Default image for Schema.org (1B)
 _DEFAULT_IMAGE_URL = "https://tmc.com.br/og-default.jpg"
 
 # Phase 1.1: Hard minimum source thresholds
-MIN_SOURCE_CHARS = int(os.environ.get("MIN_SOURCE_CHARS", "100"))
-NOTA_ONLY_THRESHOLD = int(os.environ.get("NOTA_ONLY_THRESHOLD", "150"))
+MIN_SOURCE_CHARS = int(os.environ.get("MIN_SOURCE_CHARS", "300"))
+NOTA_ONLY_THRESHOLD = int(os.environ.get("NOTA_ONLY_THRESHOLD", "500"))
+SHORT_SOURCE_THRESHOLD = int(os.environ.get("SHORT_SOURCE_THRESHOLD", "800"))
 
 # Phase 1.2: Production safety mode
 PRODUCTION_SAFETY_MODE = os.environ.get("PRODUCTION_SAFETY_MODE", "true").lower() == "true"
@@ -51,29 +63,32 @@ DECONTAMINATION_ENABLED = os.environ.get("DECONTAMINATION_ENABLED", "true").lowe
 QUALITY_LOOP_ENABLED = os.environ.get("QUALITY_LOOP_ENABLED", "true").lower() == "true"
 QUALITY_LOOP_MAX_ATTEMPTS = int(os.environ.get("QUALITY_LOOP_MAX_ATTEMPTS", "3"))
 QUALITY_LOOP_MAX_CLAIM_SEARCHES = int(os.environ.get("QUALITY_LOOP_MAX_CLAIM_SEARCHES", "5"))
-QUALITY_LOOP_FLESCH_THRESHOLD = float(os.environ.get("QUALITY_LOOP_FLESCH_THRESHOLD", "50"))
+QUALITY_LOOP_FLESCH_THRESHOLD = float(os.environ.get("QUALITY_LOOP_FLESCH_THRESHOLD", "55"))
 QUALITY_LOOP_CONFIDENCE_THRESHOLD = float(os.environ.get("QUALITY_LOOP_CONFIDENCE_THRESHOLD", "0.50"))
-QUALITY_LOOP_NOVEL_ENTITY_THRESHOLD = float(os.environ.get("QUALITY_LOOP_NOVEL_ENTITY_THRESHOLD", "0.60"))
+QUALITY_LOOP_NOVEL_ENTITY_THRESHOLD = float(os.environ.get("QUALITY_LOOP_NOVEL_ENTITY_THRESHOLD", "0.75"))
 QUALITY_LOOP_UNVERIFIABLE_THRESHOLD = int(os.environ.get("QUALITY_LOOP_UNVERIFIABLE_THRESHOLD", "3"))
 QUALITY_LOOP_UNVERIFIABLE_RATIO = float(os.environ.get("QUALITY_LOOP_UNVERIFIABLE_RATIO", "0.40"))
 
 # Enrichment cache (TTL 5 minutes) - avoids redundant Exa calls on regen
 _enrichment_cache = {}
+_enrichment_cache_lock = threading.Lock()
 _ENRICHMENT_CACHE_TTL = 300  # seconds
 
 
 def _get_cached_enrichment(cache_key: str):
-    entry = _enrichment_cache.get(cache_key)
-    if entry and (time.time() - entry["ts"]) < _ENRICHMENT_CACHE_TTL:
-        logger.info(f"Enrichment cache HIT for key={cache_key[:8]}...")
-        return entry["data"]
-    return None
+    with _enrichment_cache_lock:
+        entry = _enrichment_cache.get(cache_key)
+        if entry and (time.time() - entry["ts"]) < _ENRICHMENT_CACHE_TTL:
+            logger.info(f"Enrichment cache HIT for key={cache_key[:8]}...")
+            return entry["data"]
+        return None
 
 
 def _set_cached_enrichment(cache_key: str, enrichment):
-    if len(_enrichment_cache) > 50:
-        _enrichment_cache.clear()
-    _enrichment_cache[cache_key] = {"data": enrichment, "ts": time.time()}
+    with _enrichment_cache_lock:
+        if len(_enrichment_cache) > 50:
+            _enrichment_cache.clear()
+        _enrichment_cache[cache_key] = {"data": enrichment, "ts": time.time()}
 
 
 # Sensitive Topic Detection (2B)
@@ -96,7 +111,7 @@ def _detect_sensitive_topics(texto: str) -> list:
     texto_lower = texto.lower()
     for topic, patterns in _SENSITIVE_TOPIC_PATTERNS.items():
         for pattern in patterns:
-            if _re.search(pattern, texto_lower):
+            if re.search(pattern, texto_lower):
                 instructions.append(_SENSITIVE_TOPIC_INSTRUCTIONS[topic])
                 break
     return instructions
@@ -105,7 +120,7 @@ def _detect_sensitive_topics(texto: str) -> list:
 # Request/Response Models
 class GenerateRequest(BaseModel):
     """Request model for article generation."""
-    texto_base: str = Field(..., min_length=20, description="Source text content")
+    texto_base: str = Field(..., min_length=20, max_length=50000, description="Source text content")
     persona: str = Field(default="imparcial", description="Writer persona (legacy)")
     tom: str = Field(default="formal", description="Writing tone")
     tipo_materia: str = Field(default="destaque", description="Article type")
@@ -236,17 +251,51 @@ def evaluate_safety_gates(
     if prior_review_reasons:
         decision.review_reasons = list(prior_review_reasons)
 
-    # Production vs legacy confidence floor
+    # Load publication-readiness floors from config
+    from services.config import get_config
+    _cfg = get_config()
+    publish_confidence_floor = _cfg.publish_confidence_floor  # 0.65
+    publish_grounded_floor = _cfg.publish_grounded_floor      # 0.70
+    publish_max_expansion = _cfg.publish_max_expansion          # 8.0
+
+    # Production vs legacy confidence floor (for hard block)
     confidence_floor = 0.50 if PRODUCTION_SAFETY_MODE else 0.40
+
+    # Compute grounded ratio (context claims count as partial grounded — they are
+    # factually correct enrichment-sourced info, not hallucination)
+    grounded_claims = verification_data.get("grounded_claims", 0)
+    context_claims = verification_data.get("context_claims", 0)
+    effective_grounded = grounded_claims + (context_claims * 0.8)
+    grounded_ratio = effective_grounded / total_claims if total_claims > 0 else 0.0
 
     # --- HARD BLOCKS ---
     if risk_level == "critical":
         decision.publish_blocked = True
         decision.block_reasons.append("Nivel de risco CRITICO detectado")
 
+    # Production: "high" risk is also a hard block (articles must be publication-ready)
+    if PRODUCTION_SAFETY_MODE and risk_level == "high":
+        decision.publish_blocked = True
+        decision.block_reasons.append("Nivel de risco ALTO (bloqueado em modo producao)")
+
     if confidence_score < confidence_floor and verification_data.get("is_verified", False):
         decision.publish_blocked = True
         decision.block_reasons.append(f"Confianca muito baixa ({confidence_score:.0%})")
+
+    # Publication-readiness floors (absolute minimums)
+    if PRODUCTION_SAFETY_MODE and verification_data.get("is_verified", False):
+        if confidence_score < publish_confidence_floor:
+            if not decision.publish_blocked:
+                decision.publish_blocked = True
+                decision.block_reasons.append(
+                    f"Confianca {confidence_score:.0%} abaixo do piso de publicacao ({publish_confidence_floor:.0%})"
+                )
+        if total_claims > 0 and grounded_ratio < publish_grounded_floor:
+            if not any("grounded" in r.lower() for r in decision.block_reasons):
+                decision.publish_blocked = True
+                decision.block_reasons.append(
+                    f"Apenas {grounded_ratio:.0%} claims fundamentados (minimo {publish_grounded_floor:.0%})"
+                )
 
     if PRODUCTION_SAFETY_MODE:
         # Production: stricter fabrication gates
@@ -282,9 +331,11 @@ def evaluate_safety_gates(
     else:
         effective_expansion = expansion_ratio
 
-    if effective_expansion > 15:
+    # Tighter expansion limit in production
+    expansion_hard_limit = publish_max_expansion if PRODUCTION_SAFETY_MODE else 15
+    if effective_expansion > expansion_hard_limit:
         decision.publish_blocked = True
-        decision.block_reasons.append(f"Expansao extrema: {effective_expansion:.1f}x")
+        decision.block_reasons.append(f"Expansao extrema: {effective_expansion:.1f}x (limite: {expansion_hard_limit}x)")
 
     # --- SOFT GATES (human review) ---
     if PRODUCTION_SAFETY_MODE:
@@ -308,19 +359,25 @@ def evaluate_safety_gates(
     novel_entities = entity_comparison.get("novel_entities", [])
     output_entities = entity_comparison.get("output_entities", [])
     if output_entities and len(novel_entities) >= 4:
-        if len(novel_entities) / len(output_entities) > 0.60:
+        novel_ratio = len(novel_entities) / len(output_entities)
+        # Skip novel entity gate when confidence is high — verification already
+        # confirmed claims are well-grounded, so novel entities are likely
+        # legitimate enrichment/context rather than hallucination
+        if novel_ratio > 0.60 and confidence_score < 0.80:
             decision.human_review_required = True
             decision.review_reasons.append(
                 f"{len(novel_entities)} entidades novas nao presentes na fonte"
             )
 
-    if 10 < effective_expansion <= 15:
-        decision.human_review_required = True
-        decision.review_reasons.append(f"Expansao elevada: {effective_expansion:.1f}x")
+    if not PRODUCTION_SAFETY_MODE:
+        # Legacy: softer expansion warnings
+        if 10 < effective_expansion <= 15:
+            decision.human_review_required = True
+            decision.review_reasons.append(f"Expansao elevada: {effective_expansion:.1f}x")
 
-    if risk_level == "high" and not decision.publish_blocked:
-        decision.human_review_required = True
-        decision.review_reasons.append("Nivel de risco ALTO")
+        if risk_level == "high" and not decision.publish_blocked:
+            decision.human_review_required = True
+            decision.review_reasons.append("Nivel de risco ALTO")
 
     return decision
 
@@ -328,6 +385,8 @@ def evaluate_safety_gates(
 def evaluate_quality_criteria(
     verification_data: dict,
     readability_data: dict,
+    categoria: str = "",
+    tipo_materia: str = "",
 ) -> dict:
     """
     Evaluate all quality criteria for the Quality Loop.
@@ -337,6 +396,8 @@ def evaluate_quality_criteria(
     Args:
         verification_data: From fact_check_service verify_article
         readability_data: From compute_readability
+        categoria: Article category (for adjusting thresholds)
+        tipo_materia: Article type (for adjusting thresholds)
 
     Returns:
         dict with all_passed (bool), failures (list of criterion dicts)
@@ -356,15 +417,25 @@ def evaluate_quality_criteria(
             "claims": fabricated_claims_list,
         })
 
-    # 2. Readability check
+    # 2. Readability check (category-aware threshold)
     flesch = readability_data.get("flesch_score", 100)
-    if flesch < QUALITY_LOOP_FLESCH_THRESHOLD:
+    # Technical/analytical/opinion content has naturally lower readability
+    flesch_threshold = QUALITY_LOOP_FLESCH_THRESHOLD
+    if tipo_materia in ("analise", "editorial", "coluna") or categoria in ("economia", "politica"):
+        flesch_threshold = max(45.0, QUALITY_LOOP_FLESCH_THRESHOLD - 10)
+    if flesch < flesch_threshold:
+        avg_sent = readability_data.get("avg_sentence_length", 0)
         failures.append({
             "criterion": "readability",
-            "detail": f"Flesch {flesch} abaixo do minimo {QUALITY_LOOP_FLESCH_THRESHOLD}",
+            "detail": f"Flesch {flesch} abaixo do minimo {flesch_threshold} (media frase: {avg_sent:.0f} palavras)",
             "instruction": (
-                "Reescreva com frases mais curtas (maximo 20 palavras por frase). "
-                "Evite oracoes subordinadas longas. Use vocabulario mais acessivel."
+                "URGENTE - LEGIBILIDADE MUITO BAIXA. Siga TODAS estas regras:\n"
+                "1. QUEBRE toda frase com mais de 15 palavras em DUAS frases separadas\n"
+                "2. SUBSTITUA palavras longas (4+ silabas): implementar→usar, significativo→grande, consequentemente→por isso, regulamentacao→regra, disponibilizar→oferecer, infraestrutura→estrutura\n"
+                "3. REESCREVA toda frase em voz passiva para voz ativa: 'foi aprovado pelo Senado' → 'O Senado aprovou'\n"
+                "4. ELIMINE oracoes subordinadas com 'que', 'o qual', 'sendo que' - faca frases separadas\n"
+                "5. CADA paragrafo deve ter NO MAXIMO 2-3 frases curtas\n"
+                "6. META: media de 12 palavras por frase, MAXIMO ABSOLUTO 18 palavras"
             ),
         })
 
@@ -385,7 +456,7 @@ def evaluate_quality_criteria(
     entity_data = verification_data.get("entity_comparison", {})
     novel = entity_data.get("novel_entities", [])
     output_entities = entity_data.get("output_entities", [])
-    if output_entities and len(novel) >= 4:
+    if output_entities and len(novel) >= 5:
         ratio = len(novel) / len(output_entities)
         if ratio > QUALITY_LOOP_NOVEL_ENTITY_THRESHOLD:
             failures.append({
@@ -418,6 +489,10 @@ def evaluate_quality_criteria(
                     "Se a informacao e importante, atribua a uma fonte especifica ('segundo [Fonte]')."
                 ),
             })
+
+    # 6. Bold count - NO LONGER in quality loop (post-processed by _enforce_bold_limit)
+    # Bold enforcement is handled programmatically after generation since LLMs
+    # cannot reliably count bold instances while generating text.
 
     return {
         "all_passed": len(failures) == 0,
@@ -502,7 +577,13 @@ async def generate_article_handler(req: func.HttpRequest) -> func.HttpResponse:
         try:
             request_data = GenerateRequest(**body)
         except Exception as e:
-            return create_error_response(f"Validation error: {str(e)}", 400)
+            logger.warning(f"Generate request validation error: {e}")
+            return create_error_response("Erro de validacao nos dados enviados", 400)
+
+        # Force safety in production mode
+        if PRODUCTION_SAFETY_MODE:
+            request_data.skip_verification = False
+            request_data.skip_enrichment = False
 
         # Phase 1.1: Hard minimum source threshold
         source_char_count = len(request_data.texto_base.strip())
@@ -525,6 +606,15 @@ async def generate_article_handler(req: func.HttpRequest) -> func.HttpResponse:
             )
             request_data.tipo_materia = "nota"
             nota_forced = True
+
+        # Short source: force simpler article types to limit expansion
+        if (source_char_count < SHORT_SOURCE_THRESHOLD
+                and request_data.tipo_materia in ("destaque", "reportagem", "analise")):
+            logger.info(
+                f"[{correlation_id}] Short source ({source_char_count} < {SHORT_SOURCE_THRESHOLD}), "
+                f"downgrading tipo_materia from {request_data.tipo_materia} to servico"
+            )
+            request_data.tipo_materia = "servico"
 
         # Import services (lazy to avoid startup issues)
         from services.llm_service import get_llm_service
@@ -551,7 +641,8 @@ async def generate_article_handler(req: func.HttpRequest) -> func.HttpResponse:
 
         if is_fact_check_enabled() and not request_data.skip_enrichment:
             enrichment_start = time.time()
-            enrichment_cache_key = hashlib.md5((request_data.titulo_fonte or "").encode()).hexdigest()
+            cache_input = f"{request_data.titulo_fonte or ''}:{(request_data.texto_base or '')[:500]}"
+            enrichment_cache_key = hashlib.md5(cache_input.encode()).hexdigest()
             cached = _get_cached_enrichment(enrichment_cache_key)
             if cached:
                 enrichment = cached
@@ -626,7 +717,6 @@ async def generate_article_handler(req: func.HttpRequest) -> func.HttpResponse:
             return func.HttpResponse(
                 json.dumps({
                     "error": "Falha na geracao do artigo",
-                    "details": str(e),
                 }, ensure_ascii=False),
                 status_code=502,
                 mimetype="application/json",
@@ -740,11 +830,12 @@ async def generate_article_handler(req: func.HttpRequest) -> func.HttpResponse:
                     "is_verified": False,
                     "risk_level": "high",
                     "requires_human_review": True,
-                    "warnings": [f"Verification failed: {str(e)[:100]}"],
+                    "warnings": ["Verificacao automatica falhou"],
                     "review_reasons": ["Verification pipeline error"],
                     "pipeline_error": True,
                 }
-                # Ensure failed verification flags human review at top level
+                # Pipeline error = block article (no unverified content in production)
+                result["publish_blocked"] = True
                 result["human_review_required"] = True
                 result["review_reasons"] = [
                     "Verificacao automatica falhou - revisao manual necessaria"
@@ -785,7 +876,10 @@ async def generate_article_handler(req: func.HttpRequest) -> func.HttpResponse:
 
             quality_loop_start = time.time()
             verification_data = result.get("verification", {})
-            quality_eval = evaluate_quality_criteria(verification_data, readability)
+            quality_eval = evaluate_quality_criteria(
+                verification_data, readability,
+                categoria=request_data.categoria, tipo_materia=request_data.tipo_materia,
+            )
             best_result = dict(result)
             best_failures_count = len(quality_eval["failures"])
 
@@ -943,7 +1037,8 @@ async def generate_article_handler(req: func.HttpRequest) -> func.HttpResponse:
 
                     # Re-evaluate quality
                     regen_eval = evaluate_quality_criteria(
-                        regen_result["verification"], regen_readability
+                        regen_result["verification"], regen_readability,
+                        categoria=request_data.categoria, tipo_materia=request_data.tipo_materia,
                     )
 
                     # Accept if better (fewer failures) or all passed
@@ -975,13 +1070,31 @@ async def generate_article_handler(req: func.HttpRequest) -> func.HttpResponse:
 
             quality_loop_result["quality_loop_passed"] = quality_eval["all_passed"]
 
-            # If loop didn't pass, use best version
+            # If loop didn't pass after all attempts, block publication
             if not quality_loop_result["quality_loop_passed"]:
                 result = best_result
+                remaining = [f['criterion'] for f in quality_eval['failures']]
                 logger.warning(
                     f"[{correlation_id}] Quality Loop exhausted {attempt} attempts, "
-                    f"using best version. Remaining: {[f['criterion'] for f in quality_eval['failures']]}"
+                    f"using best version. Remaining: {remaining}"
                 )
+                # Block if critical quality criteria still fail
+                critical_failures = [c for c in remaining if c in ("fabrication", "confidence", "unverifiable")]
+                if critical_failures:
+                    result["publish_blocked"] = True
+                    result["block_reason"] = (
+                        f"Quality Loop falhou apos {attempt} tentativas: {', '.join(critical_failures)}"
+                    )
+                    logger.warning(
+                        f"[{correlation_id}] PUBLISH BLOCKED by Quality Loop: {critical_failures}"
+                    )
+                else:
+                    # Non-critical failures (readability, novel_entities) → flag for review
+                    result["human_review_required"] = True
+                    result.setdefault("review_reasons", [])
+                    result["review_reasons"].append(
+                        f"Quality Loop nao passou: {', '.join(remaining)}"
+                    )
 
             result["quality_loop"] = quality_loop_result
             result["regenerated"] = quality_loop_result["quality_loop_attempts"] > 0
@@ -1030,12 +1143,19 @@ async def generate_article_handler(req: func.HttpRequest) -> func.HttpResponse:
         # ==============================================================
         # Publish safety gate: block critical-risk articles
         # ==============================================================
-        # Use enrichment-adjusted source length for expansion ratio if available
-        effective_source_len = source_len  # default to raw source length
+        # Use RAW source length for expansion ratio - enrichment should NOT hide
+        # the fact that the original source was too short. This prevents a 63-char
+        # source from being inflated to 5000+ verified_chars and passing expansion gates.
+        # The enrichment provides CONTEXT, not SOURCE material.
+        effective_source_len = source_len  # Always use raw source length
+        # Only use enrichment-adjusted length if it's < 2x the raw source
+        # (indicates enrichment confirmed existing content, not fabricated new context)
         if enrichment and hasattr(enrichment, 'verified_chars') and enrichment.verified_chars > 0:
-            effective_source_len = enrichment.verified_chars
+            if enrichment.verified_chars <= source_len * 2:
+                effective_source_len = enrichment.verified_chars
         elif enrichment and isinstance(enrichment, dict) and enrichment.get('verified_chars', 0) > 0:
-            effective_source_len = enrichment['verified_chars']
+            if enrichment['verified_chars'] <= source_len * 2:
+                effective_source_len = enrichment['verified_chars']
 
         safety = evaluate_safety_gates(
             verification_data=result.get("verification", {}),
@@ -1110,7 +1230,11 @@ async def generate_article_handler(req: func.HttpRequest) -> func.HttpResponse:
         # AI Disclosure (1D)
         result["ai_disclosure"] = {
             "ai_assisted": True,
-            "disclosure_text": "Esta materia foi gerada com auxilio de inteligencia artificial e revisada pela equipe editorial TMC.",
+            "disclosure_text": (
+                "Esta materia foi gerada com auxilio de inteligencia artificial e revisada pela equipe editorial TMC."
+                if result.get("human_review_required")
+                else "Esta materia foi gerada com auxilio de inteligencia artificial."
+            ),
         }
 
         # Sensitive topics (2B)
@@ -1216,10 +1340,10 @@ async def generate_article_handler(req: func.HttpRequest) -> func.HttpResponse:
 
     except RuntimeError as e:
         logger.error(f"AI service error: {e}")
-        return create_error_response(f"AI service error: {str(e)}", 503)
+        return create_error_response("Erro no servico de IA", 503)
     except ValueError as e:
         logger.error(f"Invalid response from AI: {e}")
-        return create_error_response(f"Invalid AI response: {str(e)}", 500)
+        return create_error_response("Resposta invalida do servico de IA", 500)
     except Exception as e:
         logger.exception(f"Unexpected error in generate_article: {e}")
         return create_error_response("Internal server error", 500)
@@ -1246,7 +1370,8 @@ async def extract_topics_handler(req: func.HttpRequest) -> func.HttpResponse:
         try:
             request_data = ExtractTopicsRequest(**body)
         except Exception as e:
-            return create_error_response(f"Validation error: {str(e)}", 400)
+            logger.warning(f"Extract topics validation error: {e}")
+            return create_error_response("Erro de validacao nos dados enviados", 400)
 
         # Import LLM service
         from services.llm_service import get_llm_service
@@ -1290,7 +1415,8 @@ async def generate_tags_handler(req: func.HttpRequest) -> func.HttpResponse:
         try:
             request_data = GenerateTagsRequest(**body)
         except Exception as e:
-            return create_error_response(f"Validation error: {str(e)}", 400)
+            logger.warning(f"Generate tags validation error: {e}")
+            return create_error_response("Erro de validacao nos dados enviados", 400)
 
         # Import LLM service
         from services.llm_service import get_llm_service
@@ -1781,21 +1907,16 @@ async def merge_topics_handler(req: func.HttpRequest) -> func.HttpResponse:
 
     except ValueError as e:
         logger.error(f"Validation error in merge_topics: {e}")
-        return create_error_response(f"Erro de validação: {str(e)}", 400)
+        return create_error_response("Erro de validacao nos dados enviados", 400)
     except RuntimeError as e:
         logger.error(f"AI service error: {e}")
-        error_msg = str(e)
-        if "API error" in error_msg or "timeout" in error_msg.lower():
-            return create_error_response("Serviço de IA temporariamente indisponível. Tente novamente.", 503)
-        return create_error_response(f"Erro no serviço de IA: {error_msg}", 503)
+        return create_error_response("Erro no servico de IA", 503)
     except json.JSONDecodeError as e:
         logger.error(f"JSON parse error in merge_topics: {e}")
         return create_error_response("Erro ao processar resposta da IA. Tente novamente.", 500)
     except Exception as e:
         logger.exception(f"Unexpected error in merge_topics: {e}")
-        # Provide more context in error message
-        error_type = type(e).__name__
-        return create_error_response(f"Erro inesperado ({error_type}): {str(e)[:200]}", 500)
+        return create_error_response("Erro interno do servidor", 500)
 
 
 def merge_topics_sync(req: func.HttpRequest) -> func.HttpResponse:

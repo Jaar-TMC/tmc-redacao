@@ -87,7 +87,8 @@ async def edit_article_handler(req: func.HttpRequest) -> func.HttpResponse:
         try:
             request_data = EditArticleRequest(**body)
         except Exception as e:
-            return create_error_response(f"Validation error: {str(e)}", 400)
+            logger.warning(f"Validation error: {e}")
+            return create_error_response("Erro de validacao nos dados enviados", 400)
 
         # Validate current_article has at least some content
         current = request_data.current_article
@@ -141,10 +142,10 @@ async def edit_article_handler(req: func.HttpRequest) -> func.HttpResponse:
 
     except RuntimeError as e:
         logger.error(f"AI service error: {e}")
-        return create_error_response(f"AI service error: {str(e)}", 503)
+        return create_error_response("Erro no servico de IA", 503)
     except ValueError as e:
         logger.error(f"Invalid response from AI: {e}")
-        return create_error_response(f"Invalid AI response: {str(e)}", 500)
+        return create_error_response("Resposta invalida do servico", 500)
     except Exception as e:
         logger.exception(f"Unexpected error in edit_article: {e}")
         return create_error_response("Internal server error", 500)

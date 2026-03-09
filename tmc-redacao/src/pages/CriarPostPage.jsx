@@ -470,9 +470,8 @@ const CriarPostPage = () => {
 
   // Helper para remover tags HTML e obter texto limpo
   const stripHtmlTags = (html) => {
-    const tmp = document.createElement('div');
-    tmp.innerHTML = html;
-    return tmp.textContent || tmp.innerText || '';
+    if (!html) return '';
+    return html.replace(/<[^>]*>/g, '');
   };
 
   // Função para copiar matéria para área de transferência

@@ -54,6 +54,7 @@ const RevisarPage = () => {
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const phaseTimerRef = useRef(null);
   const elapsedTimerRef = useRef(null);
+  const isGeneratingRef = useRef(false);
 
   // Pipeline phases with realistic timing based on production measurements
   const PHASES = useMemo(() => [
@@ -194,7 +195,9 @@ const RevisarPage = () => {
   }, []);
 
   const handleGenerate = useCallback(async () => {
-    if (!reviewData) return;
+    if (isGeneratingRef.current) return;
+    isGeneratingRef.current = true;
+    if (!reviewData) { isGeneratingRef.current = false; return; }
 
     setIsGenerating(true);
     setGenerationProgress(0);
@@ -315,6 +318,8 @@ const RevisarPage = () => {
       console.error('Error generating article:', error);
       setIsGenerating(false);
       setGenerationError(error.message || 'Erro ao gerar matéria. Tente novamente.');
+    } finally {
+      isGeneratingRef.current = false;
     }
   }, [navigate, PHASES, reviewData, setResultado, fonte?.dados]);
 

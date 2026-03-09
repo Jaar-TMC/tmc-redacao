@@ -46,7 +46,7 @@ else:
 
 def add_cors_headers(response: func.HttpResponse, origin: str = None) -> func.HttpResponse:
     """Add CORS headers to response."""
-    allowed_origin = origin if origin in ALLOWED_ORIGINS else ALLOWED_ORIGINS[0]
+    allowed_origin = origin if origin in ALLOWED_ORIGINS else (ALLOWED_ORIGINS[0] if ALLOWED_ORIGINS else "")
 
     # Create new response with CORS headers
     headers = dict(response.headers) if response.headers else {}
@@ -71,7 +71,7 @@ def with_cors(handler):
 
         # Handle preflight OPTIONS request
         if req.method == "OPTIONS":
-            allowed_origin = origin if origin in ALLOWED_ORIGINS else ALLOWED_ORIGINS[0]
+            allowed_origin = origin if origin in ALLOWED_ORIGINS else (ALLOWED_ORIGINS[0] if ALLOWED_ORIGINS else "")
             return func.HttpResponse(
                 "",
                 status_code=204,
@@ -209,8 +209,9 @@ async def health(req: func.HttpRequest) -> func.HttpResponse:
 
 @app.route(route="stats", methods=["GET", "OPTIONS"])
 @with_cors
+@require_admin
 async def stats(req: func.HttpRequest) -> func.HttpResponse:
-    """GET /api/stats - Estatísticas de coleta."""
+    """GET /api/stats - Estatísticas de coleta (admin only)."""
     from functions.health import stats_handler
     return await stats_handler(req)
 
@@ -385,8 +386,9 @@ async def collect_source(req: func.HttpRequest) -> func.HttpResponse:
 
 @app.route(route="metrics", methods=["GET", "OPTIONS"])
 @with_cors
+@require_admin
 async def metrics(req: func.HttpRequest) -> func.HttpResponse:
-    """GET /api/metrics - In-process pipeline metrics."""
+    """GET /api/metrics - In-process pipeline metrics (admin only)."""
     import json as _json
     from services.metrics import Metrics
     return func.HttpResponse(
@@ -452,6 +454,16 @@ async def extract_topics(req: func.HttpRequest) -> func.HttpResponse:
     Returns:
         {"topics": [{"type": "fato", "content": "..."}, ...]}
     """
+    from services.rate_limiter import RateLimiter
+    retry_after = RateLimiter.get().check("extract-topics")
+    if retry_after is not None:
+        import json as _json
+        return func.HttpResponse(
+            _json.dumps({"error": "Rate limit exceeded", "retry_after_seconds": round(retry_after, 1)}),
+            status_code=429,
+            headers={"Retry-After": str(int(retry_after) + 1)},
+            mimetype="application/json",
+        )
     from functions.generation_api import extract_topics_handler
     return await extract_topics_handler(req)
 
@@ -469,6 +481,16 @@ async def generate_tags(req: func.HttpRequest) -> func.HttpResponse:
     Returns:
         {"tags": ["tag1", "tag2", "tag3", ...]}
     """
+    from services.rate_limiter import RateLimiter
+    retry_after = RateLimiter.get().check("generate-tags")
+    if retry_after is not None:
+        import json as _json
+        return func.HttpResponse(
+            _json.dumps({"error": "Rate limit exceeded", "retry_after_seconds": round(retry_after, 1)}),
+            status_code=429,
+            headers={"Retry-After": str(int(retry_after) + 1)},
+            mimetype="application/json",
+        )
     from functions.generation_api import generate_tags_handler
     return await generate_tags_handler(req)
 
@@ -519,6 +541,16 @@ async def merge_topics(req: func.HttpRequest) -> func.HttpResponse:
             "summary": {"mainTopic": "...", "totalElements": 5}
         }
     """
+    from services.rate_limiter import RateLimiter
+    retry_after = RateLimiter.get().check("merge-topics")
+    if retry_after is not None:
+        import json as _json
+        return func.HttpResponse(
+            _json.dumps({"error": "Rate limit exceeded", "retry_after_seconds": round(retry_after, 1)}),
+            status_code=429,
+            headers={"Retry-After": str(int(retry_after) + 1)},
+            mimetype="application/json",
+        )
     from functions.generation_api import merge_topics_handler
     return await merge_topics_handler(req)
 
@@ -556,6 +588,16 @@ async def edit_article(req: func.HttpRequest) -> func.HttpResponse:
             "changes_summary": "Descrição das alterações feitas"
         }
     """
+    from services.rate_limiter import RateLimiter
+    retry_after = RateLimiter.get().check("edit-article")
+    if retry_after is not None:
+        import json as _json
+        return func.HttpResponse(
+            _json.dumps({"error": "Rate limit exceeded", "retry_after_seconds": round(retry_after, 1)}),
+            status_code=429,
+            headers={"Retry-After": str(int(retry_after) + 1)},
+            mimetype="application/json",
+        )
     from functions.edit_api import edit_article_handler
     return await edit_article_handler(req)
 
@@ -654,9 +696,10 @@ async def get_theme(req: func.HttpRequest) -> func.HttpResponse:
 
 @app.route(route="clustering-stats", methods=["GET", "OPTIONS"])
 @with_cors
+@require_admin
 async def clustering_stats(req: func.HttpRequest) -> func.HttpResponse:
     """
-    GET /api/clustering-stats - Retorna metricas de qualidade do clustering.
+    GET /api/clustering-stats - Retorna metricas de qualidade do clustering (admin only).
 
     Returns:
         {

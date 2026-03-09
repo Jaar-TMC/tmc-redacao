@@ -13,9 +13,11 @@ import os
 import json
 import logging
 import hashlib
+import threading
 from typing import Optional, Dict, Any
 from datetime import datetime, timedelta
 
+from services.config import get_config
 from services.llm_service import LLMService, is_llm_configured
 
 logger = logging.getLogger(__name__)
@@ -99,6 +101,7 @@ class LLMVerificationService:
         # Key: hash of sorted (title1, title2)
         # Value: {"result": dict, "timestamp": datetime}
         self._verification_cache: Dict[str, Dict[str, Any]] = {}
+        self._cache_lock = threading.Lock()
 
         logger.info(f"LLMVerificationService initialized: enabled={VERIFICATION_ENABLED}")
 
@@ -123,38 +126,40 @@ class LLMVerificationService:
         Returns:
             Cached result dict or None if not found/expired
         """
-        if cache_key not in self._verification_cache:
+        with self._cache_lock:
+            if cache_key not in self._verification_cache:
+                return None
+
+            cached = self._verification_cache[cache_key]
+            timestamp = cached.get('timestamp')
+
+            if timestamp:
+                age = datetime.utcnow() - timestamp
+                if age < timedelta(hours=VERIFICATION_CACHE_TTL_HOURS):
+                    logger.debug(f"Cache hit for verification: {cache_key[:8]}...")
+                    return cached.get('result')
+
+            # Expired
+            del self._verification_cache[cache_key]
             return None
-
-        cached = self._verification_cache[cache_key]
-        timestamp = cached.get('timestamp')
-
-        if timestamp:
-            age = datetime.utcnow() - timestamp
-            if age < timedelta(hours=VERIFICATION_CACHE_TTL_HOURS):
-                logger.debug(f"Cache hit for verification: {cache_key[:8]}...")
-                return cached.get('result')
-
-        # Expired
-        del self._verification_cache[cache_key]
-        return None
 
     def _cache_result(self, cache_key: str, result: Dict[str, Any]) -> None:
         """Cache verification result."""
-        self._verification_cache[cache_key] = {
-            'result': result,
-            'timestamp': datetime.utcnow()
-        }
+        with self._cache_lock:
+            self._verification_cache[cache_key] = {
+                'result': result,
+                'timestamp': datetime.utcnow()
+            }
 
-        # Limit cache size
-        if len(self._verification_cache) > 1000:
-            # Remove oldest entries
-            oldest_keys = sorted(
-                self._verification_cache.keys(),
-                key=lambda k: self._verification_cache[k].get('timestamp', datetime.min)
-            )[:200]
-            for key in oldest_keys:
-                del self._verification_cache[key]
+            # Limit cache size
+            if len(self._verification_cache) > 1000:
+                # Remove oldest entries
+                oldest_keys = sorted(
+                    self._verification_cache.keys(),
+                    key=lambda k: self._verification_cache[k].get('timestamp', datetime.min)
+                )[:200]
+                for key in oldest_keys:
+                    del self._verification_cache[key]
 
     async def verify_same_event(
         self,
@@ -235,7 +240,9 @@ class LLMVerificationService:
             response_text = await self.llm._call_api(
                 system=VERIFICATION_SYSTEM,
                 user_content=user_prompt,
-                max_tokens=VERIFICATION_MAX_TOKENS
+                max_tokens=VERIFICATION_MAX_TOKENS,
+                model=get_config().event_verification_model,
+                task_type='event_verification'
             )
 
             result = self._parse_verification_response(response_text)
@@ -330,7 +337,8 @@ class LLMVerificationService:
 
     def clear_cache(self) -> None:
         """Clear the verification cache."""
-        self._verification_cache.clear()
+        with self._cache_lock:
+            self._verification_cache.clear()
         logger.info("Verification cache cleared")
 
     def get_cache_stats(self) -> Dict[str, Any]:
@@ -339,7 +347,11 @@ class LLMVerificationService:
         valid_count = 0
         expired_count = 0
 
-        for cached in self._verification_cache.values():
+        with self._cache_lock:
+            entries = list(self._verification_cache.values())
+            total = len(self._verification_cache)
+
+        for cached in entries:
             timestamp = cached.get('timestamp')
             if timestamp:
                 age = now - timestamp
@@ -349,7 +361,7 @@ class LLMVerificationService:
                     expired_count += 1
 
         return {
-            'total_entries': len(self._verification_cache),
+            'total_entries': total,
             'valid_entries': valid_count,
             'expired_entries': expired_count,
             'ttl_hours': VERIFICATION_CACHE_TTL_HOURS

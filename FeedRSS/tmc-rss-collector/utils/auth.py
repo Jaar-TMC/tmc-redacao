@@ -4,6 +4,7 @@ Stack with @with_cors: @with_cors @require_auth async def handler(req): ...
 """
 import json
 import logging
+import os
 from functools import wraps
 from typing import Optional
 
@@ -12,6 +13,8 @@ import azure.functions as func
 from services.auth_service import decode_token
 
 logger = logging.getLogger(__name__)
+
+_PRODUCTION_SAFETY_MODE = os.environ.get("PRODUCTION_SAFETY_MODE", "true").lower() == "true"
 
 
 def get_current_user(req: func.HttpRequest) -> Optional[dict]:
@@ -40,6 +43,10 @@ def get_current_user(req: func.HttpRequest) -> Optional[dict]:
                 return None
         except Exception as e:
             logger.warning(f"Could not check token blacklist: {e}")
+            # In production, deny access when blacklist cannot be checked (fail-closed)
+            if _PRODUCTION_SAFETY_MODE:
+                logger.error("Blacklist check failed in production - denying access")
+                return None
 
     return {
         "id": payload["sub"],

@@ -1,5 +1,6 @@
 {
   "version": "2.0",
+  "functionTimeout": "00:10:00",
   "logging": {
     "applicationInsights": {
       "samplingSettings": {
@@ -20,7 +21,9 @@
   },
   "extensions": {
     "http": {
-      "routePrefix": "api"
+      "routePrefix": "api",
+      "maxConcurrentRequests": 50,
+      "dynamicThrottlesEnabled": true
     }
   }
 }

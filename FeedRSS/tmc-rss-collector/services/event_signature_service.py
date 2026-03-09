@@ -14,6 +14,7 @@ import os
 import json
 import logging
 import re
+import threading
 from typing import Optional, Dict, Any, List
 from datetime import datetime, date
 from uuid import UUID
@@ -23,6 +24,7 @@ from models.event_signature import (
     EventSignatureCreate,
     normalize_entity
 )
+from services.config import get_config
 from services.llm_service import LLMService, is_llm_configured
 
 logger = logging.getLogger(__name__)
@@ -90,6 +92,7 @@ class EventSignatureService:
         """
         self.llm = llm_service
         self._extraction_cache: Dict[str, EventSignatureCreate] = {}
+        self._cache_lock = threading.Lock()
 
         logger.info(
             f"EventSignatureService initialized: enabled={EVENT_EXTRACTION_ENABLED}"
@@ -124,11 +127,12 @@ class EventSignatureService:
 
         # Check cache
         cache_key = f"{title[:100]}|{content[:200]}"
-        if cache_key in self._extraction_cache:
-            cached = self._extraction_cache[cache_key]
-            if article_id:
-                cached.article_id = article_id
-            return cached
+        with self._cache_lock:
+            if cache_key in self._extraction_cache:
+                cached = self._extraction_cache[cache_key]
+                if article_id:
+                    cached.article_id = article_id
+                return cached
 
         try:
             # Build prompt
@@ -141,7 +145,9 @@ class EventSignatureService:
             response_text = await self.llm._call_api(
                 system=EVENT_EXTRACTION_SYSTEM,
                 user_content=user_prompt,
-                max_tokens=EVENT_EXTRACTION_MAX_TOKENS
+                max_tokens=EVENT_EXTRACTION_MAX_TOKENS,
+                model=get_config().event_extraction_model,
+                task_type='event_extraction'
             )
 
             # Parse response
@@ -153,7 +159,8 @@ class EventSignatureService:
 
             if signature:
                 # Cache result
-                self._extraction_cache[cache_key] = signature
+                with self._cache_lock:
+                    self._extraction_cache[cache_key] = signature
 
                 logger.info(
                     f"Extracted event signature: action='{signature.event_action}', "
@@ -343,7 +350,8 @@ class EventSignatureService:
 
     def clear_cache(self) -> None:
         """Clear the extraction cache."""
-        self._extraction_cache.clear()
+        with self._cache_lock:
+            self._extraction_cache.clear()
         logger.info("Event signature extraction cache cleared")
 
 

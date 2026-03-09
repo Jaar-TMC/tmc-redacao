@@ -10,6 +10,7 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 from datetime import datetime, timedelta
 from uuid import UUID
 import json
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
 from models import (
     Source, SourceCreate, SourceUpdate,
@@ -40,8 +41,14 @@ class DatabaseService:
                 "Database not configured. Set SQL_SERVER and SQL_DATABASE environment variables."
             )
 
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=1, max=10),
+        retry=retry_if_exception_type((pymssql.OperationalError, pymssql.InterfaceError)),
+        reraise=True
+    )
     def get_connection(self) -> pymssql.Connection:
-        """Obtem uma conexao com o banco de dados."""
+        """Obtem uma conexao com o banco de dados. Retries on transient errors."""
         query_timeout = int(os.environ.get('SQL_QUERY_TIMEOUT', '30'))
         return pymssql.connect(
             server=self.server,
@@ -631,7 +638,7 @@ class DatabaseService:
             INSERT INTO collected_articles
             (source_id, title, content, preview, url, image_url, author,
              category, tags, published_at, collected_at, hash)
-            OUTPUT INSERTED.id, INSERTED.title, INSERTED.content
+            OUTPUT INSERTED.id, INSERTED.title, INSERTED.content, INSERTED.category
             VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         """
 
@@ -662,7 +669,8 @@ class DatabaseService:
                         inserted_articles.append({
                             'id': row[0],
                             'title': row[1],
-                            'content': row[2] or ''
+                            'content': row[2] or '',
+                            'category': row[3] or ''
                         })
                     inserted += 1
                 except pymssql.IntegrityError as e:
@@ -1394,7 +1402,7 @@ class DatabaseService:
             if affected == 0:
                 return None
 
-        return self.get_user_article_by_id(article_id)
+        return self.get_user_article_by_id(article_id, user_id=user_id)
 
     def delete_user_article(self, article_id: UUID, user_id: Optional[str] = None) -> bool:
         """
@@ -2810,6 +2818,58 @@ class DatabaseService:
 
         except Exception as e:
             logger.warning(f"Failed to insert generation audit (non-blocking): {e}")
+            return False
+
+    def insert_llm_usage_log(self, log_data: dict) -> bool:
+        """
+        Insert an LLM usage log record for cost and performance tracking.
+
+        Non-blocking: errors are logged but never propagated.
+
+        Args:
+            log_data: Dict with fields matching llm_usage_log table
+
+        Returns:
+            True if inserted successfully, False otherwise
+        """
+        try:
+            def _trunc(val, max_len):
+                if val and isinstance(val, str) and len(val) > max_len:
+                    return val[:max_len]
+                return val
+
+            query = """
+                INSERT INTO llm_usage_log
+                (correlation_id, task_type, model, endpoint, provider,
+                 input_tokens, output_tokens, input_cost_usd, output_cost_usd,
+                 latency_ms, status, error_message, response_chars, stop_reason)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            """
+
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(query, (
+                    _trunc(log_data.get('correlation_id'), 64),
+                    _trunc(log_data.get('task_type', 'unknown'), 50),
+                    _trunc(log_data.get('model'), 100),
+                    _trunc(log_data.get('endpoint'), 500),
+                    _trunc(log_data.get('provider', 'anthropic'), 20),
+                    log_data.get('input_tokens'),
+                    log_data.get('output_tokens'),
+                    log_data.get('input_cost_usd'),
+                    log_data.get('output_cost_usd'),
+                    log_data.get('latency_ms'),
+                    _trunc(log_data.get('status', 'success'), 10),
+                    _trunc(log_data.get('error_message'), 500),
+                    log_data.get('response_chars'),
+                    _trunc(log_data.get('stop_reason'), 20),
+                ))
+                conn.commit()
+
+            return True
+
+        except Exception as e:
+            logger.warning(f"Failed to insert LLM usage log (non-blocking): {e}")
             return False
 
     # ========================================

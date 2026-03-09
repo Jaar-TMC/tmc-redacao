@@ -124,11 +124,11 @@ async def login_handler(req: func.HttpRequest) -> func.HttpResponse:
         }
 
         # Set refresh token as HttpOnly cookie
-        # SameSite=None required for cross-origin fetch with credentials: 'include'
+        # SameSite=Lax for CSRF protection
         max_age = 30 * 24 * 3600 if remember_me else 7 * 24 * 3600
         cookie = (
             f"refresh_token={refresh_token}; "
-            f"HttpOnly; SameSite=None; Secure; "
+            f"HttpOnly; SameSite=Lax; Secure; "
             f"Path=/api/auth; Max-Age={max_age}"
         )
 
@@ -332,7 +332,7 @@ async def logout_handler(req: func.HttpRequest) -> func.HttpResponse:
         db.log_auth_event(req.user["id"], req.user["email"], "logout", req.headers.get("X-Forwarded-For", "unknown"))
 
         # Clear refresh_token cookie
-        clear_cookie = "refresh_token=; HttpOnly; SameSite=None; Secure; Path=/api/auth; Max-Age=0"
+        clear_cookie = "refresh_token=; HttpOnly; SameSite=Lax; Secure; Path=/api/auth; Max-Age=0"
 
         return func.HttpResponse(
             json.dumps({"message": "Logout successful"}),
@@ -382,8 +382,9 @@ async def list_users_handler(req: func.HttpRequest) -> func.HttpResponse:
         )
 
     except ValueError as e:
+        logger.warning(f"Invalid parameter in list_users: {e}")
         return func.HttpResponse(
-            json.dumps({"error": f"Invalid parameter: {e}"}),
+            json.dumps({"error": "Parametro invalido"}),
             status_code=400,
             mimetype="application/json"
         )
@@ -419,8 +420,9 @@ async def create_user_handler(req: func.HttpRequest) -> func.HttpResponse:
                 role=body.get("role", "user"),
             )
         except Exception as e:
+            logger.warning(f"User create validation error: {e}")
             return func.HttpResponse(
-                json.dumps({"error": f"Validation error: {e}"}),
+                json.dumps({"error": "Erro de validacao nos dados do usuario"}),
                 status_code=400,
                 mimetype="application/json"
             )
@@ -495,8 +497,9 @@ async def update_user_handler(req: func.HttpRequest) -> func.HttpResponse:
                 is_active=body.get("is_active"),
             )
         except Exception as e:
+            logger.warning(f"User update validation error: {e}")
             return func.HttpResponse(
-                json.dumps({"error": f"Validation error: {e}"}),
+                json.dumps({"error": "Erro de validacao nos dados do usuario"}),
                 status_code=400,
                 mimetype="application/json"
             )

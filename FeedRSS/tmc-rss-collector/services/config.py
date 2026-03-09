@@ -26,8 +26,6 @@ class AppConfig:
     anthropic_api_key: str = ""
     azure_ai_api_key: str = ""
     azure_ai_endpoint: str = ""
-    llm_model: str = "claude-sonnet-4-5-20250929"
-
     # Per-task model routing (optimize cost vs quality)
     # Phase 1: Safe downgrades (classification + naming = low-risk)
     classification_model: str = "claude-haiku-4-5"
@@ -58,8 +56,13 @@ class AppConfig:
     production_safety_mode: bool = True
 
     # Safety thresholds
-    min_source_chars: int = 100
-    nota_only_threshold: int = 150
+    min_source_chars: int = 300
+    nota_only_threshold: int = 500
+    short_source_threshold: int = 800
+    # Publication-readiness floors (absolute minimums for any published article)
+    publish_confidence_floor: float = 0.65
+    publish_grounded_floor: float = 0.70
+    publish_max_expansion: float = 8.0
     # CORS
     cors_allowed_origins: str = ""
 
@@ -112,7 +115,6 @@ def load_config() -> AppConfig:
         anthropic_api_key=os.environ.get("ANTHROPIC_API_KEY", ""),
         azure_ai_api_key=os.environ.get("AZURE_AI_API_KEY", ""),
         azure_ai_endpoint=os.environ.get("AZURE_AI_ENDPOINT", ""),
-        llm_model=os.environ.get("LLM_MODEL", "claude-sonnet-4-5-20250929"),
         # Per-task model routing
         classification_model=os.environ.get("CLASSIFICATION_MODEL", "claude-haiku-4-5"),
         scoring_model=os.environ.get("SCORING_MODEL", "claude-haiku-4-5"),
@@ -138,8 +140,12 @@ def load_config() -> AppConfig:
         decontamination_enabled=_bool_env("DECONTAMINATION_ENABLED", True),
         production_safety_mode=_bool_env("PRODUCTION_SAFETY_MODE", True),
         # Safety
-        min_source_chars=_int_env("MIN_SOURCE_CHARS", 100),
-        nota_only_threshold=_int_env("NOTA_ONLY_THRESHOLD", 150),
+        min_source_chars=_int_env("MIN_SOURCE_CHARS", 300),
+        nota_only_threshold=_int_env("NOTA_ONLY_THRESHOLD", 500),
+        short_source_threshold=_int_env("SHORT_SOURCE_THRESHOLD", 800),
+        publish_confidence_floor=_float_env("PUBLISH_CONFIDENCE_FLOOR", 0.65),
+        publish_grounded_floor=_float_env("PUBLISH_GROUNDED_FLOOR", 0.70),
+        publish_max_expansion=_float_env("PUBLISH_MAX_EXPANSION", 8.0),
         # CORS
         cors_allowed_origins=os.environ.get("CORS_ALLOWED_ORIGINS", ""),
         # Rate limits
@@ -187,10 +193,10 @@ def load_config() -> AppConfig:
             "Set to specific origins (e.g. https://app.tmc.com.br) for production."
         )
 
-    # Validate JWT secret in production (mandatory - prevents forged tokens)
-    if config.production_safety_mode and not config.jwt_secret_key:
+    # Validate JWT secret (mandatory - prevents forged tokens)
+    if not config.jwt_secret_key:
         raise RuntimeError(
-            "JWT_SECRET_KEY is required in production mode. "
+            "JWT_SECRET_KEY is required. "
             "Set it as an environment variable."
         )
 

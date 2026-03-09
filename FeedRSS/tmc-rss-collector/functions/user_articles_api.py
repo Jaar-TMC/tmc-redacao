@@ -72,7 +72,7 @@ async def list_user_articles_handler(req: func.HttpRequest) -> func.HttpResponse
 
     except ValueError as e:
         return func.HttpResponse(
-            json.dumps({"error": f"Invalid parameter: {e}"}),
+            json.dumps({"error": "Parâmetro inválido"}),
             status_code=400,
             mimetype="application/json"
         )
@@ -201,7 +201,7 @@ async def create_user_article_handler(req: func.HttpRequest) -> func.HttpRespons
 
     except ValueError as e:
         return func.HttpResponse(
-            json.dumps({"error": f"Validation error: {e}"}),
+            json.dumps({"error": "Dados inválidos"}),
             status_code=400,
             mimetype="application/json"
         )
@@ -288,7 +288,7 @@ async def update_user_article_handler(req: func.HttpRequest) -> func.HttpRespons
 
     except ValueError as e:
         return func.HttpResponse(
-            json.dumps({"error": f"Validation error: {e}"}),
+            json.dumps({"error": "Dados inválidos"}),
             status_code=400,
             mimetype="application/json"
         )

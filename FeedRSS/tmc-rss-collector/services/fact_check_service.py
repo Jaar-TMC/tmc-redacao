@@ -24,6 +24,8 @@ from collections import Counter
 import httpx
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
+from services.config import get_config
+
 logger = logging.getLogger(__name__)
 
 # =============================================================================
@@ -123,6 +125,7 @@ class VerificationMetadata:
     grounded_claims: int = 0
     fabricated_claims: int = 0
     unverifiable_claims: int = 0
+    context_claims: int = 0
     claims: list = field(default_factory=list)
     entity_comparison: dict = field(default_factory=dict)
     quote_verification: dict = field(default_factory=dict)
@@ -162,6 +165,7 @@ class VerificationMetadata:
             "grounded_claims": self.grounded_claims,
             "fabricated_claims": self.fabricated_claims,
             "unverifiable_claims": self.unverifiable_claims,
+            "context_claims": self.context_claims,
             "claims": claims_list,
             "entity_comparison": self.entity_comparison,
             "quote_verification": self.quote_verification,
@@ -330,6 +334,9 @@ def compute_readability(text: str) -> dict:
     else:
         level = "muito_dificil"
 
+    # Count bold elements in original (pre-stripped) text
+    bold_count = len(re.findall(r'\*\*[^*]+\*\*', text))
+
     return {
         "flesch_score": round(flesch_score, 1),
         "avg_sentence_length": round(avg_sentence_length, 1),
@@ -337,6 +344,7 @@ def compute_readability(text: str) -> dict:
         "long_sentence_pct": round(long_sentence_pct * 100, 1),
         "readability_level": level,
         "words": total_words,
+        "bold_count": bold_count,
     }
 
 
@@ -809,7 +817,7 @@ Regras:
 - "contradicted": as fontes CONTRADIZEM a afirmacao (dados diferentes)
 - "inconclusive": as fontes nao falam sobre este assunto especifico"""
 
-            response = await llm.call_api(system_prompt, comparison_prompt, 512)
+            response = await llm.call_api(system_prompt, comparison_prompt, 512, task_type='source_comparison')
             parsed = self._parse_json_response(response)
 
             if not parsed:
@@ -1000,7 +1008,7 @@ Regras:
 - Nao inclua opinioes ou analises"""
 
             max_tokens = 2048 if source_len < 500 else 1024
-            response_text = await llm.call_api(system, prompt, max_tokens)
+            response_text = await llm.call_api(system, prompt, max_tokens, model=get_config().enrichment_extraction_model, task_type='enrichment_extraction')
 
             # Try standard JSON extraction
             json_start = response_text.find("{")
@@ -1075,6 +1083,15 @@ Regras:
         if removed > 0:
             logger.info(f"Cross-contamination guard: removed {removed}/{len(facts)} enrichment facts")
 
+        # When ALL facts fail cross-contamination, return empty list.
+        # Keeping unrelated facts is worse than having no enrichment,
+        # since they inject data about different events.
+        if not filtered:
+            logger.warning(
+                f"Cross-contamination guard: ALL {len(facts)} enrichment facts "
+                f"removed (zero entity overlap with source)"
+            )
+
         return filtered
 
     # =========================================================================
@@ -1139,8 +1156,12 @@ Regras:
             claim_task = self._extract_and_verify_claims(
                 texto_base, generated_article, enrichment
             )
+            enrichment_text_for_entities = ""
+            if enrichment and enrichment.success:
+                enrichment_text_for_entities = enrichment.context_text or ""
             entity_task = asyncio.to_thread(
-                self._compare_entities, texto_base, generated_article
+                self._compare_entities, texto_base, generated_article,
+                enrichment_text_for_entities,
             )
             quote_task = asyncio.to_thread(
                 self._verify_quotes, generated_article, texto_base, citacoes
@@ -1180,6 +1201,7 @@ Regras:
                 context_count = sum(
                     1 for c in claims if c.verdict == "context"
                 )
+                metadata.context_claims = context_count
                 # Backwards compat: also count legacy "editorial" as opinion
                 editorial_count = sum(
                     1 for c in claims if c.verdict == "editorial"
@@ -1309,11 +1331,11 @@ Regras:
             metadata.is_verified = True
             metadata.enrichment_used = bool(enrichment and enrichment.success)
 
-            # Truncation metadata (4A)
+            # Truncation metadata (4A) — limits: source=8000, article=5000
             metadata.truncation = {
-                "source_truncated": len(texto_base.strip()) > 6000,
-                "article_truncated": len(generated_article.strip()) > 3000,
-                "unverified_chars": max(0, len(generated_article.strip()) - 3000),
+                "source_truncated": len(texto_base.strip()) > 8000,
+                "article_truncated": len(generated_article.strip()) > 5000,
+                "unverified_chars": max(0, len(generated_article.strip()) - 5000),
             }
 
         except Exception as e:
@@ -1366,13 +1388,13 @@ Regras:
                 if enrichment_parts:
                     enrichment_section = "\n\n".join(enrichment_parts)
 
-            # Truncation warning (4A)
-            source_for_verification = texto_base[:6000]
-            article_for_verification = generated_article[:3000]
-            if len(texto_base) > 6000:
-                logger.warning(f"Source truncated for verification: {len(texto_base)} -> 6000 chars")
-            if len(generated_article) > 3000:
-                logger.warning(f"Article truncated for verification: {len(generated_article)} -> 3000 chars ({len(generated_article)-3000} chars unverified)")
+            # Truncation warning (4A) — increased limits for better verification coverage
+            source_for_verification = texto_base[:8000]
+            article_for_verification = generated_article[:5000]
+            if len(texto_base) > 8000:
+                logger.warning(f"Source truncated for verification: {len(texto_base)} -> 8000 chars")
+            if len(generated_article) > 5000:
+                logger.warning(f"Article truncated for verification: {len(generated_article)} -> 5000 chars ({len(generated_article)-5000} chars unverified)")
 
             system = ("Voce e um verificador factual rigoroso de artigos "
                       "jornalisticos. Seu papel e proteger o leitor contra desinformacao, "
@@ -1443,14 +1465,28 @@ IMPORTANTE - REGRAS DE CLASSIFICACAO:
 - Afirmacoes "opinion" NAO contam na avaliacao de precisao factual
 - Afirmacoes "context" CONTAM na avaliacao (devem ser factualmente corretas)"""
 
-            response_text = await llm.call_api(system, prompt, 2048)
+            response_text = await llm.call_api(system, prompt, 4096, task_type='claim_extraction')
 
             json_start = response_text.find("{")
             json_end = response_text.rfind("}") + 1
             if json_start == -1 or json_end <= json_start:
+                logger.warning("Claim extraction: no JSON found in response")
                 return []
 
-            data = json.loads(response_text[json_start:json_end])
+            try:
+                data = json.loads(response_text[json_start:json_end])
+            except json.JSONDecodeError as je:
+                # Retry with repaired JSON (common when max_tokens truncates output)
+                logger.warning(f"Claim extraction JSON parse failed, attempting repair: {je}")
+                try:
+                    from services.llm_service import repair_json
+                    repaired = repair_json(response_text[json_start:json_end])
+                    data = json.loads(repaired)
+                    logger.info("Claim extraction JSON repaired successfully")
+                except Exception:
+                    logger.error(f"Claim extraction JSON repair also failed")
+                    return []
+
             claims = []
             for c in data.get("claims", [])[:MAX_CLAIMS]:
                 # Backwards compat: map legacy "editorial" to "context"
@@ -1475,16 +1511,22 @@ IMPORTANTE - REGRAS DE CLASSIFICACAO:
     # Entity Comparison (pure regex, no API calls)
     # =========================================================================
 
-    def _compare_entities(self, texto_base: str, generated_article: str) -> EntityComparisonResult:
+    def _compare_entities(self, texto_base: str, generated_article: str,
+                          enrichment_context: str = "") -> EntityComparisonResult:
         """
         Compare named entities between source and generated article.
 
         Uses regex patterns with substring and abbreviation matching.
+        Enrichment context entities are treated as legitimate source entities.
         No API calls needed.
         """
         result = EntityComparisonResult()
 
-        source_entities = self._extract_entities_regex(texto_base)
+        # Combine source + enrichment for entity extraction (enrichment entities are legitimate)
+        combined_source = texto_base
+        if enrichment_context:
+            combined_source = texto_base + "\n" + enrichment_context
+        source_entities = self._extract_entities_regex(combined_source)
         output_entities = self._extract_entities_regex(generated_article)
 
         result.source_entities = list(source_entities)
@@ -1523,6 +1565,33 @@ IMPORTANTE - REGRAS DE CLASSIFICACAO:
 
         all_matched = common | substring_matched | abbreviation_matched
         novel = output_normalized - all_matched
+
+        # Filter out known false-positive novel entities:
+        # - TMC boilerplate (CTA text, brand mentions)
+        # - Common PT-BR generic words that regex picks up as entities
+        # - Common news source names injected by enrichment/CTA
+        _NOVEL_ENTITY_STOPWORDS = {
+            # TMC boilerplate / CTA
+            "tmc", "brasil", "siga a tmc", "whatsapp",
+            # News sources
+            "globo", "estadao", "folha", "uol", "cnn", "g1", "infomoney",
+            "extra", "correio", "reuters", "bloomberg", "agencia brasil",
+            # Common generic words picked up by regex
+            "pressao", "impacto", "creio", "amizade", "sincerao", "vitima",
+            "motociclistas", "estatisticas", "especialistas", "publico",
+            "taxas", "titulos", "rivais", "emprestimo", "paulo",
+            "crescimento", "queda", "alta", "baixa", "mercado", "investidores",
+            "analistas", "governo", "presidente", "ministro", "senado",
+            "congresso", "camara", "economia", "inflacao", "juros",
+            "campeonato", "temporada", "rodada", "classico", "gol",
+            "jogador", "tecnico", "selecao", "copa", "mundial",
+            "defesa", "ataque", "preparacao", "classificacao",
+            # Common enrichment-injected context words
+            "cenario", "contexto", "perspectiva", "expectativa",
+            "movimentacao", "negociacao", "operacao", "transacao",
+            "regiao", "setor", "area", "segmento",
+        }
+        novel = {e for e in novel if e.lower() not in _NOVEL_ENTITY_STOPWORDS and len(e) > 2}
 
         result.common_entities = list(all_matched)[:20]
         result.novel_entities = list(novel)[:20]
@@ -2151,7 +2220,7 @@ Responda em JSON:
 
 NAO classifique. Apenas gere perguntas e respostas factuais."""
 
-        qa_response = await llm.call_api(system_qa, prompt_qa, 768)
+        qa_response = await llm.call_api(system_qa, prompt_qa, 768, task_type='cove_qa')
         qa_data = self._parse_json_response(qa_response)
 
         if qa_data:
@@ -2191,7 +2260,7 @@ Regras:
 - **unverifiable**: Impossivel confirmar nem negar
 - **fabricated**: Respostas confirmam que a informacao e INCORRETA ou DESCONEXA"""
 
-        verdict_response = await llm.call_api(system_verdict, prompt_verdict, 512)
+        verdict_response = await llm.call_api(system_verdict, prompt_verdict, 512, task_type='cove_verdict')
         verdict_data = self._parse_json_response(verdict_response)
 
         if verdict_data:
@@ -2240,10 +2309,16 @@ Regras:
             grounded_count = sum(1 for c in factual_claims
                                if (isinstance(c, ExtractedClaim) and c.verdict == "grounded")
                                or (isinstance(c, dict) and c.get("verdict") == "grounded"))
+            # Context claims are factually correct (by definition) — count at 80% weight
+            # This prevents enrichment-sourced facts from tanking the grounded ratio
+            context_count = sum(1 for c in factual_claims
+                               if (isinstance(c, ExtractedClaim) and c.verdict == "context")
+                               or (isinstance(c, dict) and c.get("verdict") == "context"))
             fabricated_count = sum(1 for c in factual_claims
                                  if (isinstance(c, ExtractedClaim) and c.verdict == "fabricated")
                                  or (isinstance(c, dict) and c.get("verdict") == "fabricated"))
-            grounded_ratio = grounded_count / num_factual
+            effective_grounded = grounded_count + (context_count * 0.8)
+            grounded_ratio = effective_grounded / num_factual
             # Phase 2.6: Non-linear fabrication penalty
             # 1 fabricated = 0.30, 2 = 0.55, 3+ = 0.80
             if fabricated_count == 0:
@@ -2259,11 +2334,17 @@ Regras:
             # Empty claims fallback (4B): penalize if extraction failed
             if metadata.claim_extraction_failed:
                 claim_score = 0.35  # pessimistic, not neutral
+                metadata.risk_level = "high"
+                metadata.requires_human_review = True
+                if "Claim extraction failed — zero claims extracted" not in metadata.review_reasons:
+                    metadata.review_reasons.append("Claim extraction failed — zero claims extracted")
             else:
                 claim_score = 0.5  # No claims = uncertain
 
-        # Entity overlap score
+        # Entity overlap score (floor 0.3 when enrichment provided context)
         entity_score = entity_result.overlap_score
+        if metadata.enrichment_used and entity_score < 0.3:
+            entity_score = 0.3  # Enriched articles legitimately introduce new entities
 
         # Expansion ratio score
         ratio = metadata.expansion_ratio
@@ -2398,10 +2479,13 @@ Regras:
         if metadata.expansion_ratio > 25 and level in ("low", "medium"):
             level = "high"
 
-        # Override: unverified quotes
+        # Override: unverified quotes (only escalate when confidence is genuinely low)
+        # Paraphrased or enrichment-sourced quotes often fail exact matching but
+        # the article may still be well-grounded based on claims verification
         if (quote_result.total_quotes > 0
                 and quote_result.verification_rate < 0.5
-                and level in ("low", "medium")):
+                and level in ("low", "medium")
+                and metadata.confidence_score < 0.65):
             level = "high"
 
         # Override: novel entity percentage
