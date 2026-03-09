@@ -504,20 +504,21 @@ const FilterBar = ({ urgencyCounts }) => {
                 </div>
                 <div className="flex items-center gap-2">
                   <span className="w-2 h-2 rounded-full bg-warning" />
-                  <span><strong>B</strong> Relevante (40-74) — boas pautas</span>
+                  <span><strong>B</strong> Relevante (35-74) — boas pautas</span>
                 </div>
                 <div className="flex items-center gap-2">
                   <span className="w-2 h-2 rounded-full bg-light-gray" />
-                  <span><strong>C</strong> Baixo (&lt;40) — menor relevância</span>
+                  <span><strong>C</strong> Baixo (&lt;35) — menor relevância</span>
                 </div>
               </div>
               {/* Tooltip arrow */}
               <div className="absolute -top-1 right-3 w-2 h-2 bg-dark-gray rotate-45" />
             </div>
           </div>
+        </div>
 
-          {/* Sort Order Divider + Toggle */}
-          <div className="w-px h-5 bg-light-gray mx-1" aria-hidden="true" />
+        {/* Sort Order Toggle - separate flex child so it wraps independently */}
+        <div className="flex items-center gap-2">
           <span className="text-xs font-semibold text-medium-gray whitespace-nowrap">Ordenar:</span>
           <div className="flex items-center gap-1" role="radiogroup" aria-label="Ordenar matérias">
             <button
