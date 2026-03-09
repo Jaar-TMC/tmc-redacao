@@ -73,7 +73,7 @@ const ArticleCard = ({ article, isSelected, onSelect, selectedTags = new Set(), 
 
         {/* Score Badge + Category Tag */}
         <div className="absolute top-3 right-3 z-10 flex items-center gap-1.5">
-          {article.score != null && (
+          {article.score != null ? (
             <ScoreTooltip article={article}>
               <span
                 className={`text-white text-xs font-bold px-2 py-1 rounded-md ${
@@ -88,6 +88,14 @@ const ArticleCard = ({ article, isSelected, onSelect, selectedTags = new Set(), 
                 {article.score}
               </span>
             </ScoreTooltip>
+          ) : (
+            <span
+              className="text-white/70 text-xs font-bold px-2 py-1 rounded-md bg-medium-gray/60"
+              aria-label="Score não disponível"
+              title="Score ainda não calculado"
+            >
+              —
+            </span>
           )}
           <span className={`${categoryColor} text-white text-xs font-semibold px-2 py-1 rounded-md`} aria-label={`Categoria: ${article.category}`}>
             {article.category}
