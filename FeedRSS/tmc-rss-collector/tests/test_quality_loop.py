@@ -118,7 +118,7 @@ class TestEvaluateQualityCriteria:
                 "output_entities": ["a", "b", "c", "d", "e"],
             },
         }
-        readability = {"flesch_score": 50, "avg_sentence_length": 14}
+        readability = {"flesch_score": 60, "avg_sentence_length": 14}
 
         result = evaluate_quality_criteria(verification, readability)
 
@@ -180,7 +180,7 @@ class TestEvaluateQualityCriteria:
         assert "confidence" in [f["criterion"] for f in result["failures"]]
 
     def test_novel_entities_fails(self):
-        """More than 60% novel entities triggers failure."""
+        """More than 60% novel entities (>= 5) triggers failure."""
         verification = {
             "confidence_score": 0.70,
             "fabricated_claims": 0,
@@ -188,11 +188,11 @@ class TestEvaluateQualityCriteria:
             "total_claims": 10,
             "claims": [],
             "entity_comparison": {
-                "novel_entities": ["a", "b", "c", "d"],
-                "output_entities": ["a", "b", "c", "d", "e"],
+                "novel_entities": ["a", "b", "c", "d", "e", "f"],
+                "output_entities": ["a", "b", "c", "d", "e", "f", "g"],
             },
         }
-        readability = {"flesch_score": 50}
+        readability = {"flesch_score": 60}
 
         result = evaluate_quality_criteria(verification, readability)
 

@@ -126,6 +126,7 @@ class TestEvaluateSafetyGates:
         )
         assert result.publish_blocked
 
+    @patch("functions.generation_api.PRODUCTION_SAFETY_MODE", True)
     def test_2_fabricated_high_confidence_blocks_production(self):
         """Production mode: 2 fabricated always blocks (regardless of confidence)."""
         data = {

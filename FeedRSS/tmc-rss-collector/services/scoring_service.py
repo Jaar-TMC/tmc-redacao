@@ -13,12 +13,12 @@ Scoring System:
 | inesperado    | yes/partial/no      | 25/12/0    |
 | impacto       | high/medium/low     | 30/15/0    |
 | busca_agora   | yes/maybe/no        | 25/12/0    |
-| conversa      | yes/no              | 20/0       |
+| conversa      | yes/maybe/no        | 20/10/0    |
 
 Classification:
 - A: total_score >= 75 (High priority - front page material)
-- B: total_score 40-74 (Medium priority - good content)
-- C: total_score < 40 (Low priority - filler content)
+- B: total_score 35-74 (Medium priority - good content)
+- C: total_score < 35 (Low priority - filler content)
 """
 
 import os
@@ -46,11 +46,11 @@ logger = logging.getLogger(__name__)
 SCORE_INESPERADO = {'yes': 25, 'partial': 12, 'no': 0}
 SCORE_IMPACTO = {'high': 30, 'medium': 15, 'low': 0}
 SCORE_BUSCA_AGORA = {'yes': 25, 'maybe': 12, 'no': 0}
-SCORE_CONVERSA = {'yes': 20, 'no': 0}
+SCORE_CONVERSA = {'yes': 20, 'maybe': 10, 'no': 0}
 
 # Classification thresholds
 THRESHOLD_A = 75  # >= 75 = Class A
-THRESHOLD_B = 40  # >= 40 = Class B, < 40 = Class C
+THRESHOLD_B = 35  # >= 35 = Class B, < 35 = Class C
 
 # Max tokens for scoring response
 SCORING_MAX_TOKENS = 1024
@@ -97,6 +97,8 @@ Avalia se o leitor vai ativamente buscar mais informacoes sobre este assunto.
 Avalia se a noticia vai gerar discussao nas redes sociais, com amigos, familia.
 - **yes**: Noticia para conversar - vai gerar debates e discussoes
   - Exemplos: Polemica politica, declaracao controversa, crime chocante, resultado surpreendente, tema divisivo
+- **maybe**: Noticia que pode gerar algum comentario ou compartilhamento, mas nao debate acalorado
+  - Exemplos: Conquista esportiva, mudanca em servico popular, curiosidade interessante, novidade tecnologica
 - **no**: Noticia que nao gera conversa - leia e siga em frente
   - Exemplos: Informacao factual sem polemica, rotina, comunicado tecnico, estatistica neutra
 
@@ -108,7 +110,7 @@ Responda APENAS com JSON valido no seguinte formato:
   "sinal_inesperado": "yes|partial|no",
   "sinal_impacto": "high|medium|low",
   "sinal_busca_agora": "yes|maybe|no",
-  "sinal_conversa": "yes|no",
+  "sinal_conversa": "yes|maybe|no",
   "justificativa": "Breve explicacao das classificacoes (max 200 caracteres)"
 }
 ```
@@ -122,6 +124,9 @@ IMPORTANTE:
 
 SCORING_USER_PROMPT_TEMPLATE = """Analise o seguinte artigo e classifique usando os 4 sinais de relevancia editorial:
 
+## CATEGORIA
+{category}
+
 ## TITULO
 {title}
 
@@ -129,6 +134,8 @@ SCORING_USER_PROMPT_TEMPLATE = """Analise o seguinte artigo e classifique usando
 {content}
 
 ---
+
+Considere a categoria ao avaliar os sinais. O que e "inesperado" em Esportes pode ser rotineiro em Politica, e vice-versa. Calibre sua avaliacao para o contexto da categoria.
 
 Classifique este artigo nos 4 sinais (inesperado, impacto, busca_agora, conversa) e retorne APENAS o JSON."""
 
@@ -258,6 +265,8 @@ def _heuristic_score_article(title: str, content: str) -> Dict[str, Any]:
 
     if conversa_matches >= 2 or (conversa_matches >= 1 and relevance_boost):
         sinal_conversa = 'yes'
+    elif conversa_matches >= 1:
+        sinal_conversa = 'maybe'
     else:
         sinal_conversa = 'no'
 
@@ -343,13 +352,14 @@ class ScoringService:
 
         return scores, total_score, classification
 
-    async def _analyze_with_llm(self, title: str, content: str) -> Optional[Dict[str, Any]]:
+    async def _analyze_with_llm(self, title: str, content: str, category: str = '') -> Optional[Dict[str, Any]]:
         """
         Analyze article using Claude AI.
 
         Args:
             title: Article title
             content: Article content
+            category: Article category (e.g. "Politica", "Esportes")
 
         Returns:
             Dict with AI analysis or None if LLM unavailable
@@ -358,12 +368,13 @@ class ScoringService:
             logger.warning("LLM service not available, will use heuristic fallback")
             return None
 
-        # Truncate content if too long (keep first 3000 chars)
-        truncated_content = content[:3000] if content and len(content) > 3000 else (content or '')
+        # Truncate content if too long (keep first 5000 chars for better context)
+        truncated_content = content[:5000] if content and len(content) > 5000 else (content or '')
 
         user_prompt = SCORING_USER_PROMPT_TEMPLATE.format(
             title=title,
-            content=truncated_content
+            content=truncated_content,
+            category=category or 'Nao especificada'
         )
 
         try:
@@ -406,7 +417,8 @@ class ScoringService:
         article_id: UUID,
         title: str,
         content: str,
-        use_heuristic_fallback: bool = True
+        use_heuristic_fallback: bool = True,
+        category: str = ''
     ) -> ArticleScore:
         """
         Score a single article.
@@ -416,6 +428,7 @@ class ScoringService:
             title: Article title
             content: Article content
             use_heuristic_fallback: If True, use heuristics when LLM fails
+            category: Article category for context-aware scoring
 
         Returns:
             ArticleScore with classification
@@ -423,7 +436,7 @@ class ScoringService:
         logger.info(f"Scoring article {article_id}: {title[:50]}...")
 
         # Try AI analysis first
-        ai_result = await self._analyze_with_llm(title, content)
+        ai_result = await self._analyze_with_llm(title, content, category=category)
 
         if ai_result:
             signals = ai_result
@@ -546,7 +559,8 @@ class ScoringService:
                     article_id=article_id,
                     title=article['title'],
                     content=article.get('content', ''),
-                    use_heuristic_fallback=use_heuristic_fallback
+                    use_heuristic_fallback=use_heuristic_fallback,
+                    category=article.get('category', '')
                 )
                 results.append(score)
 
@@ -624,10 +638,10 @@ class ScoringService:
         Returns:
             List of article dicts with id, title, content
         """
-        # Query for articles without scores
+        # Query for articles without scores (includes category for context-aware scoring)
         # This uses raw SQL since the method might not exist in DatabaseService
         query = """
-            SELECT TOP %s a.id, a.title, a.content
+            SELECT TOP %s a.id, a.title, a.content, a.category
             FROM collected_articles a
             LEFT JOIN article_scores s ON a.id = s.article_id
             WHERE s.id IS NULL
@@ -643,7 +657,8 @@ class ScoringService:
                 {
                     'id': row[0],
                     'title': row[1],
-                    'content': row[2]
+                    'content': row[2],
+                    'category': row[3] or ''
                 }
                 for row in rows
             ]
@@ -705,7 +720,8 @@ class ScoringService:
         article_id: UUID,
         title: str,
         content: str,
-        use_heuristic_fallback: bool = True
+        use_heuristic_fallback: bool = True,
+        category: str = ''
     ) -> ArticleScore:
         """
         Synchronous wrapper for score_article.
@@ -717,6 +733,7 @@ class ScoringService:
             title: Article title
             content: Article content
             use_heuristic_fallback: If True, use heuristics when LLM fails
+            category: Article category for context-aware scoring
 
         Returns:
             ArticleScore with classification
@@ -727,12 +744,12 @@ class ScoringService:
             import nest_asyncio
             nest_asyncio.apply()
             return asyncio.run(self.score_article(
-                article_id, title, content, use_heuristic_fallback
+                article_id, title, content, use_heuristic_fallback, category=category
             ))
         except RuntimeError:
             # No event loop running, safe to use asyncio.run
             return asyncio.run(self.score_article(
-                article_id, title, content, use_heuristic_fallback
+                article_id, title, content, use_heuristic_fallback, category=category
             ))
 
 
@@ -792,14 +809,14 @@ def get_score_breakdown(classification: str) -> Dict[str, Any]:
             'color': '#22c55e'  # green
         },
         'B': {
-            'min': 40,
+            'min': 35,
             'max': 74,
             'description': 'Media prioridade - bom conteudo',
             'color': '#eab308'  # yellow
         },
         'C': {
             'min': 0,
-            'max': 39,
+            'max': 34,
             'description': 'Baixa prioridade - conteudo complementar',
             'color': '#ef4444'  # red
         }

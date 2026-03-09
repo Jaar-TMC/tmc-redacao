@@ -168,15 +168,21 @@ class TestGetDynamicLengthRequirement:
         assert label_501 == "materia media"
 
     def test_enriched_short_upgrades(self):
-        """Short source with high verified_chars uses higher tier."""
+        """Short source with enrichment gets modest uplift (capped at 2x source)."""
         short = "A" * 50
         # Without enrichment
         _, _, label_short = get_dynamic_length_requirement(short)
         assert label_short == "nota curta"
 
-        # With enrichment of 3500 verified chars
+        # With enrichment of 3500 verified chars — capped at 2x source (100 chars)
+        # so still stays in nota curta tier (enrichment is modest boost, not full replace)
         _, _, label_enriched = get_dynamic_length_requirement(short, verified_chars=3500)
-        assert label_enriched in ("materia longa", "materia completa")
+        assert label_enriched == "nota curta"
+
+        # With a longer source (300 chars), enrichment can push it higher
+        medium = "A" * 300
+        _, _, label_medium_enriched = get_dynamic_length_requirement(medium, verified_chars=3500)
+        assert label_medium_enriched != "nota curta"
 
 
 # ===========================================================================

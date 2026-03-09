@@ -116,10 +116,10 @@ def score_article_heuristic(title, content):
         result['score_conversa']
     )
 
-    # Classificacao com threshold corrigido (40, nao 50)
+    # Classificacao com threshold corrigido (35)
     if result['total_score'] >= 75:
         result['classification'] = 'A'
-    elif result['total_score'] >= 40:  # CORRIGIDO de 50 para 40
+    elif result['total_score'] >= 35:  # Threshold B ajustado para 35
         result['classification'] = 'B'
     else:
         result['classification'] = 'C'
@@ -281,8 +281,8 @@ def main():
 
     print(f'\nSCORING:')
     print(f'  Classe A (>=75): {class_counts["A"]} materias')
-    print(f'  Classe B (40-74): {class_counts["B"]} materias')
-    print(f'  Classe C (<40): {class_counts["C"]} materias')
+    print(f'  Classe B (35-74): {class_counts["B"]} materias')
+    print(f'  Classe C (<35): {class_counts["C"]} materias')
 
     print(f'\nCLUSTERING (threshold 0.50):')
     print(f'  Total de clusters: {len(clusters)}')

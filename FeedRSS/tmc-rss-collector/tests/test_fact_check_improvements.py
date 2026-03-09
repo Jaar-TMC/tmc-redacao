@@ -737,7 +737,7 @@ class TestCoVeTwoCallSplit:
     async def test_cove_two_call_isolation(self, service):
         """CoVe single claim makes 2 LLM calls (Q&A + verdict)."""
         call_count = 0
-        async def mock_call_api(system, prompt, max_tokens):
+        async def mock_call_api(system, prompt, max_tokens, **kwargs):
             nonlocal call_count
             call_count += 1
             if call_count == 1:
@@ -769,7 +769,7 @@ class TestCoVeTwoCallSplit:
     @pytest.mark.asyncio
     async def test_cove_proportional_strong(self, service):
         """Strong evidence gives 0.08 bonus."""
-        async def mock_call_api(system, prompt, max_tokens):
+        async def mock_call_api(system, prompt, max_tokens, **kwargs):
             if "Gere" in prompt:
                 return json.dumps({"questions": ["Q?"], "answers": ["A"]})
             return json.dumps({"final_verdict": "grounded", "reasoning": "ok", "evidence_strength": "strong"})
@@ -785,7 +785,7 @@ class TestCoVeTwoCallSplit:
     @pytest.mark.asyncio
     async def test_cove_proportional_weak(self, service):
         """Weak evidence gives 0.02 bonus."""
-        async def mock_call_api(system, prompt, max_tokens):
+        async def mock_call_api(system, prompt, max_tokens, **kwargs):
             if "Gere" in prompt:
                 return json.dumps({"questions": ["Q?"], "answers": ["A"]})
             return json.dumps({"final_verdict": "unverifiable", "reasoning": "ok", "evidence_strength": "weak"})
@@ -801,7 +801,7 @@ class TestCoVeTwoCallSplit:
     @pytest.mark.asyncio
     async def test_cove_fabricated_keeps_zero_delta(self, service):
         """If still fabricated after CoVe, delta is 0."""
-        async def mock_call_api(system, prompt, max_tokens):
+        async def mock_call_api(system, prompt, max_tokens, **kwargs):
             if "Gere" in prompt:
                 return json.dumps({"questions": ["Q?"], "answers": ["A"]})
             return json.dumps({"final_verdict": "fabricated", "reasoning": "confirmed wrong", "evidence_strength": "strong"})
@@ -1047,7 +1047,7 @@ class TestEditorialVerdictSplit:
     @pytest.mark.asyncio
     async def test_cove_can_reclassify_to_context(self, service):
         """CoVe should be able to reclassify fabricated -> context."""
-        async def mock_call_api(system, prompt, max_tokens):
+        async def mock_call_api(system, prompt, max_tokens, **kwargs):
             if "Gere" in prompt:
                 return json.dumps({"questions": ["Q?"], "answers": ["A"]})
             return json.dumps({"final_verdict": "context", "reasoning": "factual background", "evidence_strength": "moderate"})

@@ -31,8 +31,8 @@ async def scoring_calculator_handler(timer: func.TimerRequest) -> None:
 
     Classification:
     - A: total_score >= 75 (High priority)
-    - B: total_score 40-74 (Medium priority)
-    - C: total_score < 40 (Low priority)
+    - B: total_score 35-74 (Medium priority)
+    - C: total_score < 35 (Low priority)
 
     Flow:
     1. Get articles without scores from database
@@ -105,7 +105,7 @@ async def _update_affected_theme_scores(db) -> int:
             t.min_score = scores.min_score,
             t.classification = CASE
                 WHEN scores.avg_score >= 75 THEN 'A'
-                WHEN scores.avg_score >= 40 THEN 'B'
+                WHEN scores.avg_score >= 35 THEN 'B'
                 ELSE 'C'
             END,
             t.last_updated_at = GETUTCDATE()

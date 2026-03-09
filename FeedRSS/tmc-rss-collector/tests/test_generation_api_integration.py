@@ -64,9 +64,13 @@ def _make_verification_metadata():
 
 
 VALID_BODY = {
-    "texto_base": "O presidente Lula sancionou a nova lei que cria o programa social. "
-                  "A medida foi anunciada pelo Ministerio da Fazenda em Brasilia. "
-                  "O programa deve beneficiar milhoes de familias brasileiras.",
+    "texto_base": (
+        "O presidente Lula sancionou a nova lei que cria o programa social. "
+        "A medida foi anunciada pelo Ministerio da Fazenda em Brasilia. "
+        "O programa deve beneficiar milhoes de familias brasileiras em todo o pais. "
+        "O Ministerio estima que cerca de 20 milhoes de pessoas serao atendidas pelo programa. "
+        "A iniciativa faz parte do pacote de medidas sociais do governo federal para 2026."
+    ),
     "categoria": "politica",
     "tom": "sobrio",
     "tipo_materia": "destaque",

@@ -1083,10 +1083,16 @@ Regras:
         if removed > 0:
             logger.info(f"Cross-contamination guard: removed {removed}/{len(facts)} enrichment facts")
 
-        # When ALL facts fail cross-contamination, return empty list.
-        # Keeping unrelated facts is worse than having no enrichment,
-        # since they inject data about different events.
-        if not filtered:
+        # Minimum retention: when ALL facts would be removed, keep top 2.
+        # Removing ALL enrichment is worse than keeping marginally related facts,
+        # since the enrichment search already filtered by topic relevance.
+        if not filtered and len(facts) >= 2:
+            logger.info(
+                f"Cross-contamination guard: keeping top 2 facts "
+                f"(all {len(facts)} would have been removed)"
+            )
+            filtered = facts[:2]
+        elif not filtered:
             logger.warning(
                 f"Cross-contamination guard: ALL {len(facts)} enrichment facts "
                 f"removed (zero entity overlap with source)"

@@ -13,7 +13,7 @@ from uuid import UUID, uuid4
 SinalInesperado = Literal['yes', 'partial', 'no']
 SinalImpacto = Literal['high', 'medium', 'low']
 SinalBuscaAgora = Literal['yes', 'maybe', 'no']
-SinalConversa = Literal['yes', 'no']
+SinalConversa = Literal['yes', 'maybe', 'no']
 Classification = Literal['A', 'B', 'C']
 ScoredBy = Literal['ai', 'manual']
 
@@ -24,7 +24,7 @@ class ArticleScoreBase(BaseModel):
     sinal_inesperado: SinalInesperado = Field(..., description="Fato inesperado? (yes/partial/no)")
     sinal_impacto: SinalImpacto = Field(..., description="Impacto na vida do leitor (high/medium/low)")
     sinal_busca_agora: SinalBuscaAgora = Field(..., description="Leitor vai buscar agora? (yes/maybe/no)")
-    sinal_conversa: SinalConversa = Field(..., description="Leitor vai comentar? (yes/no)")
+    sinal_conversa: SinalConversa = Field(..., description="Leitor vai comentar? (yes/maybe/no)")
 
     # Scores numericos (max varies per signal, total 0-100)
     score_inesperado: int = Field(..., ge=0, le=25, description="Pontuacao Inesperado (0-25)")
@@ -84,10 +84,10 @@ class ArticleScore(ArticleScoreBase):
         )
 
         # Calcular classificacao
-        # A: 75-100, B: 40-74, C: 0-39
+        # A: 75-100, B: 35-74, C: 0-34
         if self.total_score >= 75:
             self.classification = 'A'
-        elif self.total_score >= 40:  # Threshold B: 40-74 (unificado com scoring_service.py)
+        elif self.total_score >= 35:  # Threshold B: 35-74 (unificado com scoring_service.py)
             self.classification = 'B'
         else:
             self.classification = 'C'

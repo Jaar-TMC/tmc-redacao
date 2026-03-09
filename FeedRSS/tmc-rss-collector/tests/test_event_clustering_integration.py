@@ -90,7 +90,7 @@ def mock_llm_service():
     """
     mock = MagicMock()
 
-    async def mock_call_api(system: str, user_content: str, max_tokens: int = 1024):
+    async def mock_call_api(system: str, user_content: str, max_tokens: int = 1024, **kwargs):
         """Mock LLM API call that extracts event signature from content."""
         # Parse the user content to determine what article we're processing
         if 'Joao Silva' in user_content or 'trigemeos' in user_content:

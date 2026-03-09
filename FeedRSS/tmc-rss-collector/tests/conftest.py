@@ -10,6 +10,19 @@ from unittest.mock import AsyncMock, MagicMock
 # Add project root to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
+# Set test environment defaults (before any config module import).
+# PRODUCTION_SAFETY_MODE=false avoids requiring JWT_SECRET_KEY in tests.
+os.environ.setdefault("PRODUCTION_SAFETY_MODE", "false")
+
+
+@pytest.fixture(autouse=True)
+def _reset_config_singleton():
+    """Reset config singleton before each test so env changes take effect."""
+    import services.config as cfg_mod
+    cfg_mod._config = None
+    yield
+    cfg_mod._config = None
+
 
 @pytest.fixture
 def fact_check_service():

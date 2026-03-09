@@ -193,10 +193,10 @@ def load_config() -> AppConfig:
             "Set to specific origins (e.g. https://app.tmc.com.br) for production."
         )
 
-    # Validate JWT secret (mandatory - prevents forged tokens)
-    if not config.jwt_secret_key:
+    # Validate JWT secret in production (mandatory - prevents forged tokens)
+    if config.production_safety_mode and not config.jwt_secret_key:
         raise RuntimeError(
-            "JWT_SECRET_KEY is required. "
+            "JWT_SECRET_KEY is required in production mode. "
             "Set it as an environment variable."
         )
 
