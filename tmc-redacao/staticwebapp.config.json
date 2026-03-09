@@ -17,7 +17,7 @@
     }
   },
   "globalHeaders": {
-    "content-security-policy": "default-src 'self'; script-src 'self' https://www.youtube.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: https: https://www.google.com; font-src 'self' data:; connect-src 'self' https://tmc-redacao-api-b7h3dyaxazfvdcez.eastus2-01.azurewebsites.net; frame-src https://www.youtube.com https://www.youtube-nocookie.com",
+    "content-security-policy": "default-src 'self'; script-src 'self' https://www.youtube.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; img-src 'self' data: https: https://www.google.com; font-src 'self' data: https://fonts.gstatic.com; connect-src 'self' https://tmc-redacao-api-b7h3dyaxazfvdcez.eastus2-01.azurewebsites.net; frame-src https://www.youtube.com https://www.youtube-nocookie.com",
     "X-Frame-Options": "DENY",
     "X-Content-Type-Options": "nosniff",
     "Strict-Transport-Security": "max-age=31536000; includeSubDomains",

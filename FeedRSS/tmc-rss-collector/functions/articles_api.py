@@ -92,13 +92,14 @@ async def list_articles_handler(req: func.HttpRequest) -> func.HttpResponse:
         )
 
     except ValueError as e:
+        logger.error(f"ValueError in list_articles: {e}", exc_info=True)
         return func.HttpResponse(
             json.dumps({"error": "Parâmetro inválido"}),
             status_code=400,
             mimetype="application/json"
         )
     except Exception as e:
-        logger.error(f"Error listing articles: {e}")
+        logger.error(f"Error listing articles: {e}", exc_info=True)
         return func.HttpResponse(
             json.dumps({"error": "Internal server error"}),
             status_code=500,
@@ -201,7 +202,7 @@ async def get_categories_handler(req: func.HttpRequest) -> func.HttpResponse:
         )
 
     except Exception as e:
-        logger.error(f"Error getting categories: {e}")
+        logger.error(f"Error getting categories: {e}", exc_info=True)
         return func.HttpResponse(
             json.dumps({"error": "Internal server error"}),
             status_code=500,
@@ -257,13 +258,14 @@ async def get_trending_tags_handler(req: func.HttpRequest) -> func.HttpResponse:
         )
 
     except ValueError as e:
+        logger.error(f"ValueError in get_trending_tags: {e}", exc_info=True)
         return func.HttpResponse(
             json.dumps({"error": "Parâmetro inválido"}),
             status_code=400,
             mimetype="application/json"
         )
     except Exception as e:
-        logger.error(f"Error getting trending tags: {e}")
+        logger.error(f"Error getting trending tags: {e}", exc_info=True)
         return func.HttpResponse(
             json.dumps({"error": "Internal server error"}),
             status_code=500,

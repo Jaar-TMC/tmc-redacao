@@ -196,7 +196,7 @@ class DatabaseService:
 
         with self.get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute(query, params)
+            cursor.execute(query, tuple(params))
             conn.commit()
 
         return self.get_source_by_id(source_id)
@@ -241,7 +241,7 @@ class DatabaseService:
 
         with self.get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute(query, params)
+            cursor.execute(query, tuple(params))
             conn.commit()
 
     # ========================================
@@ -378,10 +378,10 @@ class DatabaseService:
         with self.get_connection() as conn:
             cursor = conn.cursor()
 
-            cursor.execute(count_query, params)
+            cursor.execute(count_query, tuple(params))
             total = cursor.fetchone()[0]
 
-            cursor.execute(query, params + [offset, limit])
+            cursor.execute(query, tuple(params) + (offset, limit))
             rows = cursor.fetchall()
 
             logger.info(f"[get_articles] total={total}, rows={len(rows)}")
@@ -445,7 +445,7 @@ class DatabaseService:
                 {scores_join}
                 {where_clause}
             """
-            cursor.execute(count_query, params)
+            cursor.execute(count_query, tuple(params))
             total = cursor.fetchone()[0]
 
             # 2. Get page of articles (always joins article_scores for score columns)
@@ -463,7 +463,7 @@ class DatabaseService:
                 {order_clause}
                 OFFSET %s ROWS FETCH NEXT %s ROWS ONLY
             """
-            cursor.execute(query, params + [offset, limit])
+            cursor.execute(query, tuple(params) + (offset, limit))
             rows = cursor.fetchall()
             articles = [self._row_to_article(row) for row in rows]
 
@@ -479,7 +479,7 @@ class DatabaseService:
                 {urgency_scores_join}
                 {urgency_where}
             """
-            cursor.execute(urgency_query, urgency_params)
+            cursor.execute(urgency_query, tuple(urgency_params))
             urow = cursor.fetchone()
 
             urgency_counts = {
@@ -842,7 +842,7 @@ class DatabaseService:
 
         with self.get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute(query, params)
+            cursor.execute(query, tuple(params))
             rows = cursor.fetchall()
 
             return [{"tag": row[0], "count": row[1]} for row in rows]
@@ -898,7 +898,7 @@ class DatabaseService:
 
         with self.get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute(query, params)
+            cursor.execute(query, tuple(params))
             rows = cursor.fetchall()
 
             result = []
@@ -937,7 +937,7 @@ class DatabaseService:
 
         with self.get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute(query, params)
+            cursor.execute(query, tuple(params))
             return [{"name": row[0], "count": row[1]} for row in cursor.fetchall()]
 
     def get_all_tags_filtered(self,
@@ -1013,7 +1013,7 @@ class DatabaseService:
 
         with self.get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute(query, params)
+            cursor.execute(query, tuple(params))
             rows = cursor.fetchall()
 
             result = []
@@ -1208,11 +1208,11 @@ class DatabaseService:
             cursor = conn.cursor()
 
             # Executar count
-            cursor.execute(count_query, params)
+            cursor.execute(count_query, tuple(params))
             total = cursor.fetchone()[0]
 
             # Executar query principal
-            cursor.execute(query, params + [offset, limit])
+            cursor.execute(query, tuple(params) + (offset, limit))
             rows = cursor.fetchall()
 
             articles = [self._row_to_user_article(row) for row in rows]
@@ -1238,7 +1238,7 @@ class DatabaseService:
         """
         with self.get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute(query, params)
+            cursor.execute(query, tuple(params))
             row = cursor.fetchone()
             return self._row_to_user_article(row) if row else None
 
@@ -1395,7 +1395,7 @@ class DatabaseService:
 
         with self.get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute(query, params)
+            cursor.execute(query, tuple(params))
             affected = cursor.rowcount
             conn.commit()
 
@@ -1428,7 +1428,7 @@ class DatabaseService:
         """
         with self.get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute(query, params)
+            cursor.execute(query, tuple(params))
             affected = cursor.rowcount
             conn.commit()
             return affected > 0
@@ -1831,7 +1831,7 @@ class DatabaseService:
         try:
             with self.get_connection() as conn:
                 cursor = conn.cursor()
-                cursor.execute(query, params)
+                cursor.execute(query, tuple(params))
                 conn.commit()
 
             return self.get_theme(theme_id)
@@ -2676,7 +2676,7 @@ class DatabaseService:
         try:
             with self.get_connection() as conn:
                 cursor = conn.cursor()
-                cursor.execute(query, params)
+                cursor.execute(query, tuple(params))
                 conn.commit()
                 return cursor.rowcount > 0
         except Exception as e:
@@ -2975,10 +2975,10 @@ class DatabaseService:
         with self.get_connection() as conn:
             cursor = conn.cursor()
 
-            cursor.execute(count_query, params)
+            cursor.execute(count_query, tuple(params))
             total = cursor.fetchone()[0]
 
-            cursor.execute(query, params + [offset, limit])
+            cursor.execute(query, tuple(params) + (offset, limit))
             rows = cursor.fetchall()
             users = [self._row_to_user(row) for row in rows]
 
@@ -3035,7 +3035,7 @@ class DatabaseService:
 
         with self.get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute(query, params)
+            cursor.execute(query, tuple(params))
             conn.commit()
 
         return self.get_user_by_id(user_id)
