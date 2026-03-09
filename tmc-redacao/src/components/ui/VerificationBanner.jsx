@@ -24,7 +24,7 @@ const VerificationBanner = ({ verification, publishBlocked, blockReason, humanRe
       return null; // No verification data - don't show banner
     }
 
-    const { confidence_score, risk_level, total_claims, grounded_claims, fabricated_claims, unverifiable_claims } = verification;
+    const { confidence_score, risk_level, total_claims: _total_claims, grounded_claims: _grounded_claims, fabricated_claims: _fabricated_claims, unverifiable_claims: _unverifiable_claims } = verification;
 
     if (publishBlocked || risk_level === 'critical' || confidence_score < 0.4) {
       return {
@@ -43,7 +43,7 @@ const VerificationBanner = ({ verification, publishBlocked, blockReason, humanRe
       return {
         level: 'warning',
         icon: AlertTriangle,
-        title: 'Risco alto - revisao recomendada',
+        title: 'Risco alto - revisão recomendada',
         bgClass: 'bg-amber-50 border-amber-200',
         textClass: 'text-amber-800',
         subtextClass: 'text-amber-600',
@@ -68,7 +68,7 @@ const VerificationBanner = ({ verification, publishBlocked, blockReason, humanRe
     return {
       level: 'warning',
       icon: AlertTriangle,
-      title: 'Verificacao parcial',
+      title: 'Verificação parcial',
       bgClass: 'bg-amber-50 border-amber-200',
       textClass: 'text-amber-800',
       subtextClass: 'text-amber-600',
@@ -94,7 +94,7 @@ const VerificationBanner = ({ verification, publishBlocked, blockReason, humanRe
             {status.title}
           </span>
           <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${status.badgeClass}`}>
-            {Math.round(confidence_score * 100)}% confianca
+            {Math.round(confidence_score * 100)}% confiança
           </span>
         </div>
         <div className="flex items-center gap-3">
@@ -123,11 +123,11 @@ const VerificationBanner = ({ verification, publishBlocked, blockReason, humanRe
           {total_claims > 0 && (
             <div className="text-xs space-y-1">
               <p className={`font-medium ${status.textClass}`}>
-                {total_claims} afirmacoes analisadas:
+                {total_claims} afirmações analisadas:
               </p>
               <div className="flex gap-4">
                 <span className="text-green-700">{grounded_claims} fundamentadas</span>
-                <span className="text-amber-700">{unverifiable_claims} inverificaveis</span>
+                <span className="text-amber-700">{unverifiable_claims} inverificáveis</span>
                 <span className="text-red-700">{fabricated_claims} fabricadas</span>
               </div>
             </div>
@@ -140,7 +140,7 @@ const VerificationBanner = ({ verification, publishBlocked, blockReason, humanRe
             </span>
             {verification.expansion_ratio > 0 && (
               <span className={status.subtextClass}>
-                Expansao: <strong>{verification.expansion_ratio?.toFixed(1)}x</strong>
+                Expansão: <strong>{verification.expansion_ratio?.toFixed(1)}x</strong>
               </span>
             )}
             {verification.source_sufficiency && (
@@ -163,14 +163,14 @@ const VerificationBanner = ({ verification, publishBlocked, blockReason, humanRe
           {/* Block reason */}
           {publishBlocked && blockReason && (
             <div className="bg-red-100 rounded px-3 py-2 text-xs text-red-800 font-medium">
-              Publicacao bloqueada: {blockReason}
+              Publicação bloqueada: {blockReason}
             </div>
           )}
 
           {/* Human review warning */}
           {humanReviewRequired && !publishBlocked && reviewReasons?.length > 0 && (
             <div className="bg-amber-100 rounded px-3 py-2 text-xs text-amber-800">
-              <p className="font-medium mb-1">Revisao humana recomendada:</p>
+              <p className="font-medium mb-1">Revisão humana recomendada:</p>
               {reviewReasons.map((reason, i) => (
                 <p key={i} className="text-amber-700">- {reason}</p>
               ))}

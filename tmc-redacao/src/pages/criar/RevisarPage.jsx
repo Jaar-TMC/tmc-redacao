@@ -17,32 +17,6 @@ import { generateArticle } from '../../services/api';
  * antes de gerar a matéria usando IA.
  */
 
-// Fallback mock data when context is empty (for testing)
-const mockReviewData = {
-  textoBase: {
-    type: 'Transcrição YouTube',
-    title: 'Entrevista Ministro Economia',
-    blocks: 5,
-    words: 420,
-    content: 'O ministro da economia anunciou hoje em entrevista coletiva que o governo vai implementar novas medidas para conter a inflação nos próximos meses. As medidas foram recebidas com cautela pelo mercado financeiro...'
-  },
-  materiais: [
-    { id: 1, type: 'link', title: 'g1.com/noticia/economia...', words: 320, status: 'extracted' },
-    { id: 2, type: 'pdf', title: 'relatorio_trimestral.pdf', pages: 12, words: 3400, status: 'extracted' }
-  ],
-  configuracoes: {
-    categoria: 'Economia',
-    tom: 'Didático',
-    modoOpinativo: false,
-    creditos: 'Agência Brasil',
-    dataBase: '18/12/2024',
-    orientacaoLide: 'Focar no impacto econômico para o cidadão comum',
-    citacoes: 1,
-    instrucoes: 'Evitar termos técnicos, manter parágrafos curtos',
-    tipoMateria: 'destaque'
-  }
-};
-
 // Map context categoria to display names
 const CATEGORIA_NAMES = {
   esportes: 'Esportes',
@@ -198,27 +172,8 @@ const RevisarPage = () => {
       };
     }
 
-    // Fall back to mock data
-    return {
-      ...mockReviewData,
-      configuracoes: {
-        ...mockReviewData.configuracoes,
-        categoria: 'Geral/Variedades',
-        modoOpinativo: false
-      },
-      _raw: {
-        textoBaseContent: mockReviewData.textoBase.content,
-        categoria: 'geral',
-        tom: 'conversacional',
-        modoOpinativo: false,
-        tipoMateria: 'destaque',
-        citacoes: [],
-        contexto: '',
-        creditos: mockReviewData.configuracoes.creditos,
-        orientacaoLide: mockReviewData.configuracoes.orientacaoLide,
-        tags: getSelectedTagsArray()
-      }
-    };
+    // No data available - will redirect below
+    return null;
   }, [fonte, textoBase, configuracoes, materiaisComplementares, getSelectedTagsArray, getTextoBaseParaGeracao]);
 
   const toggleSection = useCallback((section, id = null) => {
@@ -239,6 +194,8 @@ const RevisarPage = () => {
   }, []);
 
   const handleGenerate = useCallback(async () => {
+    if (!reviewData) return;
+
     setIsGenerating(true);
     setGenerationProgress(0);
     setCurrentPhase(0);
@@ -359,7 +316,7 @@ const RevisarPage = () => {
       setIsGenerating(false);
       setGenerationError(error.message || 'Erro ao gerar matéria. Tente novamente.');
     }
-  }, [navigate, PHASES, reviewData, setResultado]);
+  }, [navigate, PHASES, reviewData, setResultado, fonte?.dados]);
 
   // Cleanup timers on unmount
   useEffect(() => {
@@ -377,9 +334,16 @@ const RevisarPage = () => {
   }, [navigate]);
 
   const totalWords = useMemo(() => {
+    if (!reviewData) return 0;
     return reviewData.textoBase.words +
       reviewData.materiais.reduce((acc, m) => acc + (m.words || 0), 0);
   }, [reviewData]);
+
+  // Guard: redirect to /criar if no valid data
+  if (!reviewData && fonte?.tipo !== 'zero') {
+    navigate('/criar', { replace: true });
+    return null;
+  }
 
   // Generation Overlay — phase-based progress
   if (isGenerating) {
@@ -411,7 +375,7 @@ const RevisarPage = () => {
               const PhaseIcon = phase.Icon;
               const isCompleted = idx < currentPhase;
               const isActive = idx === currentPhase && currentPhase < PHASES.length;
-              const isPending = idx > currentPhase;
+              const _isPending = idx > currentPhase;
 
               return (
                 <div
@@ -532,7 +496,7 @@ const RevisarPage = () => {
             aria-label="Ajuda"
           >
             <HelpCircle size={20} />
-            <span className="text-sm font-medium hidden sm:inline">Help</span>
+            <span className="text-sm font-medium hidden sm:inline">Ajuda</span>
           </button>
         </div>
 
@@ -668,7 +632,7 @@ const RevisarPage = () => {
               </p>
               <p className="text-sm text-medium-gray mt-1">
                 <strong className="text-dark-gray">Fontes:</strong>{' '}
-                {1 + mockReviewData.materiais.length} (texto-base + {reviewData.materiais.length} complementares)
+                {1 + reviewData.materiais.length} (texto-base + {reviewData.materiais.length} complementares)
               </p>
             </div>
           </div>

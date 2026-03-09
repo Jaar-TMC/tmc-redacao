@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useCallback } from 'react';
 
 /**
  * Custom hook for syncing state with localStorage
@@ -15,7 +15,6 @@ const useLocalStorage = (key, initialValue) => {
       const item = window.localStorage.getItem(key);
       return item ? JSON.parse(item) : initialValue;
     } catch (error) {
-      // eslint-disable-next-line no-console
       console.error(`Error reading localStorage key "${key}":`, error);
       return initialValue;
     }
@@ -29,7 +28,6 @@ const useLocalStorage = (key, initialValue) => {
       setStoredValue(valueToStore);
       window.localStorage.setItem(key, JSON.stringify(valueToStore));
     } catch (error) {
-      // eslint-disable-next-line no-console
       console.error(`Error setting localStorage key "${key}":`, error);
     }
   }, [key, storedValue]);

@@ -4,6 +4,12 @@
  * Converts markdown to HTML for preview display.
  * Supports: links, bold, italic, subtitles, lists, blockquotes, paragraphs
  */
+import DOMPurify from 'dompurify';
+
+const DOMPURIFY_CONFIG = {
+  ALLOWED_TAGS: ['p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'a', 'strong', 'em', 'b', 'i', 'u', 'ul', 'ol', 'li', 'blockquote', 'br', 'img', 'hr', 'span', 'div', 'sup', 'sub'],
+  ALLOWED_ATTR: ['href', 'target', 'rel', 'src', 'alt', 'class', 'id']
+};
 
 /**
  * Convert markdown text to HTML
@@ -156,7 +162,7 @@ export function markdownToHtml(text) {
   // If content already has HTML, skip ONLY paragraph wrapping
   // (which can break existing HTML structure)
   if (hasExistingHtml) {
-    return html;
+    return DOMPurify.sanitize(html, DOMPURIFY_CONFIG);
   }
 
   // Step 8: Handle PARAGRAPHS (split by double newlines)
@@ -183,7 +189,7 @@ export function markdownToHtml(text) {
     .filter(Boolean)
     .join('\n');
 
-  return html;
+  return DOMPurify.sanitize(html, DOMPURIFY_CONFIG);
 }
 
 /**

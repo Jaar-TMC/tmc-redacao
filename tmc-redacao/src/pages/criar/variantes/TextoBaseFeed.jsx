@@ -25,7 +25,7 @@ const STORY_FUSION_THRESHOLD = 2;
  */
 
 // Fallback function for topic extraction when API fails
-const extractTopicsFromArticleFallback = (article, index) => {
+const extractTopicsFromArticleFallback = (article, _index) => {
   const baseTopics = [
     { type: 'fato', prefix: 'Fato principal: ' },
     { type: 'contexto', prefix: 'Contexto: ' },
@@ -89,7 +89,7 @@ const TextoBaseFeed = ({
 }) => {
   // States
   const [materias, setMaterias] = useState([]);
-  const [isExtractingTopics, setIsExtractingTopics] = useState(false);
+  const [_isExtractingTopics, setIsExtractingTopics] = useState(false);
   const [activeMateria, setActiveMateria] = useState(null);
   const [selectedTopics, setSelectedTopics] = useState(new Set());
   const [activeTab, setActiveTab] = useState('topics');

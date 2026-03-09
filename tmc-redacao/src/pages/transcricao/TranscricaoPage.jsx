@@ -1,6 +1,6 @@
 import { useState, useCallback } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
-import { ArrowLeft, Youtube } from 'lucide-react';
+import { ArrowLeft, Youtube, AlertTriangle } from 'lucide-react';
 
 import { useDocumentTitle } from '../../hooks';
 import { useCriar } from '../../context';
@@ -73,9 +73,10 @@ function TranscricaoPage() {
   const [url, setUrl] = useState('');
   const [videoData, setVideoData] = useState(null);
 
-  // Estado de loading
+  // Estado de loading e erros
   const [isTranscribing, setIsTranscribing] = useState(false);
   const [transcriptionProgress, setTranscriptionProgress] = useState(0);
+  const [transcriptionError, setTranscriptionError] = useState(null);
 
   // Handler para URL válida
   const handleValidURL = useCallback((data) => {
@@ -88,6 +89,7 @@ function TranscricaoPage() {
 
     setIsTranscribing(true);
     setTranscriptionProgress(0);
+    setTranscriptionError(null);
     nextStep(); // Vai para step 2 (loading)
 
     // Simular progresso da transcrição
@@ -131,11 +133,13 @@ function TranscricaoPage() {
         // Navegar para Texto-Base onde o usuário vai revisar/editar
         navigate('/criar/texto-base');
       }, 500);
-    } catch (error) {
+    } catch (err) {
       clearInterval(progressInterval);
       setIsTranscribing(false);
+      setTranscriptionError(
+        err?.message || 'Ocorreu um erro ao transcrever o vídeo. Tente novamente.'
+      );
       goToStep(1);
-      // TODO: Mostrar erro
     }
   }, [videoData, nextStep, goToStep, setFonte, navigate]);
 
@@ -198,6 +202,25 @@ function TranscricaoPage() {
                 Cole o link de um vídeo e transforme em matéria jornalística
               </p>
             </div>
+
+            {/* Error banner */}
+            {transcriptionError && (
+              <div
+                className="flex items-center gap-3 bg-red-50 border border-red-200 text-red-700 rounded-lg px-4 py-3 mb-6"
+                role="alert"
+              >
+                <AlertTriangle className="w-5 h-5 flex-shrink-0" aria-hidden="true" />
+                <p className="text-sm">{transcriptionError}</p>
+                <button
+                  type="button"
+                  onClick={() => setTranscriptionError(null)}
+                  className="ml-auto text-red-400 hover:text-red-600 text-lg leading-none"
+                  aria-label="Fechar mensagem de erro"
+                >
+                  &times;
+                </button>
+              </div>
+            )}
 
             {/* Input */}
             <div className="bg-white rounded-xl p-6 shadow-sm border border-light-gray">

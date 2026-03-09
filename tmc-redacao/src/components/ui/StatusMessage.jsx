@@ -14,6 +14,7 @@ const StatusMessage = ({
 
   useEffect(() => {
     if (isVisible) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional animation trigger syncing visibility prop to render state
       setShouldRender(true);
 
       if (autoHideDuration && onDismiss) {

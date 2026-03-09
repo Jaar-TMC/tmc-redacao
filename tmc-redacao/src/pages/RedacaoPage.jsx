@@ -19,7 +19,7 @@ import { useOnboarding, TOUR_IDS } from '../components/onboarding';
 const deduplicateByTitle = (articles) => {
   const seen = new Set();
   return articles.filter(article => {
-    const normalizedTitle = article.title.toLowerCase().trim();
+    const normalizedTitle = (article.title || '').toLowerCase().trim();
     if (seen.has(normalizedTitle)) return false;
     seen.add(normalizedTitle);
     return true;
@@ -44,7 +44,7 @@ const RedacaoPage = () => {
   const [articles, setArticles] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState(null);
-  const [isInitialized, setIsInitialized] = useState(false);
+  const [_isInitialized, setIsInitialized] = useState(false);
   const [urgencyCounts, setUrgencyCounts] = useState({ now: 0, recent: 0, today: 0, all: 0 });
 
   // Pagination State
@@ -229,8 +229,8 @@ const RedacaoPage = () => {
         setUrgencyCounts(response.urgency_counts);
       }
 
-      // Update pagination info from response
-      const total = response?.total || uniqueArticles.length;
+      // Update pagination info from response - use nullish coalescing to handle 0 correctly
+      const total = response?.total ?? uniqueArticles.length;
       setTotalItems(total);
       setTotalPages(Math.ceil(total / ITEMS_PER_PAGE) || 1);
 

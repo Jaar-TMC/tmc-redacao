@@ -60,7 +60,7 @@ function YouTubeInput({ value, onChange, onValidURL, disabled = false }) {
 
       setStatus('valid');
       onValidURL(mockVideoData);
-    } catch (err) {
+    } catch {
       setStatus('invalid');
       setError('Não foi possível encontrar este vídeo.');
       onValidURL(null);

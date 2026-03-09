@@ -57,6 +57,7 @@ const EmptyState = ({
 };
 
 // Preset Empty States
+// eslint-disable-next-line react-refresh/only-export-components -- presets are component factories co-located with EmptyState
 export const EmptyStatePresets = {
   // Quando o usuário não tem nenhuma matéria
   NoArticles: ({ onCreateArticle }) => (

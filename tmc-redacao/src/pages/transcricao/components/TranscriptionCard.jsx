@@ -63,7 +63,7 @@ function TranscriptionCard({
   }, [segment.text]);
 
   // Capturar seleção de texto quando o card está expandido
-  const handleMouseUp = useCallback((e) => {
+  const handleMouseUp = useCallback((_e) => {
     if (!isExpanded || !onTextSelect) return;
 
     const selection = window.getSelection();

@@ -81,8 +81,10 @@ const Tooltip = ({
 
   useEffect(() => {
     if (isVisible) {
+       
       updatePosition();
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isVisible, position]);
 
   const handleMouseEnter = () => {

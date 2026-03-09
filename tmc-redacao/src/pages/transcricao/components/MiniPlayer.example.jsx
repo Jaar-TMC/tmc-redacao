@@ -1,3 +1,4 @@
+/* eslint-disable */
 /**
  * EXEMPLO DE INTEGRAÇÃO DO MINIPLAYER NA TRANSCRICAOPAGE
  *
@@ -45,7 +46,7 @@ function TranscricaoPageComMiniPlayer() {
       <main id="main-content" role="main" className="max-w-7xl mx-auto px-4 py-6">
         {/* Step 1: Input */}
         {currentStep === 1 && (
-          // ... código do step 1 ...
+          <>{/* ... código do step 1 ... */}</>
         )}
 
         {/* Step 2: Loading */}

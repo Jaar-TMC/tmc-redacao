@@ -9,6 +9,7 @@ import os
 import json
 import logging
 import re
+import asyncio
 from typing import Optional
 import httpx
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
@@ -298,11 +299,11 @@ SEO_OTIMIZACAO = """
 
 Se houver conflito entre SEO e precisao factual, SEMPRE priorize a precisao.
 
-### TITULO (7 a 10 palavras | EXATAMENTE 50-60 caracteres)
+### TITULO (7 a 12 palavras | MAXIMO 75 caracteres)
 - Coloque a palavra-chave principal nas PRIMEIRAS 3 PALAVRAS
 - Inclua uma power word jornalistica: confirma, revela, decide, anuncia, recusa, proibe
 - Inclua um numero quando o tema permitir (numeros aumentam CTR)
-- CONTE os caracteres ANTES de finalizar. Se >60, CORTE.
+- CONTE os caracteres ANTES de finalizar. Se >75, CORTE.
 - EXEMPLO CALIBRADO (8 palavras, 56 caracteres):
   "Governo revela novo plano para conter inflacao em 2026"
 
@@ -497,6 +498,7 @@ Referência de estilo: CazéTV - proximidade com torcedor, paixão, humor com re
 - Proximidade com o torcedor
 - Paixão pelo esporte
 - Humor em contextos apropriados
+- Opinião especializada e informada, MAS NUNCA torcedora (análise, não torcida)
 
 ## PERMITIDO
 - Gírias de forma moderada
@@ -567,6 +569,11 @@ Tom leve, pop e divertido, sem virar fofoca tóxica.
 - Referências pop (filmes, séries, músicas)
 - Trocadilhos
 - Linguagem próxima e conversacional
+
+## OBRIGATÓRIO
+- Busque SEMPRE o lado prático da notícia: se for show, informe local e data; se for filme, diretor e onde assistir
+- A TMC prefere ser guia confiável do leitor, não apenas opinativo
+- Inclua informações úteis e acionáveis para o leitor
 
 ## VETADO
 - Body shaming ou julgamento moral de vida pessoal ("ela engordou", "fulano se humilhou")
@@ -656,7 +663,7 @@ Sua missão é traduzir economia para o cotidiano do cidadão comum.
 
 ## VETADO
 - Prometer resultados de investimento
-- Tratar crise, desemprego e inflação com humor
+- Humor de QUALQUER tipo (humor inexistente - foco total em credibilidade)
 - Usar siglas e jargões sem explicação
 - Tons de pânico ("o país está quebrado")
 - Sensacionalismo financeiro""",
@@ -669,7 +676,7 @@ Sua missão é traduzir economia para o cotidiano do cidadão comum.
         ],
         "donts": [
             "Prometer resultados de investimento",
-            "Humor sobre crise ou desemprego",
+            "Humor de QUALQUER tipo (foco total em credibilidade)",
             "Siglas sem explicação",
             "Tom de pânico ou sensacionalismo"
         ]
@@ -1113,7 +1120,7 @@ def get_system_prompt(
 ## REGRAS OBRIGATÓRIAS
 
 1. **Estrutura da Matéria:**
-   - Título: 7-10 palavras, 50-60 caracteres (veja regras SEO abaixo)
+   - Título: 7-12 palavras, até 75 caracteres (veja regras SEO abaixo)
    - Título Curto: máximo 70 caracteres, versão compacta para redes sociais
    - Linha Fina: MAXIMO 120 caracteres (veja regras SEO abaixo)
    - Resumo da Matéria: 4 bullet points com os pontos mais importantes da matéria
@@ -1274,7 +1281,7 @@ Mantenha os vetos universais (sem preconceito, ataques pessoais, etc.)"""
 ## REGRAS OBRIGATÓRIAS DE FORMATO
 
 1. **Estrutura da Matéria:**
-   - Título: 7-10 palavras, 50-60 caracteres (veja regras SEO abaixo)
+   - Título: 7-12 palavras, até 75 caracteres (veja regras SEO abaixo)
    - Título Curto: máximo 70 caracteres, versão compacta para redes sociais
    - Linha Fina: MAXIMO 120 caracteres (veja regras SEO abaixo)
    - Resumo da Matéria: 4 bullet points com os pontos mais importantes da matéria
@@ -1458,7 +1465,7 @@ Inclua a atribuição de créditos apropriadamente.""")
         kw = tags[0]
         seo_checklist = f"""
 - CHECKLIST SEO + LEGIBILIDADE (valide antes de finalizar):
-  [ ] Titulo tem 7-10 palavras, 50-60 caracteres, e contem "{kw}" no inicio?
+  [ ] Titulo tem 7-12 palavras, ate 75 caracteres, e contem "{kw}" no inicio?
   [ ] Titulo curto tem no maximo 70 caracteres e cobre o fato principal?
   [ ] Linha fina tem MAXIMO 120 caracteres, inclui "{kw}", SEM CTA no final?
   [ ] Primeiro paragrafo tem 40-60 palavras com a informacao principal?
@@ -1479,7 +1486,7 @@ Inclua a atribuição de créditos apropriadamente.""")
     else:
         seo_checklist = f"""
 - CHECKLIST SEO + LEGIBILIDADE (valide antes de finalizar):
-  [ ] Titulo tem 7-10 palavras, 50-60 caracteres, com power word jornalistica?
+  [ ] Titulo tem 7-12 palavras, ate 75 caracteres, com power word jornalistica?
   [ ] Titulo curto tem no maximo 70 caracteres e cobre o fato principal?
   [ ] Linha fina tem MAXIMO 120 caracteres, SEM CTA no final?
   [ ] Primeiro paragrafo tem 40-60 palavras com a informacao principal?
@@ -1589,7 +1596,7 @@ class LLMService:
         retry=retry_if_exception_type((httpx.ConnectError, httpx.ConnectTimeout)),
         reraise=True,
     )
-    async def _call_api(self, system: str, user_content: str, max_tokens: int = MAX_TOKENS, correlation_id: str = "") -> str:
+    async def _call_api(self, system: str, user_content: str, max_tokens: int = MAX_TOKENS, correlation_id: str = "", model: str = "", task_type: str = "") -> str:
         """Make API call and return response text. Retries on connection errors."""
         import time as _time
         _cid = f"[{correlation_id}] " if correlation_id else ""
@@ -1605,8 +1612,9 @@ class LLMService:
 
         headers = self._get_headers()
 
+        effective_model = model or self.model
         payload = {
-            "model": self.model,
+            "model": effective_model,
             "max_tokens": max_tokens,
             "system": system,
             "messages": [
@@ -1614,7 +1622,8 @@ class LLMService:
             ]
         }
 
-        logger.info(f"{_cid}Calling API: {self.endpoint} with model {self.model}")
+        logger.info(f"{_cid}Calling API: {self.endpoint} with model {effective_model} task={task_type or 'unspecified'}")
+        _start_time = _time.time()
 
         try:
             response = await self.http_client.post(
@@ -1623,32 +1632,112 @@ class LLMService:
                 json=payload
             )
         except (httpx.ConnectError, httpx.ConnectTimeout) as e:
+            _elapsed_ms = int((_time.time() - _start_time) * 1000)
             self._llm_failures += 1
             if self._llm_failures >= 5:
                 self._llm_circuit_open = True
                 self._llm_circuit_open_until = _time.time() + 120
                 logger.warning(f"LLM circuit breaker OPENED after {self._llm_failures} failures")
+            # Log connection failure
+            try:
+                from services.database import get_db
+                asyncio.get_event_loop().run_in_executor(None, get_db().insert_llm_usage_log, {
+                    'correlation_id': correlation_id or None,
+                    'task_type': task_type or 'unspecified',
+                    'model': effective_model,
+                    'endpoint': self.endpoint,
+                    'provider': 'azure' if self.use_azure else 'anthropic',
+                    'latency_ms': _elapsed_ms,
+                    'status': 'timeout',
+                    'error_message': str(e)[:500],
+                })
+            except Exception:
+                pass
             raise
 
         if response.status_code != 200:
             error_text = response.text
+            _elapsed_ms = int((_time.time() - _start_time) * 1000)
             logger.error(f"API error {response.status_code}: {error_text}")
             self._llm_failures += 1
             if self._llm_failures >= 5:
                 self._llm_circuit_open = True
                 self._llm_circuit_open_until = _time.time() + 120
                 logger.warning(f"LLM circuit breaker OPENED after {self._llm_failures} consecutive errors")
+            # Log failed call (non-blocking)
+            try:
+                from services.database import get_db
+                asyncio.get_event_loop().run_in_executor(None, get_db().insert_llm_usage_log, {
+                    'correlation_id': correlation_id or None,
+                    'task_type': task_type or 'unspecified',
+                    'model': effective_model,
+                    'endpoint': self.endpoint,
+                    'provider': 'azure' if self.use_azure else 'anthropic',
+                    'latency_ms': _elapsed_ms,
+                    'status': 'error',
+                    'error_message': error_text[:500],
+                })
+            except Exception:
+                pass
             raise RuntimeError(f"AI service error: {error_text}")
 
         # Success: reset circuit breaker
         self._llm_failures = 0
 
         result = response.json()
-        return result["content"][0]["text"]
+        response_text = result["content"][0]["text"]
 
-    async def call_api(self, system: str, user_content: str, max_tokens: int = MAX_TOKENS, correlation_id: str = "") -> str:
+        # --- LLM Usage Tracking ---
+        _elapsed_ms = int((_time.time() - _start_time) * 1000)
+        usage = result.get("usage", {})
+        input_tokens = usage.get("input_tokens", 0)
+        output_tokens = usage.get("output_tokens", 0)
+        stop_reason = result.get("stop_reason", "")
+
+        # Cost calculation (USD per token)
+        _cost_map = {
+            "claude-sonnet-4-5": (3.00 / 1_000_000, 15.00 / 1_000_000),
+            "claude-sonnet-4-5-20250929": (3.00 / 1_000_000, 15.00 / 1_000_000),
+            "claude-haiku-4-5": (0.80 / 1_000_000, 4.00 / 1_000_000),
+            "claude-haiku-4-5-20251001": (0.80 / 1_000_000, 4.00 / 1_000_000),
+        }
+        input_rate, output_rate = _cost_map.get(effective_model, (3.00 / 1_000_000, 15.00 / 1_000_000))
+        input_cost = input_tokens * input_rate
+        output_cost = output_tokens * output_rate
+
+        logger.info(
+            f"{_cid}LLM usage: model={effective_model} task={task_type or 'unspecified'} "
+            f"tokens={input_tokens}+{output_tokens}={input_tokens + output_tokens} "
+            f"cost=${input_cost + output_cost:.4f} latency={_elapsed_ms}ms stop={stop_reason}"
+        )
+
+        # Non-blocking DB logging via thread pool (matches asyncio.to_thread pattern)
+        try:
+            from services.database import get_db
+            _log_data = {
+                'correlation_id': correlation_id or None,
+                'task_type': task_type or 'unspecified',
+                'model': effective_model,
+                'endpoint': self.endpoint,
+                'provider': 'azure' if self.use_azure else 'anthropic',
+                'input_tokens': input_tokens,
+                'output_tokens': output_tokens,
+                'input_cost_usd': round(input_cost, 6),
+                'output_cost_usd': round(output_cost, 6),
+                'latency_ms': _elapsed_ms,
+                'status': 'success',
+                'response_chars': len(response_text),
+                'stop_reason': stop_reason,
+            }
+            asyncio.get_event_loop().run_in_executor(None, get_db().insert_llm_usage_log, _log_data)
+        except Exception as _log_err:
+            logger.debug(f"LLM usage log write failed (non-blocking): {_log_err}")
+
+        return response_text
+
+    async def call_api(self, system: str, user_content: str, max_tokens: int = MAX_TOKENS, correlation_id: str = "", model: str = "", task_type: str = "") -> str:
         """Public interface for LLM API calls."""
-        return await self._call_api(system, user_content, max_tokens, correlation_id=correlation_id)
+        return await self._call_api(system, user_content, max_tokens, correlation_id=correlation_id, model=model, task_type=task_type)
 
     async def generate_article(
         self,
@@ -1725,7 +1814,7 @@ class LLMService:
         )
 
         try:
-            response_text = await self._call_api(system_prompt, user_prompt, MAX_TOKENS, correlation_id=correlation_id)
+            response_text = await self._call_api(system_prompt, user_prompt, MAX_TOKENS, correlation_id=correlation_id, task_type='article_generation')
             logger.debug(f"Raw LLM response: {response_text[:500]}...")
 
             # Try to extract JSON from response
@@ -1844,7 +1933,7 @@ Responda APENAS com JSON válido, sem markdown:
 }}"""
 
         try:
-            response_text = await self._call_api(system, prompt, 4096)
+            response_text = await self._call_api(system, prompt, 4096, task_type='topic_extraction')
 
             json_start = response_text.find("{")
             json_end = response_text.rfind("}") + 1
@@ -1916,7 +2005,7 @@ Responda em JSON:
 ```"""
 
         try:
-            response_text = await self._call_api(system, prompt, 1024)
+            response_text = await self._call_api(system, prompt, 1024, task_type='tag_generation')
 
             json_start = response_text.find("{")
             json_end = response_text.rfind("}") + 1
@@ -1972,7 +2061,7 @@ Responda em JSON:
 
         try:
             # Use 8192 tokens for merge_topics - complex output needs more space
-            response_text = await self._call_api(MERGE_TOPICS_SYSTEM, prompt, 8192)
+            response_text = await self._call_api(MERGE_TOPICS_SYSTEM, prompt, 8192, task_type='story_fusion')
             logger.debug(f"Merge topics response: {response_text[:500]}...")
 
             # Extract JSON from response
@@ -2092,7 +2181,7 @@ Responda em JSON:
         user_prompt = get_edit_article_prompt(current_article, instruction, edit_scope)
 
         try:
-            response_text = await self._call_api(system_prompt, user_prompt, MAX_TOKENS)
+            response_text = await self._call_api(system_prompt, user_prompt, MAX_TOKENS, task_type='article_edit')
             logger.debug(f"Edit article response: {response_text[:500]}...")
 
             # Extract JSON from response

@@ -39,6 +39,7 @@ function ProgressOverlay({
     else if (progress >= 20) messageIndex = 1; // 20-40%: Processando
     else messageIndex = 0;                     // 0-20%: Extraindo
 
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setCurrentMessage(messageIndex);
   }, [progress, isVisible]);
 
@@ -73,7 +74,7 @@ function ProgressOverlay({
                     key={i}
                     className="w-1 bg-white rounded-full animate-pulse"
                     style={{
-                      height: `${Math.random() * 100}%`,
+                      height: `${[60, 80, 45, 90, 70][i]}%`,
                       animationDelay: `${i * 0.1}s`,
                       animationDuration: '0.5s'
                     }}

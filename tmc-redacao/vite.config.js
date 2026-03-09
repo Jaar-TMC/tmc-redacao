@@ -57,7 +57,7 @@ export default defineConfig({
     : {
         // Default build: standard Vite output
         outDir: 'dist',
-        sourcemap: true,
+        sourcemap: false,
       },
 
   // Server configuration for development

@@ -1,3 +1,4 @@
+/* eslint-disable react-refresh/only-export-components */
 import { createContext, useContext, useState, useCallback, useMemo } from 'react';
 import PropTypes from 'prop-types';
 
@@ -407,7 +408,42 @@ export const CriarProvider = ({ children }) => {
   // === Reset ===
   const resetFluxo = useCallback(() => {
     sessionStorage.removeItem('tmc_resultado');
-    setState(initialState);
+    // Create fresh state with new instances for all reference types (Set, Array, Object)
+    // to avoid sharing mutable references with the module-level initialState
+    setState({
+      ...initialState,
+      fonte: { tipo: null, dados: null },
+      textoBase: {
+        ...initialState.textoBase,
+        blocos: [],
+        blocosSelecionados: new Set(),
+        variantSelections: null,
+      },
+      storyFusion: {
+        ...initialState.storyFusion,
+        mergedGroups: [],
+        exclusives: [],
+        quotes: [],
+        selectedVersions: {},
+        includedGroups: new Set(),
+        includedExclusives: new Set(),
+        includedQuotes: new Set(),
+        editedTexts: {},
+      },
+      selectedTags: new Set(),
+      configuracoes: {
+        ...initialState.configuracoes,
+        data: new Date().toISOString().split('T')[0],
+        citacoes: [],
+      },
+      materiaisComplementares: {
+        links: [],
+        videos: [],
+        pdfs: [],
+      },
+      resultado: null,
+      etapasCompletas: new Set(),
+    });
   }, []);
 
   // === Helpers ===

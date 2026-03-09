@@ -31,7 +31,7 @@ import {
   ShieldAlert,
   ShieldCheck
 } from 'lucide-react';
-import { countWords, markdownToHtml } from '../utils/markdownRenderer';
+import { markdownToHtml } from '../utils/markdownRenderer';
 import { mockTones, mockPersonas } from '../data/mockData';
 import Tooltip from '../components/ui/Tooltip';
 import { SEOAnalyzerPanel, calculateSEOScore, RichTextEditor, EditorToolbar } from '../components/editor';
@@ -62,7 +62,7 @@ const CriarPostPage = () => {
   const publishBlocked = resultado?.publishBlocked || false;
   const blockReason = resultado?.blockReason || null;
   const verificationData = resultado?.verification || null;
-  const riskLevel = resultado?.riskLevel || null;
+  const _riskLevel = resultado?.riskLevel || null;
   const humanReviewRequired = resultado?.humanReviewRequired || false;
   const reviewReasons = resultado?.reviewReasons || [];
   // v7: editorial gates
@@ -79,7 +79,7 @@ const CriarPostPage = () => {
   const schemaOrg = resultado?.schemaOrg || null;
   const notaForced = resultado?.notaForced || false;
   const notaDisclaimer = resultado?.notaDisclaimer || null;
-  const regenerated = resultado?.regenerated || false;
+  const _regenerated = resultado?.regenerated || false;
   const correlationId = resultado?.correlationId || null;
   const qualityLoopPassed = resultado?.qualityLoop?.quality_loop_passed ?? false;
   const sourceUrls = resultado?.sourceUrls || [];
@@ -89,6 +89,10 @@ const CriarPostPage = () => {
   // State for loading existing article
   const [isLoadingArticle, setIsLoadingArticle] = useState(false);
   const [loadedArticle, setLoadedArticle] = useState(null);
+
+  // Double-submit protection refs
+  const isSavingRef = useRef(false);
+  const isPublishingRef = useRef(false);
 
   // Extrair parâmetros da URL (vindos da tela de seleção de tema)
   const themeContext = useMemo(() => {
@@ -106,28 +110,6 @@ const CriarPostPage = () => {
       tipo
     };
   }, [searchParams]);
-
-  // Mock data para demonstração - matéria bem formatada com boa nota SEO
-  const mockArticle = {
-    title: 'Brasil bate recorde histórico em exportações de soja em 2024',
-    linhaFina: 'País consolida liderança mundial no mercado de commodities agrícolas com aumento de 15% nas vendas externas e perspectivas otimistas para o segundo semestre',
-    content: `O Brasil alcançou um marco histórico nas exportações de soja em 2024, consolidando sua posição como principal fornecedor global do grão. Os dados divulgados pelo Ministério da Agricultura mostram que o país exportou mais de 100 milhões de toneladas no primeiro semestre, um aumento de 15% em relação ao mesmo período do ano anterior.
-
-A demanda aquecida da China, principal compradora da soja brasileira, foi um dos fatores determinantes para esse resultado expressivo. O país asiático adquiriu aproximadamente 70% de toda a produção exportada pelo Brasil, fortalecendo ainda mais as relações comerciais entre as duas nações.
-
-Especialistas do setor apontam que a combinação de condições climáticas favoráveis nas principais regiões produtoras, como Mato Grosso, Goiás e Paraná, aliada aos investimentos em tecnologia agrícola, foram fundamentais para o aumento da produtividade. A safra 2023/2024 registrou média de 3,5 toneladas por hectare, superando as expectativas iniciais dos analistas.
-
-O impacto econômico dessas exportações é significativo para a balança comercial brasileira. O agronegócio continua sendo o principal pilar das exportações nacionais, representando mais de 40% do total exportado pelo país. Os recursos gerados beneficiam não apenas o setor agrícola, mas toda a cadeia produtiva, incluindo transporte, logística e serviços.
-
-Para o segundo semestre, as projeções indicam manutenção do ritmo positivo. Analistas estimam que o Brasil pode encerrar 2024 com exportações superiores a 150 milhões de toneladas, estabelecendo um novo recorde absoluto na história do país.
-
-A diversificação dos mercados compradores também contribui para essa perspectiva otimista. Além da China, países do Oriente Médio e da África têm aumentado significativamente suas compras de soja brasileira, reduzindo a dependência de um único mercado.
-
-O governo federal anunciou medidas para apoiar os produtores rurais, incluindo linhas de crédito com juros reduzidos e programas de incentivo à sustentabilidade. A meta é garantir que o crescimento do setor ocorra de forma responsável, respeitando os compromissos ambientais assumidos internacionalmente.
-
-Com esse desempenho, o Brasil reafirma sua posição estratégica no cenário global de commodities e projeta um futuro promissor para o agronegócio nacional.`,
-    tags: ['Agronegócio', 'Exportações', 'Soja', 'Economia', 'Brasil']
-  };
 
   // Load article data when editing
   useEffect(() => {
@@ -150,13 +132,20 @@ Com esse desempenho, o Brasil reafirma sua posição estratégica no cenário gl
     loadArticle();
   }, [editArticleId]);
 
-  // Use loaded article, resultado from context, or fall back to mock data
-  const initialTitle = loadedArticle?.title || resultado?.titulo || mockArticle.title;
+  // Guard: redirect to /criar if no article data and not editing
+  useEffect(() => {
+    if (!editArticleId && !resultado && !loadedArticle && !isLoadingArticle) {
+      navigate('/criar', { replace: true });
+    }
+  }, [editArticleId, resultado, loadedArticle, isLoadingArticle, navigate]);
+
+  // Use loaded article or resultado from context - no mock fallback
+  const initialTitle = loadedArticle?.title || resultado?.titulo || '';
   const initialTituloCurto = loadedArticle?.tituloCurto || resultado?.tituloCurto || '';
-  const initialLinhaFina = loadedArticle?.linhaFina || resultado?.linhaFina || mockArticle.linhaFina;
-  const initialContent = loadedArticle?.content || resultado?.conteudo || mockArticle.content;
+  const initialLinhaFina = loadedArticle?.linhaFina || resultado?.linhaFina || '';
+  const initialContent = loadedArticle?.content || resultado?.conteudo || '';
   // Ensure initialTags is always an array
-  const rawTags = loadedArticle?.tags || resultado?.tagsSugeridas || mockArticle.tags;
+  const rawTags = loadedArticle?.tags || resultado?.tagsSugeridas || [];
   const initialTags = Array.isArray(rawTags) ? rawTags : [];
 
   // Update state when loaded article changes
@@ -178,7 +167,7 @@ Com esse desempenho, o Brasil reafirma sua posição estratégica no cenário gl
     undo,
     redo,
     pushVersion,
-    updateCurrentContent,
+    updateCurrentContent: _updateCurrentContent,
     resetHistory,
     versionCount,
     versions,
@@ -219,7 +208,7 @@ Com esse desempenho, o Brasil reafirma sua posição estratégica no cenário gl
   const [isPublishing, setIsPublishing] = useState(false);
   const [showCopyDropdown, setShowCopyDropdown] = useState(false);
   const [copyType, setCopyType] = useState(null); // 'html' or 'text'
-  const [isPreviewMode, setIsPreviewMode] = useState(false);
+  const [_isPreviewMode, _setIsPreviewMode] = useState(false);
   const [showVersionDropdown, setShowVersionDropdown] = useState(false);
   const [isGeneratingTitle, setIsGeneratingTitle] = useState(false);
 
@@ -462,7 +451,7 @@ Com esse desempenho, o Brasil reafirma sua posição estratégica no cenário gl
         tom: selectedTone?.id || 'conversacional'
       });
 
-      if (result.titulo) {
+      if (result?.titulo) {
         setTitle(result.titulo);
         // Push version for undo support
         pushVersion({
@@ -472,8 +461,8 @@ Com esse desempenho, o Brasil reafirma sua posição estratégica no cenário gl
           tags
         }, 'ai', 'Título sugerido pela IA');
       }
-    } catch (err) {
-      console.error('Error suggesting title:', err);
+    } catch {
+      // Title suggestion failed silently - user can retry
     } finally {
       setIsGeneratingTitle(false);
     }
@@ -552,11 +541,14 @@ Com esse desempenho, o Brasil reafirma sua posição estratégica no cenário gl
 
   // Save as draft handler
   const handleSaveDraft = useCallback(async () => {
+    if (isSavingRef.current) return;
+
     if (!title.trim() && !content.trim()) {
       setSaveError('Adicione pelo menos um título ou conteúdo para salvar');
       return;
     }
 
+    isSavingRef.current = true;
     setIsSavingDraft(true);
     setSaveError(null);
 
@@ -574,29 +566,31 @@ Com esse desempenho, o Brasil reafirma sua posição estratégica no cenário gl
       }
 
       setLastSavedAt(new Date());
-      console.log('Draft saved:', savedArticle.id);
     } catch (err) {
       console.error('Error saving draft:', err);
       setSaveError(err.message || 'Erro ao salvar rascunho');
     } finally {
       setIsSavingDraft(false);
+      isSavingRef.current = false;
     }
   }, [title, content, articleId, buildArticleData]);
 
   // Publish handler with editorial gate enforcement
   const handlePublish = useCallback(async () => {
+    if (isPublishingRef.current) return;
+
     if (!title.trim()) {
-      setSaveError('Titulo e obrigatorio para publicar');
+      setSaveError('Título é obrigatório para publicar');
       return;
     }
     if (!content.trim()) {
-      setSaveError('Conteudo e obrigatorio para publicar');
+      setSaveError('Conteúdo é obrigatório para publicar');
       return;
     }
 
     // v7: block publish if publication_status === "blocked"
     if (publicationStatus === 'blocked') {
-      setSaveError(`Publicacao bloqueada: ${blockReason || 'Verificacao automatica detectou problemas criticos.'}`);
+      setSaveError(`Publicação bloqueada: ${blockReason || 'Verificação automática detectou problemas críticos.'}`);
       return;
     }
 
@@ -606,6 +600,7 @@ Com esse desempenho, o Brasil reafirma sua posição estratégica no cenário gl
       return;
     }
 
+    isPublishingRef.current = true;
     setShowPublishConfirm(false);
     setIsPublishing(true);
     setSaveError(null);
@@ -613,20 +608,19 @@ Com esse desempenho, o Brasil reafirma sua posição estratégica no cenário gl
     try {
       const articleData = buildArticleData('published');
 
-      let savedArticle;
       if (articleId) {
-        savedArticle = await updateUserArticle(articleId, articleData);
+        await updateUserArticle(articleId, articleData);
       } else {
-        savedArticle = await createUserArticle(articleData);
+        await createUserArticle(articleData);
       }
 
-      console.log('Article published:', savedArticle.id);
       navigate('/minhas-materias');
     } catch (err) {
       console.error('Error publishing:', err);
-      setSaveError(err.message || 'Erro ao publicar materia');
+      setSaveError(err.message || 'Erro ao publicar matéria');
     } finally {
       setIsPublishing(false);
+      isPublishingRef.current = false;
     }
   }, [title, content, articleId, buildArticleData, navigate, publicationStatus, blockReason, showPublishConfirm]);
 
@@ -860,7 +854,7 @@ Com esse desempenho, o Brasil reafirma sua posição estratégica no cenário gl
               {publicationStatus === 'draft_review' && !qualityLoopPassed && (
                 <span className="text-xs px-2 py-1 rounded-full bg-amber-100 text-amber-700 font-medium flex items-center gap-1">
                   <AlertTriangle size={12} />
-                  Revisao necessaria
+                  Revisão necessária
                 </span>
               )}
               <button
@@ -873,7 +867,7 @@ Com esse desempenho, o Brasil reafirma sua posição estratégica no cenário gl
                     ? 'bg-amber-500 hover:bg-amber-600'
                     : 'bg-tmc-orange hover:bg-tmc-orange/90'
                 }`}
-                title={publicationStatus === 'blocked' ? (blockReason || 'Publicacao bloqueada') : ''}
+                title={publicationStatus === 'blocked' ? (blockReason || 'Publicação bloqueada') : ''}
               >
                 {isPublishing ? (
                   <>
@@ -908,7 +902,7 @@ Com esse desempenho, o Brasil reafirma sua posição estratégica no cenário gl
             <div className="flex items-start gap-3">
               <AlertTriangle size={18} className="text-amber-500 mt-0.5 flex-shrink-0" />
               <div className="flex-1">
-                <p className="text-sm font-medium text-amber-800">Revisao humana recomendada</p>
+                <p className="text-sm font-medium text-amber-800">Revisão humana recomendada</p>
                 {reviewReasons.length > 0 && (
                   <ul className="text-xs text-amber-700 mt-1 space-y-0.5">
                     {reviewReasons.map((reason, i) => (
@@ -940,7 +934,7 @@ Com esse desempenho, o Brasil reafirma sua posição estratégica no cenário gl
           <div className="bg-red-50 border-t border-red-200 px-4 py-3">
             <div className="flex items-center gap-2">
               <ShieldAlert size={16} className="text-red-500" />
-              <span className="text-sm font-medium text-red-800">Publicacao bloqueada: {blockReason}</span>
+              <span className="text-sm font-medium text-red-800">Publicação bloqueada: {blockReason}</span>
             </div>
           </div>
         )}
@@ -952,10 +946,10 @@ Com esse desempenho, o Brasil reafirma sua posição estratégica no cenário gl
               <AlertTriangle size={18} className="text-amber-500 mt-0.5 flex-shrink-0" />
               <div className="flex-1">
                 <p className="text-sm font-medium text-amber-800">
-                  A materia precisa de revisao manual
+                  A matéria precisa de revisão manual
                 </p>
                 <p className="text-xs text-amber-600 mt-1">
-                  A IA nao conseguiu resolver todos os pontos automaticamente. Revise o texto antes de publicar.
+                  A IA não conseguiu resolver todos os pontos automaticamente. Revise o texto antes de publicar.
                 </p>
                 <div className="flex gap-2 mt-2">
                   <button
@@ -993,7 +987,7 @@ Com esse desempenho, o Brasil reafirma sua posição estratégica no cenário gl
             }`}>
               <span className="font-medium">Legibilidade: Flesch {readabilityData.flesch_score}</span>
               {readabilityData.avg_sentence_length && (
-                <span>Frase media: {readabilityData.avg_sentence_length} palavras</span>
+                <span>Frase média: {readabilityData.avg_sentence_length} palavras</span>
               )}
               {readabilityData.long_sentence_pct != null && (
                 <span>Frases longas: {Math.round(readabilityData.long_sentence_pct)}%</span>
@@ -1007,7 +1001,7 @@ Com esse desempenho, o Brasil reafirma sua posição estratégica no cenário gl
           <div className="px-4 pb-1">
             <div className="text-xs px-3 py-2 rounded border bg-amber-50 border-amber-200 text-amber-700 flex items-center gap-2">
               <AlertTriangle size={14} />
-              <span>Verificacao sem enriquecimento externo - confianca pode ser menor</span>
+              <span>Verificação sem enriquecimento externo - confiança pode ser menor</span>
             </div>
           </div>
         )}
@@ -1018,7 +1012,7 @@ Com esse desempenho, o Brasil reafirma sua posição estratégica no cenário gl
             <div className="text-xs px-3 py-2 rounded border bg-red-100 border-red-300 text-red-800">
               <div className="flex items-center gap-2 font-bold mb-1">
                 <AlertTriangle size={14} />
-                <span>CONTEUDO SENSIVEL DETECTADO</span>
+                <span>CONTEÚDO SENSÍVEL DETECTADO</span>
               </div>
               {sensitiveInstructions.length > 0 && (
                 <ul className="list-disc list-inside space-y-1 mt-1">

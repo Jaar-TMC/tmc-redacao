@@ -1,3 +1,4 @@
+/* eslint-disable react-refresh/only-export-components */
 import React, { useMemo, useState, useRef } from 'react';
 import PropTypes from 'prop-types';
 import {
@@ -27,7 +28,7 @@ import {
 import { performSEOAnalysis, calculateSEOScore } from '../../utils/seoUtils';
 import { SEO_EXPLANATIONS, getScoreTips } from '../../constants/seoExplanations';
 import { CATEGORY_WEIGHTS } from '../../constants/seoConstants';
-import { generateOptimizationSummary, extractPrimaryKeyword } from '../../utils/seoPromptGenerator';
+import { generateOptimizationSummary } from '../../utils/seoPromptGenerator';
 
 /**
  * SEOAnalyzerPanel - Painel de análise SEO em tempo real (v3 - Algorithm Excellence)
@@ -242,7 +243,7 @@ const CategoryCard = ({ categoryKey, category, explanations, isExpanded, onToggl
     aiSerpOptimization: 'IA & SERP'
   };
 
-  const percentage = Math.round((category.score / category.maxScore) * 100);
+  const _percentage = Math.round((category.score / category.maxScore) * 100);
 
   return (
     <div className="border-b border-light-gray last:border-0">

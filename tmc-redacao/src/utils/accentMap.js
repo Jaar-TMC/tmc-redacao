@@ -41,7 +41,7 @@ const ACCENT_MAP = {
   'televisao': 'televisão', 'extensao': 'extensão', 'expansao': 'expansão',
   'suspensao': 'suspensão', 'exclusao': 'exclusão', 'inclusao': 'inclusão',
   'explosao': 'explosão', 'revisao': 'revisão', 'previsao': 'previsão',
-  'divisao': 'divisão', 'repercussao': 'repercussão', 'extorsao': 'extorsão',
+  'divisao': 'divisão', 'repercussao': 'repercussão',
   'dimensao': 'dimensão', 'adesao': 'adesão', 'permissao': 'permissão',
   'submissao': 'submissão', 'profissao': 'profissão', 'progressao': 'progressão',
   'recessao': 'recessão', 'sucessao': 'sucessão', 'possessao': 'possessão',

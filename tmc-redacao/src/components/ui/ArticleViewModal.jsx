@@ -1,7 +1,29 @@
 import { useEffect, useCallback } from 'react';
 import PropTypes from 'prop-types';
+import DOMPurify from 'dompurify';
 import { X, Calendar, Tag, User, Clock, Edit3, ExternalLink } from 'lucide-react';
 import { markdownToHtml } from '../../utils/markdownRenderer';
+
+/**
+ * StatusBadge - Displays article publication status
+ * Extracted outside of ArticleViewModal to avoid component re-creation on every render.
+ */
+const StatusBadge = ({ status }) => {
+  const isPublished = status === 'published';
+  return (
+    <span className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium ${
+      isPublished
+        ? 'bg-green-100 text-green-700'
+        : 'bg-orange-100 text-orange-700'
+    }`}>
+      {isPublished ? 'Publicado' : 'Rascunho'}
+    </span>
+  );
+};
+
+StatusBadge.propTypes = {
+  status: PropTypes.oneOf(['draft', 'published'])
+};
 
 /**
  * ArticleViewModal - Modal para visualizar matéria formatada
@@ -51,25 +73,11 @@ const ArticleViewModal = ({ article, isOpen, onClose, onEdit }) => {
     });
   };
 
-  // Render content as HTML from markdown
+  // Render content as HTML from markdown (sanitized via DOMPurify)
   const renderContent = () => {
     if (!article.content) return null;
     const html = markdownToHtml(article.content);
-    return { __html: html };
-  };
-
-  // Status badge
-  const StatusBadge = () => {
-    const isPublished = article.status === 'published';
-    return (
-      <span className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium ${
-        isPublished
-          ? 'bg-green-100 text-green-700'
-          : 'bg-orange-100 text-orange-700'
-      }`}>
-        {isPublished ? 'Publicado' : 'Rascunho'}
-      </span>
-    );
+    return { __html: DOMPurify.sanitize(html) };
   };
 
   return (
@@ -87,7 +95,7 @@ const ArticleViewModal = ({ article, isOpen, onClose, onEdit }) => {
         {/* Header */}
         <div className="flex items-center justify-between p-4 border-b border-light-gray sticky top-0 bg-white rounded-t-xl z-10">
           <div className="flex items-center gap-3">
-            <StatusBadge />
+            <StatusBadge status={article.status} />
             {article.category && (
               <span className="text-sm text-medium-gray">{article.category}</span>
             )}

@@ -49,6 +49,7 @@ function MiniPlayer({
       const timer = setTimeout(() => setIsVisible(true), 100);
       return () => clearTimeout(timer);
     } else {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setIsVisible(false);
     }
   }, [isMainPlayerVisible, isClosed]);
@@ -56,6 +57,7 @@ function MiniPlayer({
   // Reset do estado "closed" quando o player principal volta a ficar visível
   useEffect(() => {
     if (isMainPlayerVisible) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setIsClosed(false);
     }
   }, [isMainPlayerVisible]);

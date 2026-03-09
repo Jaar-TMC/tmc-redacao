@@ -170,6 +170,13 @@ const ConfigurarPage = () => {
     confirmarConfiguracoes,
   } = useCriar();
 
+  // Guard: redirect to /criar if no fonte type is set
+  useEffect(() => {
+    if (!fonte?.tipo) {
+      navigate('/criar', { replace: true });
+    }
+  }, [fonte?.tipo, navigate]);
+
   // Form state - inicializado com valores do context (para quando usuário voltar)
   const [dataPublicacao, setDataPublicacao] = useState(configuracoes.data || '');
   const [orientacaoLide, setOrientacaoLide] = useState(configuracoes.orientacaoLide || '');
@@ -224,13 +231,14 @@ const ConfigurarPage = () => {
     if (!fonte?.tipo) return null;
 
     switch (fonte.tipo) {
-      case 'feed':
+      case 'feed': {
         const articles = fonte.dados || [];
         return {
           tipo: 'Feed RSS',
           descricao: `${articles.length} matéria${articles.length !== 1 ? 's' : ''} selecionada${articles.length !== 1 ? 's' : ''}`,
           titulos: articles.map(a => a.title).slice(0, 3)
         };
+      }
       case 'tema':
         return {
           tipo: 'Tema',
@@ -319,11 +327,11 @@ const ConfigurarPage = () => {
                     ? 'bg-gray-800 text-white'
                     : 'text-medium-gray hover:text-tmc-orange hover:bg-off-white'
                 }`}
-                aria-label="Modo Avancado"
+                aria-label="Modo Avançado"
               >
                 {showAdvanced ? <EyeOff size={18} /> : <Code size={18} />}
                 <span className="text-sm font-medium hidden sm:inline">
-                  {showAdvanced ? 'Ocultar Prompt' : 'Modo Avancado'}
+                  {showAdvanced ? 'Ocultar Prompt' : 'Modo Avançado'}
                 </span>
               </button>
             </RequirePermission>
@@ -332,7 +340,7 @@ const ConfigurarPage = () => {
               aria-label="Ajuda"
             >
               <HelpCircle size={20} />
-              <span className="text-sm font-medium hidden sm:inline">Help</span>
+              <span className="text-sm font-medium hidden sm:inline">Ajuda</span>
             </button>
           </div>
         </div>

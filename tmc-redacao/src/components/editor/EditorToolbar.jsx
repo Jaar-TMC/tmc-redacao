@@ -19,6 +19,37 @@ import {
 } from 'lucide-react';
 import Tooltip from '../ui/Tooltip';
 
+// Formatting button helper - defined outside component to avoid re-creation on each render
+const ToolbarButton = ({ onClick, isActive, disabled, tooltip, shortcut, children, ariaLabel }) => (
+  <Tooltip content={tooltip} shortcut={shortcut}>
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      className={`p-2 rounded transition-colors ${
+        isActive
+          ? 'bg-tmc-orange/20 text-tmc-orange'
+          : disabled
+          ? 'text-light-gray cursor-not-allowed'
+          : 'hover:bg-off-white text-medium-gray'
+      }`}
+      aria-label={ariaLabel || tooltip}
+      aria-pressed={isActive}
+    >
+      {children}
+    </button>
+  </Tooltip>
+);
+
+ToolbarButton.propTypes = {
+  onClick: PropTypes.func,
+  isActive: PropTypes.bool,
+  disabled: PropTypes.bool,
+  tooltip: PropTypes.string,
+  shortcut: PropTypes.string,
+  children: PropTypes.node,
+  ariaLabel: PropTypes.string,
+};
+
 /**
  * EditorToolbar - Formatting toolbar for TipTap editor
  *
@@ -80,27 +111,6 @@ const EditorToolbar = ({
       </div>
     );
   }
-
-  // Formatting button helper
-  const ToolbarButton = ({ onClick, isActive, disabled, tooltip, shortcut, children, ariaLabel }) => (
-    <Tooltip content={tooltip} shortcut={shortcut}>
-      <button
-        onClick={onClick}
-        disabled={disabled}
-        className={`p-2 rounded transition-colors ${
-          isActive
-            ? 'bg-tmc-orange/20 text-tmc-orange'
-            : disabled
-            ? 'text-light-gray cursor-not-allowed'
-            : 'hover:bg-off-white text-medium-gray'
-        }`}
-        aria-label={ariaLabel || tooltip}
-        aria-pressed={isActive}
-      >
-        {children}
-      </button>
-    </Tooltip>
-  );
 
   return (
     <div className="flex items-center gap-1 flex-wrap">

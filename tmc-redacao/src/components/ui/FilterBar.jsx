@@ -79,6 +79,7 @@ const FilterBar = ({ urgencyCounts }) => {
     if (!isUserTypingRef.current && filters.searchQuery !== searchTerm) {
       setSearchTerm(filters.searchQuery || '');
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentionally omit searchTerm to avoid sync loop
   }, [filters.searchQuery]);
 
   // Cleanup debounce timer on unmount

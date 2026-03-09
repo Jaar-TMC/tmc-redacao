@@ -38,7 +38,8 @@ const TooltipEducativo = ({
   const tooltipRef = useRef(null);
   const previousFocusRef = useRef(null);
 
-  // Calcular posição inteligente do tooltip
+  // Calcular posição inteligente do tooltip based on DOM measurements
+  // setState is necessary here because position depends on DOM layout (getBoundingClientRect)
   useEffect(() => {
     if (isOpen && tooltipRef.current && buttonRef.current && position === 'auto') {
       const buttonRect = buttonRef.current.getBoundingClientRect();
@@ -64,9 +65,29 @@ const TooltipEducativo = ({
         newPosition = 'top';
       }
 
-      setCalculatedPosition(newPosition);
+      setCalculatedPosition(newPosition); // eslint-disable-line react-hooks/set-state-in-effect
     }
   }, [isOpen, position]);
+
+  const handleOpen = () => {
+    setIsOpen(true);
+  };
+
+  const handleClose = () => {
+    setIsOpen(false);
+    // Retornar foco ao botão que abriu
+    if (buttonRef.current) {
+      buttonRef.current.focus();
+    }
+  };
+
+  const handleToggle = () => {
+    if (isOpen) {
+      handleClose();
+    } else {
+      handleOpen();
+    }
+  };
 
   // Gerenciar foco e teclas
   useEffect(() => {
@@ -99,26 +120,6 @@ const TooltipEducativo = ({
       };
     }
   }, [isOpen]);
-
-  const handleOpen = () => {
-    setIsOpen(true);
-  };
-
-  const handleClose = () => {
-    setIsOpen(false);
-    // Retornar foco ao botão que abriu
-    if (buttonRef.current) {
-      buttonRef.current.focus();
-    }
-  };
-
-  const handleToggle = () => {
-    if (isOpen) {
-      handleClose();
-    } else {
-      handleOpen();
-    }
-  };
 
   // Estilos de posicionamento
   const positionStyles = {

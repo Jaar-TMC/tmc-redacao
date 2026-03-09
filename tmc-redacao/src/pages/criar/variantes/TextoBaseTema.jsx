@@ -16,61 +16,10 @@ import TipBox from '../../../components/ui/TipBox';
  * 2. Selecionar materias do tema (lista de artigos do RSS)
  */
 
-// Dados mockados de temas
-const mockTemas = [
-  { id: 't1', name: 'Dólar', trend: 'up', count: 45, sources: ['feed', 'trends'] },
-  { id: 't2', name: 'Petrobras', trend: 'up', count: 32, sources: ['feed'] },
-  { id: 't3', name: 'Brasil x Argentina', trend: 'stable', count: 28, sources: ['twitter'] },
-  { id: 't4', name: 'Selic', trend: 'up', count: 24, sources: ['feed', 'trends'] },
-  { id: 't5', name: 'OpenAI', trend: 'up', count: 18, sources: ['trends'] },
-  { id: 't6', name: 'Inflação', trend: 'down', count: 15, sources: ['feed'] }
-];
-
-// Dados mockados de materias por tema
-const mockMaterias = {
-  't1': [
-    {
-      id: 'm1',
-      title: 'Dólar atinge R$ 6,20 e renova máxima histórica',
-      source: 'G1',
-      sourceUrl: 'https://g1.com.br',
-      category: 'Economia',
-      time: 'há 2 horas',
-      preview: 'A moeda americana subiu 1,2% nesta terça-feira, renovando a máxima histórica nominal...',
-      wordCount: 450
-    },
-    {
-      id: 'm2',
-      title: 'BC intervém no câmbio pela terceira vez na semana',
-      source: 'Valor Econômico',
-      sourceUrl: 'https://valor.com.br',
-      category: 'Mercados',
-      time: 'há 3 horas',
-      preview: 'Banco Central vendeu US$ 1 bilhão em leilão para tentar conter a alta do dólar...',
-      wordCount: 380
-    },
-    {
-      id: 'm3',
-      title: 'Especialistas explicam alta do dólar e perspectivas',
-      source: 'Estadão',
-      sourceUrl: 'https://estadao.com.br',
-      category: 'Análise',
-      time: 'há 5 horas',
-      preview: 'Incertezas fiscais e cenário externo pressionam a moeda americana frente ao real...',
-      wordCount: 620
-    },
-    {
-      id: 'm4',
-      title: 'Turistas sentem impacto do dólar nas viagens',
-      source: 'UOL',
-      sourceUrl: 'https://uol.com.br',
-      category: 'Comportamento',
-      time: 'há 6 horas',
-      preview: 'Pacotes internacionais ficam até 30% mais caros com alta da moeda americana...',
-      wordCount: 340
-    }
-  ]
-};
+// TODO: Replace with API call to fetch trending temas
+// Temas and materias should be loaded dynamically from backend
+const mockTemas = [];
+const mockMaterias = {};
 
 // Componente TemaCard
 const TemaCard = ({ tema, onClick, selected }) => {
@@ -225,11 +174,12 @@ const TextoBaseTema = ({
   const [selectedArticles, setSelectedArticles] = useState(new Set());
   const [searchQuery, setSearchQuery] = useState('');
   const [sourceFilter, setSourceFilter] = useState('all'); // all, feed, trends, twitter
-  const [previewArticle, setPreviewArticle] = useState(null);
+  const [_previewArticle, setPreviewArticle] = useState(null);
 
   // Restaurar estado do tema se houver dados iniciais (voltando da edição de tópicos)
   useEffect(() => {
     if (initialTemaData?.tema) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional initialization from props
       setSelectedTema(initialTemaData.tema);
       setStep('materias');
       if (initialTemaData.selectedArticleIds) {
@@ -250,6 +200,7 @@ const TextoBaseTema = ({
 
     // Se não houver dados ou dados estiverem vazios, ficar na seleção de tema
     if (!temaData || Object.keys(temaData).length === 0) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional initialization from props
       setStep('tema');
       return;
     }
@@ -424,7 +375,8 @@ const TextoBaseTema = ({
 
           {filteredTemas.length === 0 && (
             <div className="text-center py-8 text-medium-gray">
-              <p>Nenhum tema encontrado</p>
+              <p>Nenhum tema disponível no momento</p>
+              <p className="text-sm mt-2">Tente novamente mais tarde ou escolha outra fonte.</p>
             </div>
           )}
 

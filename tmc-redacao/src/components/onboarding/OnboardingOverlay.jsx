@@ -22,6 +22,7 @@ const OnboardingOverlay = memo(function OnboardingOverlay({
   // Track target element position
   useEffect(() => {
     if (!targetSelector) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setTargetRect(null);
       return;
     }

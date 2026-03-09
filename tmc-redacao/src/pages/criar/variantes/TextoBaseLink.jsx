@@ -20,32 +20,24 @@ import {
  * - Alternar entre modo topicos e texto completo
  */
 
-// Dados mockados de link extraido
-const mockLinkData = {
-  url: 'https://g1.globo.com/economia/noticia/dolar-atinge-r-620.html',
-  title: 'Dólar atinge R$ 6,20 e renova máxima histórica',
-  source: 'G1',
-  favicon: '🌐',
-  publishedDate: '18/12/2024',
-  author: 'Redação G1',
-  category: 'Economia',
-  wordCount: 850,
-  topics: [
-    { id: 'link-top-1', type: 'fato', text: 'Dólar comercial fechou cotado a R$ 6,20, com alta de 1,2% em relação ao fechamento do dia anterior' },
-    { id: 'link-top-2', type: 'contexto', text: 'O valor representa a maior cotação nominal da história da moeda americana no Brasil' },
-    { id: 'link-top-3', type: 'causa', text: 'Movimento reflete incertezas fiscais domésticas e cenário externo de fortalecimento do dólar frente às moedas emergentes' },
-    { id: 'link-top-4', type: 'acao', text: 'Banco Central vendeu US$ 1 bilhão em leilão de dólares para tentar conter a alta, mas efeito foi limitado' },
-    { id: 'link-top-5', type: 'declaracao', text: '"A expectativa é de estabilização nos próximos dias", afirmou o presidente do BC em nota oficial' }
-  ],
-  fullText: `A moeda americana subiu 1,2% nesta terça-feira, fechando cotada a R$ 6,20, renovando a máxima histórica nominal. O valor representa o maior patamar nominal já registrado para a moeda americana no Brasil.
+// Build link data from fonte.dados or provide empty defaults
+const buildLinkData = (fonte) => {
+  const dados = fonte?.dados || {};
+  const preview = dados.preview || {};
+  const extraction = dados.extraction || {};
 
-O movimento reflete as incertezas fiscais domésticas e o cenário externo de fortalecimento do dólar frente às moedas emergentes. Analistas apontam que a combinação de déficit fiscal crescente e indefinições sobre a política econômica afetam a confiança dos investidores.
-
-O Banco Central vendeu US$ 1 bilhão em leilão de dólares para tentar conter a alta, mas o efeito foi limitado. Foi a terceira intervenção da autoridade monetária no mercado de câmbio apenas nesta semana.
-
-"A expectativa é de estabilização nos próximos dias", afirmou o presidente do BC em nota oficial divulgada após o fechamento do mercado.
-
-Especialistas alertam que, como consequência da alta do dólar, produtos importados devem ficar mais caros nos próximos meses, pressionando a inflação.`
+  return {
+    url: dados.url || '',
+    title: preview.title || extraction.title || '',
+    source: preview.source || extraction.source || '',
+    favicon: '🌐',
+    publishedDate: preview.publishedDate || extraction.publishedDate || '',
+    author: preview.author || extraction.author || '',
+    category: preview.category || extraction.category || '',
+    wordCount: extraction.wordCount || 0,
+    topics: extraction.topics || [],
+    fullText: extraction.fullText || extraction.content || ''
+  };
 };
 
 const TextoBaseLink = ({
@@ -54,22 +46,25 @@ const TextoBaseLink = ({
   onDataChange,
   savedSelections
 }) => {
+  // Build link data from fonte
+  const linkData = useMemo(() => buildLinkData(fonte), [fonte]);
+
   // States - restore saved selections if returning from another step
   const [selectedTopics, setSelectedTopics] = useState(
     () => savedSelections?.selectedTopics?.length > 0
       ? new Set(savedSelections.selectedTopics)
-      : new Set(mockLinkData.topics.map(t => t.id))
+      : new Set(linkData.topics.map(t => t.id))
   );
   const [editedTexts, setEditedTexts] = useState(
     () => savedSelections?.editedTexts || {}
   );
   const [activeTab, setActiveTab] = useState('topics');
-  const [fullText, setFullText] = useState(mockLinkData.fullText);
+  const [fullText, setFullText] = useState(linkData.fullText);
   const [isReprocessing, setIsReprocessing] = useState(false);
 
-  // URL da fonte ou mock
-  const linkUrl = fonte?.dados?.url || mockLinkData.url;
-  const linkTitle = fonte?.dados?.preview?.title || mockLinkData.title;
+  // URL and title from fonte data
+  const linkUrl = linkData.url;
+  const linkTitle = linkData.title;
 
   // Estatisticas
   const stats = useMemo(() => {
@@ -77,7 +72,7 @@ const TextoBaseLink = ({
 
     if (activeTab === 'topics') {
       selectedTopics.forEach(id => {
-        const topic = mockLinkData.topics.find(t => t.id === id);
+        const topic = linkData.topics.find(t => t.id === id);
         if (topic) {
           const text = editedTexts[id] || topic.text;
           wordCount += text.split(/\s+/).filter(Boolean).length;
@@ -89,10 +84,10 @@ const TextoBaseLink = ({
 
     return {
       selected: selectedTopics.size,
-      total: mockLinkData.topics.length,
+      total: linkData.topics.length,
       words: wordCount
     };
-  }, [selectedTopics, editedTexts, activeTab, fullText]);
+  }, [selectedTopics, editedTexts, activeTab, fullText, linkData.topics]);
 
   // Handlers
   const handleToggleTopic = useCallback((topicId) => {
@@ -115,8 +110,8 @@ const TextoBaseLink = ({
   }, []);
 
   const handleSelectAll = useCallback(() => {
-    setSelectedTopics(new Set(mockLinkData.topics.map(t => t.id)));
-  }, []);
+    setSelectedTopics(new Set(linkData.topics.map(t => t.id)));
+  }, [linkData.topics]);
 
   const handleClearSelection = useCallback(() => {
     setSelectedTopics(new Set());
@@ -153,7 +148,7 @@ const TextoBaseLink = ({
     <div className="space-y-6">
       <SourceBadge
         type="link"
-        title={new URL(linkUrl).hostname.replace('www.', '')}
+        title={linkUrl ? new URL(linkUrl).hostname.replace('www.', '') : 'Link'}
         subtitle={linkTitle}
         onChangeSource={onChangeSource}
       />
@@ -171,7 +166,7 @@ const TextoBaseLink = ({
             <div className="bg-off-white rounded-lg p-4 mb-4">
               <div className="flex items-center gap-2 mb-3">
                 <Globe size={20} className="text-tmc-orange" />
-                <span className="font-medium text-dark-gray">{mockLinkData.source}</span>
+                <span className="font-medium text-dark-gray">{linkData.source}</span>
               </div>
 
               <h4 className="font-semibold text-dark-gray mb-3 leading-tight">
@@ -181,19 +176,19 @@ const TextoBaseLink = ({
               <div className="space-y-2 text-sm text-medium-gray">
                 <div className="flex items-center gap-2">
                   <Calendar size={14} />
-                  <span>Publicado: {mockLinkData.publishedDate}</span>
+                  <span>Publicado: {linkData.publishedDate}</span>
                 </div>
                 <div className="flex items-center gap-2">
                   <Hash size={14} />
-                  <span>Categoria: {mockLinkData.category}</span>
+                  <span>Categoria: {linkData.category}</span>
                 </div>
                 <div className="flex items-center gap-2">
                   <User size={14} />
-                  <span>Autor: {mockLinkData.author}</span>
+                  <span>Autor: {linkData.author}</span>
                 </div>
                 <div className="flex items-center gap-2">
                   <FileText size={14} />
-                  <span>~{mockLinkData.wordCount} palavras</span>
+                  <span>~{linkData.wordCount} palavras</span>
                 </div>
               </div>
             </div>
@@ -241,7 +236,7 @@ const TextoBaseLink = ({
                   {/* Controles de selecao */}
                   <SelectionToggleBar
                     selectedCount={selectedTopics.size}
-                    totalCount={mockLinkData.topics.length}
+                    totalCount={linkData.topics.length}
                     onSelectAll={handleSelectAll}
                     onClearSelection={handleClearSelection}
                     className="mb-4"
@@ -249,7 +244,7 @@ const TextoBaseLink = ({
 
                   {/* Lista de topicos */}
                   <div className="space-y-3 max-h-[450px] overflow-y-auto">
-                    {mockLinkData.topics.map(topic => (
+                    {linkData.topics.map(topic => (
                       <TopicCard
                         key={topic.id}
                         id={topic.id}

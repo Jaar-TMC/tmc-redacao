@@ -159,7 +159,7 @@ export function useChatEditor({
     setError(null);
 
     // Add user message
-    const userMessageId = addMessage('user', instruction);
+    const _userMessageId = addMessage('user', instruction);
 
     // Add loading message
     const loadingMessageId = addMessage('ai', 'Analisando e editando o artigo...', {
@@ -192,7 +192,7 @@ export function useChatEditor({
 
       // Add pending approval message with changes summary
       // Changes are NOT applied until user approves
-      const aiMessageId = addMessage('ai', result.changes_summary || 'Proposta de edição:', {
+      const _aiMessageId = addMessage('ai', result.changes_summary || 'Proposta de edição:', {
         editResult: {
           titulo: result.titulo,
           titulo_curto: result.titulo_curto || '',
@@ -404,7 +404,7 @@ export function useChatEditor({
    * Revert to a previous version by clicking on a chat message
    * @param {string} messageId - ID of the message/version to revert to
    */
-  const revertToMessage = useCallback((messageId) => {
+  const revertToMessage = useCallback((_messageId) => {
     // This will be handled by the parent component using the version history
     // Just add a system message indicating the revert
     addMessage('system', 'Versão restaurada. Você pode continuar editando a partir daqui.');

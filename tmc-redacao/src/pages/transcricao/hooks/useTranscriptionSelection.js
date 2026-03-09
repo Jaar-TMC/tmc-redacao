@@ -7,7 +7,7 @@ import { useState, useCallback, useMemo } from 'react';
  * @param {Array} initialSelection - IDs ou objetos inicialmente selecionados
  * @returns {Object} Estado e funções de seleção
  */
-function useTranscriptionSelection(initialSelection = []) {
+function useTranscriptionSelection(_initialSelection = []) {
   // Seleções de cards (modo cards)
   // Estrutura: Set de IDs com Map para armazenar se é citação
   const [cardSelections, setCardSelections] = useState(new Map());

@@ -45,13 +45,15 @@ const OnboardingTour = memo(function OnboardingTour() {
     if (currentStepIndex !== lastStepIndexRef.current) {
       skipAttemptedRef.current = false;
       lastStepIndexRef.current = currentStepIndex;
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- resetting state on step transition
       setTargetExists(false); // Reset while checking new element
     }
   }, [currentStepIndex]);
 
-  // Check if target element exists
+  // Check if target element exists - syncs DOM state with React state
   useEffect(() => {
     if (!isActive || !currentStep?.target) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- syncing DOM observation result
       setTargetExists(false);
       return;
     }

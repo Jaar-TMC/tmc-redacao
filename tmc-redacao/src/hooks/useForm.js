@@ -58,8 +58,8 @@ const useForm = (initialValues = {}, validate = null) => {
       try {
         await onSubmit(values);
       } catch (error) {
-        // eslint-disable-next-line no-console
         console.error('Form submission error:', error);
+        setErrors(prev => ({ ...prev, _form: error.message || 'Erro ao enviar formulário' }));
       } finally {
         setIsSubmitting(false);
       }

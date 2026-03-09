@@ -54,7 +54,7 @@ const MinhasMaterias = () => {
   const [isDeleting, setIsDeleting] = useState(false);
 
   // Fetch articles from API
-  const fetchArticles = useCallback(async () => {
+  const fetchArticles = useCallback(async (options = {}) => {
     setIsLoading(true);
     setError(null);
 
@@ -80,6 +80,9 @@ const MinhasMaterias = () => {
 
       const response = await getUserArticles(params);
 
+      // If aborted, don't update state
+      if (options.signal?.aborted) return;
+
       // Convert dates from ISO strings to Date objects for compatibility
       const articlesWithDates = response.items.map(article => ({
         ...article,
@@ -92,16 +95,22 @@ const MinhasMaterias = () => {
       setTotalArticles(response.total);
       setTotalPages(response.pages);
     } catch (err) {
-      console.error('Error fetching articles:', err);
+      if (err.name === 'AbortError') return;
       setError(err.message || 'Erro ao carregar matérias');
     } finally {
-      setIsLoading(false);
+      if (!options.signal?.aborted) {
+        setIsLoading(false);
+      }
     }
   }, [currentPage, filters]);
 
-  // Fetch articles when page or filters change
+  // Fetch articles when page or filters change, with AbortController cleanup
   useEffect(() => {
-    fetchArticles();
+    const controller = new AbortController();
+    fetchArticles({ signal: controller.signal });
+    return () => {
+      controller.abort();
+    };
   }, [fetchArticles]);
 
   // Reset to page 1 when filters change
@@ -130,14 +139,11 @@ const MinhasMaterias = () => {
   }, []);
 
   const handleEdit = useCallback((articleId) => {
-    console.log('Editing article:', articleId);
     navigate(`/editar/${articleId}`);
   }, [navigate]);
 
-  const handleMetrics = useCallback((articleId) => {
-    console.log('Viewing metrics for article:', articleId);
-    // TODO: Implement metrics modal
-  }, []);
+  // Metrics feature not yet implemented - no-op handler
+  const handleMetrics = useCallback(() => {}, []);
 
   const handleDeleteClick = useCallback((articleId) => {
     const article = articles.find(a => a.id === articleId);
@@ -163,7 +169,6 @@ const MinhasMaterias = () => {
       // Reset dialog state
       setDeleteDialog({ open: false, articleId: null, articleTitle: '' });
     } catch (err) {
-      console.error('Error deleting article:', err);
       setError(err.message || 'Erro ao excluir matéria');
     } finally {
       setIsDeleting(false);

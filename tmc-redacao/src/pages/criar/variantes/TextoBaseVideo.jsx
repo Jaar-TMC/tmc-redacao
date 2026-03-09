@@ -22,48 +22,12 @@ import MiniPlayer from '../../transcricao/components/MiniPlayer';
  * - Cards de transcricao selecionaveis
  */
 
-// Dados mockados da transcricao
-const mockTranscription = {
-  videoId: 'dQw4w9WgXcQ', // Placeholder
-  title: 'Entrevista Ministro Economia',
-  duration: 765, // 12:45 em segundos
-  segments: [
-    {
-      id: 'seg-1',
-      startTime: '00:00',
-      endTime: '00:45',
-      topic: 'Introdução',
-      text: 'O ministro da economia anunciou hoje em entrevista coletiva que o governo vai implementar novas medidas para conter a inflação nos próximos meses. As medidas foram recebidas com cautela pelo mercado financeiro, que aguarda mais detalhes sobre a implementação.'
-    },
-    {
-      id: 'seg-2',
-      startTime: '00:45',
-      endTime: '02:15',
-      topic: 'Medidas Anunciadas',
-      text: 'Entre as principais medidas estão a redução de impostos sobre combustíveis, revisão das metas fiscais e aumento do salário mínimo. O ministro destacou que as medidas terão impacto positivo na economia em até 6 meses. "Estamos trabalhando para garantir que o brasileiro sinta a diferença no bolso", afirmou.'
-    },
-    {
-      id: 'seg-3',
-      startTime: '02:15',
-      endTime: '03:30',
-      topic: 'Críticas da Oposição',
-      text: 'A oposição criticou as medidas, afirmando que são insuficientes para resolver os problemas estruturais da economia. O líder da oposição disse que o governo está "fazendo mais do mesmo" e que as medidas são "eleitoreiras". Segundo ele, seria necessário uma reforma tributária completa.'
-    },
-    {
-      id: 'seg-4',
-      startTime: '03:30',
-      endTime: '05:00',
-      topic: 'Reação do Mercado',
-      text: 'O mercado financeiro reagiu com volatilidade às notícias. O dólar subiu 0,5% nas primeiras horas após o anúncio, mas depois estabilizou. A bolsa de valores fechou em leve alta de 0,2%. Analistas apontam que o mercado aguarda mais detalhes sobre o financiamento das medidas.'
-    },
-    {
-      id: 'seg-5',
-      startTime: '05:00',
-      endTime: '06:15',
-      topic: 'Próximos Passos',
-      text: 'O ministro informou que enviará o projeto de lei ao Congresso na próxima semana. A expectativa é que a votação ocorra ainda este mês, antes do recesso parlamentar. O governo conta com apoio da base aliada para aprovar as medidas.'
-    }
-  ]
+// Empty default transcription (data should come from fonte.dados.transcription)
+const emptyTranscription = {
+  videoId: '',
+  title: '',
+  duration: 0,
+  segments: []
 };
 
 // Converter timestamp para segundos
@@ -103,13 +67,13 @@ const TextoBaseVideo = ({
         : durationParts[0] * 3600 + durationParts[1] * 60 + durationParts[2];
 
       return {
-        videoId: fonte.dados.video?.videoId || mockTranscription.videoId,
+        videoId: fonte.dados.video?.videoId || emptyTranscription.videoId,
         title: fonte.dados.video?.title || 'Vídeo do YouTube',
         duration,
         segments
       };
     }
-    return mockTranscription;
+    return emptyTranscription;
   }, [fonte]);
 
   // States
@@ -134,6 +98,7 @@ const TextoBaseVideo = ({
 
   // Reinicializar seleções quando os dados mudam
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional re-initialization when transcription data changes
     setSelectedSegments(new Set(transcriptionData.segments.map(s => s.id)));
   }, [transcriptionData]);
 
@@ -142,6 +107,7 @@ const TextoBaseVideo = ({
     const fullText = transcriptionData.segments
       .map(seg => `[${seg.startTime}] ${seg.topic}\n${seg.text}`)
       .join('\n\n');
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional initialization from transcription data
     setFullTextContent(fullText);
   }, [transcriptionData]);
 
@@ -343,7 +309,7 @@ const TextoBaseVideo = ({
     setActiveIntervals([]);
   }, []);
 
-  const handleMarkerClick = useCallback((seconds, segmentId) => {
+  const handleMarkerClick = useCallback((seconds, _segmentId) => {
     setCurrentTime(seconds);
     // Seek no player do YouTube
     if (youtubePlayerRef.current?.seekTo) {

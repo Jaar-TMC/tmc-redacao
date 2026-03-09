@@ -43,11 +43,11 @@ async def rss_collector_handler(timer: func.TimerRequest) -> None:
         logger.error(f"[{execution_id}] Database connection failed")
         return
 
-    # Limpar artigos antigos (> 24 horas) e duplicados
+    # Extended to 72h to prevent articles vanishing mid-workflow
     try:
-        deleted_old = db.delete_old_articles(hours=24)
+        deleted_old = db.delete_old_articles(hours=72)
         if deleted_old > 0:
-            logger.info(f"[{execution_id}] Cleanup: deleted {deleted_old} articles older than 24h")
+            logger.info(f"[{execution_id}] Cleanup: deleted {deleted_old} articles older than 72h")
 
         deleted_dupes = db.delete_duplicate_articles_by_title()
         if deleted_dupes > 0:

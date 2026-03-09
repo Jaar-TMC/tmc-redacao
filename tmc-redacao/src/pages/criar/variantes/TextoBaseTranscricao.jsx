@@ -166,9 +166,9 @@ const TextoBaseTranscricao = ({
     });
   }, []);
 
-  // Play segment (mock)
-  const handlePlaySegment = useCallback((segmentId, isPlaying) => {
-    console.log('Play segment:', segmentId, isPlaying);
+  // Play segment (stub - video playback not yet implemented)
+  const handlePlaySegment = useCallback((_segmentId, _isPlaying) => {
+    // TODO: integrate with YouTube player API
   }, []);
 
   // Go to moment - pula para timestamp no vídeo

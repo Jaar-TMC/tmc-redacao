@@ -69,7 +69,6 @@ const CriarMateria = () => {
   };
 
   const handleUrlSubmit = (data) => {
-    console.log('URL submitted:', data);
     // Salvar fonte no contexto e navegar
     const tipo = urlModalType === 'youtube' ? 'video' : 'link';
     setFonte(tipo, {
@@ -80,15 +79,12 @@ const CriarMateria = () => {
   };
 
   const handleTemaSelect = (theme) => {
-    console.log('Tema selected:', theme);
     // Salvar fonte no contexto e navegar
     setFonte('tema', theme);
     navigate('/criar/texto-base');
   };
 
   const handleFeedSelect = (articles, tags = []) => {
-    console.log('Articles selected:', articles);
-    console.log('Tags selected:', tags);
     // Salvar fonte no contexto e navegar
     setFonte('feed', articles);
     // Salvar tags selecionadas para SEO
@@ -102,7 +98,7 @@ const CriarMateria = () => {
     navigate('/');
   };
 
-  const handleStepClick = useCallback((stepIndex) => {
+  const handleStepClick = useCallback((_stepIndex) => {
     // Na etapa 1, não há etapas anteriores para navegar
     // Este handler existe para manter consistência com as outras páginas
   }, []);
@@ -137,7 +133,7 @@ const CriarMateria = () => {
               aria-label="Iniciar tour guiado desta página"
             >
               <HelpCircle size={20} />
-              <span className="text-sm font-medium hidden sm:inline">Help</span>
+              <span className="text-sm font-medium hidden sm:inline">Ajuda</span>
             </button>
           </div>
         </div>

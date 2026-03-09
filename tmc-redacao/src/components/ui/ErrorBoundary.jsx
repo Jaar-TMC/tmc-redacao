@@ -20,15 +20,14 @@ class ErrorBoundary extends Component {
     };
   }
 
-  static getDerivedStateFromError(error) {
+  static getDerivedStateFromError(_error) {
     // Update state so the next render will show the fallback UI
     return { hasError: true };
   }
 
   componentDidCatch(error, errorInfo) {
     // Log error details for debugging
-    // eslint-disable-next-line no-console
-    console.error('Error caught by ErrorBoundary:', error, errorInfo);
+    console.error('Error caught by ErrorBoundary:', error, errorInfo);  
     this.setState({
       error,
       errorInfo
@@ -69,7 +68,7 @@ class ErrorBoundary extends Component {
               Ocorreu um erro inesperado. Tente recarregar a página ou entre em contato com o suporte se o problema persistir.
             </p>
 
-            {process.env.NODE_ENV === 'development' && this.state.error && (
+            {import.meta.env.DEV && this.state.error && (
               <details className="text-left mb-6 p-4 bg-off-white rounded-lg">
                 <summary className="cursor-pointer font-medium text-sm text-dark-gray mb-2">
                   Detalhes do erro (desenvolvimento)

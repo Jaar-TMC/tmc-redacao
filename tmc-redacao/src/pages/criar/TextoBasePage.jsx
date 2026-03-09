@@ -36,7 +36,7 @@ const tooltipContent = {
 
 const TextoBasePage = () => {
   const navigate = useNavigate();
-  const { fonte, confirmarTextoBase, setBlocos, setFonte, textoBase, setVariantSelections } = useCriar();
+  const { fonte, confirmarTextoBase, setBlocos, setFonte: _setFonte, textoBase, setVariantSelections } = useCriar();
 
   // Estado para dados coletados da variante
   const [variantData, setVariantData] = useState(null);
@@ -166,7 +166,7 @@ const TextoBasePage = () => {
       } else if (variantData.groups || variantData.exclusives || variantData.quotes) {
         // StoryFusionView - múltiplas matérias combinadas
         // Extract content from groups (selected versions)
-        variantData.groups?.forEach((group, index) => {
+        variantData.groups?.forEach((group, _index) => {
           const version = group.selectedVersion;
           if (version) {
             blocos.push({
@@ -178,7 +178,7 @@ const TextoBasePage = () => {
         });
 
         // Extract exclusive content
-        variantData.exclusives?.forEach((exc, index) => {
+        variantData.exclusives?.forEach((exc, _index) => {
           blocos.push({
             id: `exc-${exc.id}`,
             type: 'exclusivo',
@@ -187,7 +187,7 @@ const TextoBasePage = () => {
         });
 
         // Extract quotes
-        variantData.quotes?.forEach((quote, index) => {
+        variantData.quotes?.forEach((quote, _index) => {
           blocos.push({
             id: `quote-${quote.id}`,
             type: 'citacao',
@@ -351,7 +351,7 @@ const TextoBasePage = () => {
                 aria-label="Ajuda"
               >
                 <HelpCircle size={20} />
-                <span className="text-sm font-medium hidden sm:inline">Help</span>
+                <span className="text-sm font-medium hidden sm:inline">Ajuda</span>
               </button>
             </div>
           </div>

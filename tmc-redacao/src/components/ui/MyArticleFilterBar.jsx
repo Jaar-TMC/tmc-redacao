@@ -16,7 +16,7 @@ import PropTypes from 'prop-types';
  * - Keyboard navigation support
  * - Focus management
  */
-const MyArticleFilterBar = ({ onFilterChange, resultsCount = 0 }) => {
+const MyArticleFilterBar = ({ onFilterChange, resultsCount: _resultsCount = 0 }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [openDropdown, setOpenDropdown] = useState(null);
   const [filters, setFilters] = useState({

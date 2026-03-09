@@ -28,6 +28,20 @@ class AppConfig:
     azure_ai_endpoint: str = ""
     llm_model: str = "claude-sonnet-4-5-20250929"
 
+    # Per-task model routing (optimize cost vs quality)
+    # Phase 1: Safe downgrades (classification + naming = low-risk)
+    classification_model: str = "claude-haiku-4-5"
+    scoring_model: str = "claude-haiku-4-5"
+    theme_naming_model: str = "claude-haiku-4-5"
+    # Phase 2: Test before committing (keep Sonnet until validated)
+    event_verification_model: str = "claude-sonnet-4-5"
+    event_extraction_model: str = "claude-sonnet-4-5"
+    enrichment_extraction_model: str = "claude-sonnet-4-5"
+    generation_model: str = "claude-sonnet-4-5"
+    fact_check_model: str = "claude-sonnet-4-5"
+    edit_model: str = "claude-sonnet-4-5"
+    merge_model: str = "claude-sonnet-4-5"
+
     # Exa enrichment
     exa_api_key: str = ""
     exa_max_results: int = 5
@@ -99,6 +113,17 @@ def load_config() -> AppConfig:
         azure_ai_api_key=os.environ.get("AZURE_AI_API_KEY", ""),
         azure_ai_endpoint=os.environ.get("AZURE_AI_ENDPOINT", ""),
         llm_model=os.environ.get("LLM_MODEL", "claude-sonnet-4-5-20250929"),
+        # Per-task model routing
+        classification_model=os.environ.get("CLASSIFICATION_MODEL", "claude-haiku-4-5"),
+        scoring_model=os.environ.get("SCORING_MODEL", "claude-haiku-4-5"),
+        theme_naming_model=os.environ.get("THEME_NAMING_MODEL", "claude-haiku-4-5"),
+        event_verification_model=os.environ.get("EVENT_VERIFICATION_MODEL", "claude-sonnet-4-5"),
+        event_extraction_model=os.environ.get("EVENT_EXTRACTION_MODEL", "claude-sonnet-4-5"),
+        enrichment_extraction_model=os.environ.get("ENRICHMENT_EXTRACTION_MODEL", "claude-sonnet-4-5"),
+        generation_model=os.environ.get("GENERATION_MODEL", "claude-sonnet-4-5"),
+        fact_check_model=os.environ.get("FACT_CHECK_MODEL", "claude-sonnet-4-5"),
+        edit_model=os.environ.get("EDIT_MODEL", "claude-sonnet-4-5"),
+        merge_model=os.environ.get("MERGE_MODEL", "claude-sonnet-4-5"),
         # Exa
         exa_api_key=os.environ.get("EXA_API_KEY", ""),
         exa_max_results=_int_env("EXA_MAX_RESULTS", 5),
@@ -162,11 +187,11 @@ def load_config() -> AppConfig:
             "Set to specific origins (e.g. https://app.tmc.com.br) for production."
         )
 
-    # Validate JWT secret in production
+    # Validate JWT secret in production (mandatory - prevents forged tokens)
     if config.production_safety_mode and not config.jwt_secret_key:
-        log.warning(
-            "PRODUCTION_SAFETY_MODE=true but JWT_SECRET_KEY not set. "
-            "Authentication will not work in production."
+        raise RuntimeError(
+            "JWT_SECRET_KEY is required in production mode. "
+            "Set it as an environment variable."
         )
 
     return config

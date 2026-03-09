@@ -21,7 +21,7 @@ const FeedSelector = ({ onClose, onSelect }) => {
 
   // API State
   const [articles, setArticles] = useState([]);
-  const [sources, setSources] = useState([]);
+  const [, setSources] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState(null);
 
@@ -55,7 +55,6 @@ const FeedSelector = ({ onClose, onSelect }) => {
         setArticles(transformedArticles);
         setSources(sourcesResponse?.sources || []);
       } catch (err) {
-        console.error('Error fetching articles:', err);
         setError(err.message || 'Erro ao carregar matérias');
       } finally {
         setIsLoading(false);

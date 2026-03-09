@@ -1344,7 +1344,7 @@ export const analyzeMediaOptimization = (content) => {
 /**
  * Analyze featured snippet readiness
  */
-export const analyzeFeaturedSnippetReadiness = (content, title) => {
+export const analyzeFeaturedSnippetReadiness = (content, _title) => {
   const results = {
     score: 0,
     maxScore: 5,
@@ -1514,7 +1514,7 @@ export const performSEOAnalysis = ({
   tituloCurto = '',
   linhaFina = '',
   content = '',
-  tags = [],
+  tags: _tags = [],
   slug = '',
   articleType = 'default',
   targetKeyword = '',

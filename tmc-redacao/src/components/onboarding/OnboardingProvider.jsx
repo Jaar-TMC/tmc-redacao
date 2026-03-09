@@ -6,6 +6,7 @@ import { tourSteps, TOUR_IDS } from './tourSteps';
 const getStorageKey = (uid) => 'tmc-onboarding-v1' + (uid ? '-' + uid : '');
 
 // Context for onboarding state
+// eslint-disable-next-line react-refresh/only-export-components -- context must be co-located with provider
 export const OnboardingContext = createContext(null);
 
 /**
@@ -35,10 +36,11 @@ export const OnboardingProvider = ({ children, userId }) => {
     }
   });
 
-  // Reload completedTours when userId changes
+  // Reload completedTours when userId changes - legitimate external sync pattern
   useEffect(() => {
     try {
       const stored = localStorage.getItem(getStorageKey(userId));
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- syncing from localStorage on userId change
       setCompletedTours(stored ? JSON.parse(stored) : {});
     } catch {
       setCompletedTours({});

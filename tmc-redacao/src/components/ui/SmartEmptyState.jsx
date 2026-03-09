@@ -34,55 +34,68 @@ const SmartEmptyState = ({ totalWithoutFilters = 0 }) => {
   useEffect(() => {
     if (activeFilters.length === 0) return;
 
-    const fetchSuggestionCounts = async () => {
-      setIsLoadingSuggestions(true);
-      const results = [];
+    const controller = new AbortController();
 
-      // For each active filter, check what happens if we remove it
-      const promises = activeFilters.map(async (filter) => {
-        try {
-          const params = { limit: 1 };
-          // Add all filters EXCEPT the one being removed
-          if (filter.key !== 'searchQuery' && filters.searchQuery) {
-            params.search = filters.searchQuery;
-          }
-          if (filter.key !== 'tag' && filters.tag) {
-            params.tag = filters.tag;
-          }
-          if (filter.key !== 'category' && filters.category) {
-            params.category = filters.category;
-          }
-          if (filter.key !== 'source' && filters.source) {
-            params.source = filters.source;
-          }
-          if (filters.urgency) {
-            params.max_hours = filters.urgency;
-          }
+    const debounceTimer = setTimeout(() => {
+      const fetchSuggestionCounts = async () => {
+        setIsLoadingSuggestions(true);
+        const results = [];
 
-          const response = await getArticles(params);
-          return {
-            ...filter,
-            count: response?.total || 0,
-          };
-        } catch {
-          return { ...filter, count: null };
+        // For each active filter, check what happens if we remove it
+        const promises = activeFilters.map(async (filter) => {
+          try {
+            const params = { limit: 1 };
+            // Add all filters EXCEPT the one being removed
+            if (filter.key !== 'searchQuery' && filters.searchQuery) {
+              params.search = filters.searchQuery;
+            }
+            if (filter.key !== 'tag' && filters.tag) {
+              params.tag = filters.tag;
+            }
+            if (filter.key !== 'category' && filters.category) {
+              params.category = filters.category;
+            }
+            if (filter.key !== 'source' && filters.source) {
+              params.source = filters.source;
+            }
+            if (filters.urgency) {
+              params.max_hours = filters.urgency;
+            }
+
+            const response = await getArticles(params, { signal: controller.signal });
+            return {
+              ...filter,
+              count: response?.total || 0,
+            };
+          } catch (err) {
+            if (err.name === 'AbortError') return null;
+            return { ...filter, count: null };
+          }
+        });
+
+        const settled = await Promise.allSettled(promises);
+        // If aborted, don't update state
+        if (controller.signal.aborted) return;
+
+        for (const result of settled) {
+          if (result.status === 'fulfilled' && result.value) {
+            results.push(result.value);
+          }
         }
-      });
 
-      const settled = await Promise.allSettled(promises);
-      for (const result of settled) {
-        if (result.status === 'fulfilled' && result.value) {
-          results.push(result.value);
-        }
-      }
+        // Sort by count descending (most results first)
+        results.sort((a, b) => (b.count || 0) - (a.count || 0));
+        setSuggestions(results);
+        setIsLoadingSuggestions(false);
+      };
 
-      // Sort by count descending (most results first)
-      results.sort((a, b) => (b.count || 0) - (a.count || 0));
-      setSuggestions(results);
-      setIsLoadingSuggestions(false);
+      fetchSuggestionCounts();
+    }, 500);
+
+    return () => {
+      clearTimeout(debounceTimer);
+      controller.abort();
     };
-
-    fetchSuggestionCounts();
   }, [filters.searchQuery, filters.tag, filters.category, filters.source, filters.urgency]);
 
   const handleRemoveFilter = (filterKey) => {

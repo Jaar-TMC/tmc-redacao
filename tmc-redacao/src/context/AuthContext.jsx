@@ -1,3 +1,4 @@
+/* eslint-disable react-refresh/only-export-components */
 import { createContext, useState, useCallback, useEffect, useMemo, useContext } from 'react';
 import PropTypes from 'prop-types';
 import { authLogin, authRefresh, authLogout, authGetMe, authUpdateMe, setAuthToken, clearAuthToken, getAuthToken } from '../services/auth';

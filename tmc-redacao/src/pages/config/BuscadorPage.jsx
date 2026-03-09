@@ -174,7 +174,7 @@ const BuscadorPage = () => {
       // Announce to screen readers
       const message = `${sourceName} ${newStatus ? 'ativada' : 'desativada'}`;
       announceToScreenReader(message);
-    } catch (err) {
+    } catch {
       // Revert on error
       setSources(sources.map(s => s.id === id ? { ...s, active: !newStatus } : s));
       setStatusMessage({
@@ -197,7 +197,7 @@ const BuscadorPage = () => {
 
     try {
       await updateSource(id, { frequency: newFrequency });
-    } catch (err) {
+    } catch {
       // Revert on error
       setSources(previousSources);
       setStatusMessage({
@@ -221,7 +221,7 @@ const BuscadorPage = () => {
           type: 'success',
           message: `Fonte "${sourceToDelete.name}" excluída com sucesso`
         });
-      } catch (err) {
+      } catch {
         setStatusMessage({
           isVisible: true,
           type: 'error',
@@ -327,7 +327,7 @@ const BuscadorPage = () => {
         });
       }
       handleCloseModal();
-    } catch (err) {
+    } catch {
       setStatusMessage({
         isVisible: true,
         type: 'error',

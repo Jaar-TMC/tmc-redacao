@@ -496,7 +496,7 @@ export const STRUCTURE_PATTERNS = {
   link: /<a[^>]*href=["']([^"']+)["'][^>]*>/gi,
   paragraph: /<p[^>]*>.*?<\/p>/gis,
   markdown: {
-    bulletList: /^[\*\-]\s+.+$/gm,
+    bulletList: /^[*-]\s+.+$/gm,
     numberedList: /^\d+\.\s+.+$/gm,
     blockquote: /^>\s+.+$/gm,
     image: /!\[.*?\]\(.*?\)/g,

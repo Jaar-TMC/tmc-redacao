@@ -59,7 +59,7 @@ export const extractPrimaryKeyword = (title = '', content = '', tags = []) => {
     .sort((a, b) => b[1] - a[1]);
 
   // Prefer words that appear at least once in content
-  const wordInContent = sortedWords.find(([_, count]) => count > 0);
+  const wordInContent = sortedWords.find(([, count]) => count > 0);
   if (wordInContent) {
     return wordInContent[0];
   }
@@ -457,7 +457,7 @@ const calculatePotentialImprovement = (recommendations) => {
  */
 export const generateSEOOptimizationPrompt = (
   seoAnalysis,
-  articleType = 'default',
+  _articleType = 'default',
   mode = 'quick',
   focusAreas = [],
   articleData = {}
@@ -617,7 +617,7 @@ const generateHighScorePrompt = (seoAnalysis, categories, primaryKeyword = '') =
       const topWeak = weakest[0];
       const category = categories[topWeak.key];
       const weakMetrics = Object.entries(category.metrics)
-        .filter(([_, m]) => m.status !== 'success')
+        .filter(([, m]) => m.status !== 'success')
         .filter(([metricKey]) => SEO_SCORING_RULES.aiOptimizableMetrics.includes(metricKey))
         .slice(0, 2);
 
@@ -749,7 +749,7 @@ const getActionItems = (categoryKey, metricKey, metric) => {
  * @param {Object} articleData - Optional article data { title, content, tags }
  * @returns {Object} - Summary with potential improvements including AI vs manual split
  */
-export const generateOptimizationSummary = (seoAnalysis, articleData = {}) => {
+export const generateOptimizationSummary = (seoAnalysis) => {
   if (!seoAnalysis) {
     return {
       potentialGain: 0,

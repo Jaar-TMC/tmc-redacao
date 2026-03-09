@@ -95,7 +95,6 @@ async function fetchApi(endpoint, options = {}) {
     if (!response.ok) {
       // On 401, try to refresh the token and retry once (skip for auth endpoints)
       if (response.status === 401 && !endpoint.startsWith('/auth/')) {
-        console.log('[fetchApi] 401 on', endpoint, '- attempting token refresh. Has refreshFn:', !!_refreshToken, 'Has token:', !!token);
         if (_refreshToken) {
           try {
             // Use singleton promise to avoid concurrent refresh calls
@@ -103,7 +102,6 @@ async function fetchApi(endpoint, options = {}) {
               _refreshPromise = _refreshToken().finally(() => { _refreshPromise = null; });
             }
             const newToken = await _refreshPromise;
-            console.log('[fetchApi] Refresh result:', newToken ? 'got new token' : 'no token returned');
             if (newToken) {
               // Retry the original request with the new token
               const retryHeaders = { ...headers, Authorization: `Bearer ${newToken}` };
@@ -116,10 +114,9 @@ async function fetchApi(endpoint, options = {}) {
                 }
                 return null;
               }
-              console.log('[fetchApi] Retry after refresh failed with status:', retryResponse.status);
             }
-          } catch (refreshErr) {
-            console.log('[fetchApi] Refresh error:', refreshErr);
+          } catch {
+            // Refresh failed silently -- fall through to _onUnauthorized
           }
         }
         if (_onUnauthorized) {
@@ -442,22 +439,36 @@ export async function editArticle({
   categoria = 'geral',
   tom = 'conversacional'
 }) {
-  return fetchApi('/edit-article', {
-    method: 'POST',
-    body: JSON.stringify({
-      current_article: {
-        title: currentArticle.title,
-        titulo_curto: currentArticle.tituloCurto || '',
-        linha_fina: currentArticle.linhaFina,
-        content: currentArticle.content,
-        tags: currentArticle.tags || []
-      },
-      instruction,
-      edit_scope: editScope,
-      categoria,
-      tom
-    })
-  });
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 120000);
+
+  try {
+    const response = await fetchApi('/edit-article', {
+      method: 'POST',
+      body: JSON.stringify({
+        current_article: {
+          title: currentArticle.title,
+          titulo_curto: currentArticle.tituloCurto || '',
+          linha_fina: currentArticle.linhaFina,
+          content: currentArticle.content,
+          tags: currentArticle.tags || []
+        },
+        instruction,
+        edit_scope: editScope,
+        categoria,
+        tom
+      }),
+      signal: controller.signal,
+    });
+    return response;
+  } catch (error) {
+    if (error.name === 'AbortError') {
+      throw new Error('A edição excedeu o tempo limite de 2 minutos. Tente novamente.');
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeoutId);
+  }
 }
 
 /**
@@ -487,10 +498,24 @@ export async function editArticle({
  * }>}
  */
 export async function mergeTopics(articles) {
-  return fetchApi('/merge-topics', {
-    method: 'POST',
-    body: JSON.stringify({ articles }),
-  });
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 120000);
+
+  try {
+    const response = await fetchApi('/merge-topics', {
+      method: 'POST',
+      body: JSON.stringify({ articles }),
+      signal: controller.signal,
+    });
+    return response;
+  } catch (error) {
+    if (error.name === 'AbortError') {
+      throw new Error('A fusão de tópicos excedeu o tempo limite de 2 minutos. Tente novamente.');
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeoutId);
+  }
 }
 
 // ============================================

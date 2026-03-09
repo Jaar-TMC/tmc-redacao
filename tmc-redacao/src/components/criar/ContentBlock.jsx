@@ -9,7 +9,7 @@ import PropTypes from 'prop-types';
  * Permite seleção, expansão e edição inline do conteúdo.
  */
 const ContentBlock = ({
-  id,
+  id: _id,
   title,
   timestamp,
   content,
@@ -35,10 +35,12 @@ const ContentBlock = ({
     }
   }, [editing, editContent]);
 
-  // Reset edit content when editing starts
+  // Reset edit content when editing starts or content changes while editing
+  // This syncs the local edit state with the parent-controlled content prop.
+  // setState here is intentional: editing is a controlled prop transition, not external state.
   useEffect(() => {
     if (editing) {
-      setEditContent(content);
+      setEditContent(content); // eslint-disable-line react-hooks/set-state-in-effect
     }
   }, [editing, content]);
 

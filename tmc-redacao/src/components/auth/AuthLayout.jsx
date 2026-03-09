@@ -69,6 +69,7 @@ function TypingEditor() {
     }
 
     if (phase === 'paused') {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- state machine transition for typing animation
       setPhase('fading');
     }
 
