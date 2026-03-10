@@ -181,8 +181,11 @@ async def transcribe_handler(req: func.HttpRequest) -> func.HttpResponse:
         return create_success_response(response)
 
     except Exception as e:
+        import traceback
+        tb = traceback.format_exc()
         logger.exception(f"Unexpected error in transcribe_handler: {e}")
         return create_error_response(
             "Erro interno ao processar transcrição.",
-            500
+            500,
+            details=f"{type(e).__name__}: {str(e)}\n{tb[-500:]}"
         )

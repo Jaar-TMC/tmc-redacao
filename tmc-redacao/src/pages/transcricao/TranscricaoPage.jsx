@@ -108,6 +108,12 @@ function TranscricaoPage() {
         return;
       }
 
+      // Log full error details for debugging
+      console.error('[Transcribe] Error:', err?.status, err?.data || err?.message);
+      if (err?.data?.details) {
+        console.error('[Transcribe] Server details:', err.data.details);
+      }
+
       // Map API error codes to user-friendly messages
       let errorMessage = 'Ocorreu um erro ao transcrever o vídeo. Tente novamente.';
       if (err?.status === 422) {

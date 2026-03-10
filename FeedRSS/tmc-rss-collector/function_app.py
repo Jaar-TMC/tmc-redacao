@@ -607,6 +607,51 @@ async def edit_article(req: func.HttpRequest) -> func.HttpResponse:
 
 
 # ========================================
+# HTTP TRIGGERS - TRANSCRIPTION DIAGNOSTIC (temporary)
+# ========================================
+
+@app.route(route="transcribe-diag", methods=["GET", "OPTIONS"])
+@with_cors
+async def transcribe_diag(req: func.HttpRequest) -> func.HttpResponse:
+    """GET /api/transcribe-diag - Diagnostic for transcription deps."""
+    import sys
+    checks = {"python": sys.version}
+    try:
+        import youtube_transcript_api
+        checks["youtube_transcript_api"] = "OK"
+        checks["yta_dir"] = [m for m in dir(youtube_transcript_api.YouTubeTranscriptApi) if not m.startswith("_")]
+    except Exception as e:
+        checks["youtube_transcript_api"] = f"FAIL: {e}"
+    try:
+        from services.youtube_service import YouTubeService
+        checks["youtube_service"] = "OK"
+        vid = YouTubeService.extract_video_id("https://www.youtube.com/watch?v=dQw4w9WgXcQ")
+        checks["extract_video_id"] = vid
+    except Exception as e:
+        checks["youtube_service"] = f"FAIL: {e}"
+    try:
+        from functions.transcription_api import transcribe_handler
+        checks["transcription_api"] = "OK"
+    except Exception as e:
+        checks["transcription_api"] = f"FAIL: {e}"
+    # Test actual YouTube calls
+    import asyncio
+    try:
+        meta = await YouTubeService.get_video_metadata("dQw4w9WgXcQ")
+        checks["metadata_fetch"] = f"OK: {meta.get('title','?')[:50]}"
+    except Exception as e:
+        checks["metadata_fetch"] = f"FAIL: {type(e).__name__}: {e}"
+    try:
+        caps = await YouTubeService.get_captions("dQw4w9WgXcQ", target_duration=60.0)
+        checks["caption_fetch"] = f"OK: {len(caps['segments'])} segments, lang={caps['language']}"
+    except Exception as e:
+        import traceback
+        checks["caption_fetch"] = f"FAIL: {type(e).__name__}: {e}"
+        checks["caption_traceback"] = traceback.format_exc()[-500:]
+    return func.HttpResponse(json.dumps(checks, indent=2, ensure_ascii=False), mimetype="application/json")
+
+
+# ========================================
 # HTTP TRIGGERS - TRANSCRIPTION API
 # ========================================
 
@@ -631,18 +676,31 @@ async def transcribe_video(req: func.HttpRequest) -> func.HttpResponse:
             "metadata": { language, total_segments, total_duration_seconds, caption_type }
         }
     """
-    from services.rate_limiter import RateLimiter
-    retry_after = RateLimiter.get().check("transcribe")
-    if retry_after is not None:
-        import json as _json
+    try:
+        from services.rate_limiter import RateLimiter
+        retry_after = RateLimiter.get().check("transcribe")
+        if retry_after is not None:
+            import json as _json
+            return func.HttpResponse(
+                _json.dumps({"error": "Rate limit exceeded", "retry_after_seconds": round(retry_after, 1)}),
+                status_code=429,
+                headers={"Retry-After": str(int(retry_after) + 1)},
+                mimetype="application/json",
+            )
+        from functions.transcription_api import transcribe_handler
+        return await transcribe_handler(req)
+    except Exception as e:
+        import traceback
+        tb = traceback.format_exc()
+        logger.exception(f"Unhandled error in transcribe_video wrapper: {e}")
         return func.HttpResponse(
-            _json.dumps({"error": "Rate limit exceeded", "retry_after_seconds": round(retry_after, 1)}),
-            status_code=429,
-            headers={"Retry-After": str(int(retry_after) + 1)},
+            json.dumps({
+                "error": "Erro interno no processamento.",
+                "details": f"WRAPPER: {type(e).__name__}: {str(e)}\n{tb[-500:]}"
+            }, ensure_ascii=False),
+            status_code=500,
             mimetype="application/json",
         )
-    from functions.transcription_api import transcribe_handler
-    return await transcribe_handler(req)
 
 
 # ========================================
