@@ -89,8 +89,22 @@ def _set_cached_enrichment(cache_key: str, enrichment):
 
 
 # Sensitive Topic Detection (2B)
+# NOTE: Patterns must be context-specific to avoid false positives.
+# Words like "menor", "criança", "adolescente" are common in Portuguese and
+# should only trigger when clearly about a minor as victim/subject.
 _SENSITIVE_TOPIC_PATTERNS = {
-    "menor_de_idade": [r"\bmenor(?:es)?\b", r"\bcriancas?\b", r"\badolescente\b", r"\b\d{1,2}\s*anos\s*de\s*idade\b"],
+    "menor_de_idade": [
+        r"\bmenor(?:es)?\s+de\s+idade\b",
+        r"\bmenor(?:es)?\s+(?:infrator|abandonad|desacompanhad|aprendiz)",
+        r"\bcrian[cç]as?\s+(?:abusad|violentad|agredid|desaparecid|abandonad|vitim|sequestrad|assassinad|morr|atropelad|ferida)",
+        r"\b(?:abuso|violencia|agressao|maus[\s-]?tratos|exploracao)\s+(?:de|contra|a)\s+(?:crian[cç]as?|adolescentes?|menores?)\b",
+        r"\badolescentes?\s+(?:abusad|violentad|agredid|desaparecid|abandonad|vitim|infrator|apreenid|assassinad|morr|atropelad|ferida)",
+        r"\b(?:1[0-7]|[1-9])\s*anos\s*de\s*idade\b",
+        r"\b(?:eca|estatuto\s+da\s+crian[cç]a)\b",
+        r"\btrabalho\s+infantil\b",
+        r"\bpedofil",
+        r"\bmenor(?:es)?\s+(?:vitim|abusad|violentad|agredid|desaparecid|sequestrad|assassinad|morr|atropelad|ferid)",
+    ],
     "suicidio": [r"\bsuicid", r"\btirou\s+(?:a\s+)?(?:propria\s+)?vida\b"],
     "violencia_sexual": [r"\bestupro\b", r"\babuso\s+sexual\b", r"\bassedio\s+sexual\b"],
 }

@@ -173,8 +173,63 @@ const RevisarPage = () => {
       };
     }
 
-    // No data available - will redirect below
-    return null;
+    // Fallback for non-array fonte types (transcription, link, tema, etc.)
+    // Use blocos assembled by TextoBasePage → getTextoBaseParaGeracao()
+    const textoBaseContent = getTextoBaseParaGeracao() || '';
+    if (!textoBaseContent) return null;
+
+    const wordCount = textoBaseContent.split(/\s+/).filter(Boolean).length;
+    const fonteLabel = fonte?.tipo === 'transcription' ? 'Transcrição de Vídeo'
+      : fonte?.tipo === 'link' ? 'Link da Web'
+      : fonte?.tipo === 'tema' ? 'Tema'
+      : 'Texto';
+    const fonteTitle = fonte?.tipo === 'transcription'
+      ? (fonte.dados?.video?.title || 'Vídeo do YouTube')
+      : (fonte.dados?.title || fonte.dados?.url || 'Texto-base');
+
+    return {
+      textoBase: {
+        type: fonteLabel,
+        title: fonteTitle,
+        blocks: textoBase?.blocos?.length || 1,
+        words: wordCount,
+        content: textoBaseContent.substring(0, 500) + (textoBaseContent.length > 500 ? '...' : '')
+      },
+      materiais: [
+        ...materiaisComplementares.links.map((l, i) => ({
+          id: `link-${i}`, type: 'link', title: l.url || l.title, words: l.words || 0, status: 'extracted'
+        })),
+        ...materiaisComplementares.pdfs.map((p, i) => ({
+          id: `pdf-${i}`, type: 'pdf', title: p.name || p.title, pages: p.pages, words: p.words || 0, status: 'extracted'
+        })),
+        ...materiaisComplementares.videos.map((v, i) => ({
+          id: `video-${i}`, type: 'video', title: v.title || v.url, words: v.words || 0, status: 'extracted'
+        }))
+      ],
+      configuracoes: {
+        categoria: CATEGORIA_NAMES[configuracoes.categoria] || configuracoes.categoria || 'Geral/Variedades',
+        tom: TOM_NAMES[configuracoes.tom] || configuracoes.tom,
+        modoOpinativo: configuracoes.modoOpinativo,
+        creditos: configuracoes.creditos || 'Não informado',
+        dataBase: configuracoes.data || new Date().toLocaleDateString('pt-BR'),
+        orientacaoLide: configuracoes.orientacaoLide || '',
+        citacoes: configuracoes.citacoes?.length || 0,
+        instrucoes: configuracoes.instrucoes || '',
+        tipoMateria: configuracoes.tipoMateria || ''
+      },
+      _raw: {
+        textoBaseContent,
+        categoria: configuracoes.categoria,
+        tom: configuracoes.tom,
+        modoOpinativo: configuracoes.modoOpinativo,
+        tipoMateria: configuracoes.tipoMateria,
+        citacoes: configuracoes.citacoes,
+        contexto: configuracoes.contexto,
+        creditos: configuracoes.creditos,
+        orientacaoLide: configuracoes.orientacaoLide,
+        tags: getSelectedTagsArray()
+      }
+    };
   }, [fonte, textoBase, configuracoes, materiaisComplementares, getSelectedTagsArray, getTextoBaseParaGeracao]);
 
   const toggleSection = useCallback((section, id = null) => {

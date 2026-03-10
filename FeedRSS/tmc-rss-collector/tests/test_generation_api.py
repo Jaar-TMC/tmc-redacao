@@ -990,12 +990,42 @@ class TestPublisherEnhancement:
 class TestSensitiveTopicDetection:
     """Tests for sensitive topic detection."""
 
-    def test_detect_menor(self):
-        """Detects menor de idade topics."""
+    def test_detect_menor_de_idade(self):
+        """Detects explicit menor de idade topics."""
         from functions.generation_api import _detect_sensitive_topics
-        instructions = _detect_sensitive_topics("O menor foi encontrado no local do acidente.")
+        instructions = _detect_sensitive_topics("O menor de idade foi encontrado no local do acidente.")
         assert len(instructions) == 1
         assert "ECA" in instructions[0]
+
+    def test_detect_menor_vitima(self):
+        """Detects menor as victim."""
+        from functions.generation_api import _detect_sensitive_topics
+        instructions = _detect_sensitive_topics("Menor vitima de violencia foi resgatado.")
+        assert len(instructions) == 1
+        assert "ECA" in instructions[0]
+
+    def test_detect_abuso_contra_crianca(self):
+        """Detects abuse against children."""
+        from functions.generation_api import _detect_sensitive_topics
+        instructions = _detect_sensitive_topics("Policia investiga caso de abuso contra criancas.")
+        assert len(instructions) == 1
+        assert "ECA" in instructions[0]
+
+    def test_no_false_positive_menor_as_lesser(self):
+        """Does NOT trigger on 'menor' meaning lesser/smaller (e.g. pena menor)."""
+        from functions.generation_api import _detect_sensitive_topics
+        instructions = _detect_sensitive_topics(
+            "O ministro decidiu manter o banqueiro preso. A defesa pediu pena menor."
+        )
+        assert len(instructions) == 0
+
+    def test_no_false_positive_crianca_generic(self):
+        """Does NOT trigger on generic 'crianca' without abuse/victim context."""
+        from functions.generation_api import _detect_sensitive_topics
+        instructions = _detect_sensitive_topics(
+            "O programa social atende criancas em todo o pais."
+        )
+        assert len(instructions) == 0
 
     def test_detect_suicidio(self):
         """Detects suicidio topics."""
@@ -1015,4 +1045,14 @@ class TestSensitiveTopicDetection:
         """Normal text has no sensitive topics."""
         from functions.generation_api import _detect_sensitive_topics
         instructions = _detect_sensitive_topics("O presidente sancionou a nova lei do programa social.")
+        assert len(instructions) == 0
+
+    def test_no_false_positive_banking_prison(self):
+        """Does NOT trigger on banking/prison articles without minor involvement."""
+        from functions.generation_api import _detect_sensitive_topics
+        instructions = _detect_sensitive_topics(
+            "O ministro do STF decidiu manter o dono do Banco Master preso na penitenciaria "
+            "federal de Brasilia. A pena menor foi descartada pelo juiz. O custodiado "
+            "permanece em menor risco no sistema federal."
+        )
         assert len(instructions) == 0

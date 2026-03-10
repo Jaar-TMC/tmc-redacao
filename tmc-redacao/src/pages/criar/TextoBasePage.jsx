@@ -145,22 +145,26 @@ const TextoBasePage = () => {
       const blocos = [];
 
       if (variantData.selectedSegments) {
-        // Variante de vídeo
-        variantData.selectedSegments.forEach((id, index) => {
+        // Variante de vídeo/transcrição — look up actual text from fonte
+        const transcriptionSegments = fonte?.dados?.transcription || [];
+        variantData.selectedSegments.forEach((id) => {
+          const segment = transcriptionSegments.find(s => s.id === id);
           blocos.push({
             id,
             type: 'transcription',
-            content: `Segmento ${index + 1}`, // Em produção, viria do mock/API
+            content: segment?.text || '',
             highlights: variantData.textHighlights?.[id] || []
           });
         });
       } else if (variantData.selectedTrechos) {
-        // Variante de transcrição (YouTube)
-        variantData.selectedTrechos.forEach((id, index) => {
+        // Variante de transcrição (YouTube) — edited text or original
+        const transcriptionSegments = fonte?.dados?.transcription || [];
+        variantData.selectedTrechos.forEach((id) => {
+          const segment = transcriptionSegments.find(s => s.id === id);
           blocos.push({
             id,
             type: 'transcription',
-            content: variantData.editedTexts?.[id] || `Trecho ${index + 1}`
+            content: variantData.editedTexts?.[id] || segment?.text || ''
           });
         });
       } else if (variantData.groups || variantData.exclusives || variantData.quotes) {

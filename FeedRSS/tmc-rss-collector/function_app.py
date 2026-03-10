@@ -84,7 +84,17 @@ def with_cors(handler):
             )
 
         # Call original handler and add CORS headers
-        response = await handler(req)
+        try:
+            response = await handler(req)
+        except Exception as e:
+            import traceback
+            tb = traceback.format_exc()
+            logger.exception(f"Unhandled error in {handler.__name__}: {e}")
+            error_body = json.dumps({
+                "error": "Erro interno.",
+                "details": f"CORS_WRAPPER[{handler.__name__}]: {type(e).__name__}: {str(e)}\n{tb[-500:]}"
+            }, ensure_ascii=False)
+            response = func.HttpResponse(error_body, status_code=500, mimetype="application/json")
         return add_cors_headers(response, origin)
 
     return wrapper
@@ -634,20 +644,42 @@ async def transcribe_diag(req: func.HttpRequest) -> func.HttpResponse:
         checks["transcription_api"] = "OK"
     except Exception as e:
         checks["transcription_api"] = f"FAIL: {e}"
-    # Test actual YouTube calls
+    # Test actual YouTube calls with user's video
+    test_vid = req.params.get("vid", "dQw4w9WgXcQ")
+    checks["test_video_id"] = test_vid
     import asyncio
     try:
-        meta = await YouTubeService.get_video_metadata("dQw4w9WgXcQ")
-        checks["metadata_fetch"] = f"OK: {meta.get('title','?')[:50]}"
+        meta = await YouTubeService.get_video_metadata(test_vid)
+        checks["metadata_fetch"] = f"OK: {meta.get('title','?')[:80]}"
     except Exception as e:
         checks["metadata_fetch"] = f"FAIL: {type(e).__name__}: {e}"
     try:
-        caps = await YouTubeService.get_captions("dQw4w9WgXcQ", target_duration=60.0)
-        checks["caption_fetch"] = f"OK: {len(caps['segments'])} segments, lang={caps['language']}"
+        caps = await YouTubeService.get_captions(test_vid, target_duration=60.0)
+        checks["caption_fetch"] = f"OK: {len(caps['segments'])} segments, lang={caps['language']}, type={caps['caption_type']}"
     except Exception as e:
         import traceback
         checks["caption_fetch"] = f"FAIL: {type(e).__name__}: {e}"
-        checks["caption_traceback"] = traceback.format_exc()[-500:]
+        checks["caption_traceback"] = traceback.format_exc()[-1000:]
+
+    # Test full handler with mock request
+    try:
+        from functions.transcription_api import transcribe_handler
+        mock_body = json.dumps({"url": f"https://www.youtube.com/watch?v={test_vid}"}).encode("utf-8")
+        mock_req = func.HttpRequest(
+            method="POST",
+            url="/api/transcribe",
+            headers={"Content-Type": "application/json"},
+            body=mock_body,
+        )
+        handler_response = await transcribe_handler(mock_req)
+        checks["handler_test"] = f"OK: status={handler_response.status_code}"
+        if handler_response.status_code != 200:
+            checks["handler_body"] = handler_response.get_body().decode("utf-8")[:1000]
+    except Exception as e:
+        import traceback
+        checks["handler_test"] = f"FAIL: {type(e).__name__}: {e}"
+        checks["handler_traceback"] = traceback.format_exc()[-1000:]
+
     return func.HttpResponse(json.dumps(checks, indent=2, ensure_ascii=False), mimetype="application/json")
 
 

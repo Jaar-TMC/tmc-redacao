@@ -138,6 +138,9 @@ async def transcribe_handler(req: func.HttpRequest) -> func.HttpResponse:
 
         logger.info(f"Video metadata fetched: {video_metadata.get('title', 'N/A')[:80]}")
 
+        # Note: contentDetails.caption from YouTube Data API is unreliable
+        # for auto-generated captions, so we always attempt the fetch.
+
         # Fetch captions
         try:
             captions_result = await YouTubeService.get_captions(
@@ -155,6 +158,17 @@ async def transcribe_handler(req: func.HttpRequest) -> func.HttpResponse:
         except VideoNotFoundError as e:
             logger.info(f"Video unavailable during caption fetch: {video_id}")
             return create_error_response(str(e), 404)
+        except TranscriptionServiceError as e:
+            error_msg = str(e)
+            logger.warning(f"Transcription service error for video {video_id}: {error_msg}")
+            # YouTube blocking/rate-limiting → 503 (retryable)
+            if "bloqueou" in error_msg or "limitou" in error_msg:
+                return create_error_response(
+                    error_msg, 503,
+                    details="O YouTube está temporariamente limitando as requisições. "
+                            "Tente novamente em alguns minutos."
+                )
+            return create_error_response(error_msg, 502)
 
         segments = captions_result["segments"]
         total_segments = len(segments)
@@ -187,5 +201,5 @@ async def transcribe_handler(req: func.HttpRequest) -> func.HttpResponse:
         return create_error_response(
             "Erro interno ao processar transcrição.",
             500,
-            details=f"{type(e).__name__}: {str(e)}\n{tb[-500:]}"
+            details=f"{type(e).__name__}: {str(e)}\n{tb[-1500:]}"
         )

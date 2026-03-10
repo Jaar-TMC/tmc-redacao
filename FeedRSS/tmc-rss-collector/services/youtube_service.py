@@ -1,18 +1,59 @@
 """
 YouTube Service - Fetches video metadata and captions from YouTube.
 
-Uses youtube-transcript-api for caption retrieval.
-No API key required. No audio processing.
+Caption retrieval strategy (tried in order):
+1. InnerTube Player API via googleapis.com (no proxy, no API key needed)
+2. youtube-transcript-api library (with proxy if configured)
+3. Timedtext endpoint fallback (bare HTTP, last resort)
+
+No audio processing.
 """
 
 import asyncio
 import logging
+import os
 import re
 from typing import Optional
 
 import httpx
 
 logger = logging.getLogger(__name__)
+
+# Proxy configuration (loaded once at module level)
+_YOUTUBE_PROXY_URL = os.environ.get("YOUTUBE_PROXY_URL", "")
+_WEBSHARE_PROXY_USER = os.environ.get("WEBSHARE_PROXY_USER", "")
+_WEBSHARE_PROXY_PASS = os.environ.get("WEBSHARE_PROXY_PASS", "")
+_YOUTUBE_API_KEY = os.environ.get("YOUTUBE_API_KEY", "")
+
+# InnerTube client configs (ANDROID is less blocked from datacenter IPs)
+_INNERTUBE_CLIENTS = [
+    {
+        "name": "ANDROID",
+        "context": {
+            "client": {
+                "clientName": "ANDROID",
+                "clientVersion": "20.10.38",
+            }
+        },
+        "user_agent": "com.google.android.youtube/20.10.38 (Linux; U; Android 14) gzip",
+        "api_key": "AIzaSyA8eiZmM1FaDVjRy-df2KTyQ_vz_yYM39w",
+    },
+    {
+        "name": "WEB",
+        "context": {
+            "client": {
+                "clientName": "WEB",
+                "clientVersion": "2.20250626.01.00",
+            }
+        },
+        "user_agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/131.0.0.0 Safari/537.36"
+        ),
+        "api_key": "AIzaSyAO_FJ2SlqU8Q4STEHLGCilw_Y9_11qcW8",
+    },
+]
 
 
 # ========================================
@@ -91,6 +132,14 @@ def _format_time(seconds: float) -> str:
     return f"{minutes:02d}:{secs:02d}"
 
 
+def _parse_iso_duration(iso_str: str) -> int:
+    """Parse ISO 8601 duration (PT1H2M3S) to total seconds."""
+    m = re.match(r'PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?', iso_str)
+    if not m:
+        return 0
+    return int(m.group(1) or 0) * 3600 + int(m.group(2) or 0) * 60 + int(m.group(3) or 0)
+
+
 class YouTubeService:
     """Service for fetching YouTube video metadata and captions."""
 
@@ -117,18 +166,79 @@ class YouTubeService:
     @staticmethod
     async def get_video_metadata(video_id: str) -> dict:
         """
-        Fetch video metadata from YouTube oembed endpoint.
+        Fetch video metadata. Tries YouTube Data API v3 first (reliable from
+        datacenter IPs via googleapis.com), falls back to oembed endpoint.
 
         Args:
             video_id: 11-character YouTube video ID.
 
         Returns:
             Dict with videoId, url, title, channel, thumbnail.
+            When using API: also includes duration_seconds, has_captions.
 
         Raises:
             VideoNotFoundError: If video does not exist or is private.
             TranscriptionServiceError: On unexpected HTTP errors.
         """
+        if _YOUTUBE_API_KEY:
+            try:
+                return await YouTubeService._get_metadata_via_api(video_id)
+            except VideoNotFoundError:
+                raise
+            except Exception as e:
+                logger.warning(f"YouTube Data API failed, falling back to oembed: {e}")
+        return await YouTubeService._get_metadata_via_oembed(video_id)
+
+    @staticmethod
+    async def _get_metadata_via_api(video_id: str) -> dict:
+        """Fetch video metadata via YouTube Data API v3 (requires YOUTUBE_API_KEY)."""
+        api_url = (
+            f"https://www.googleapis.com/youtube/v3/videos"
+            f"?part=snippet,contentDetails&id={video_id}&key={_YOUTUBE_API_KEY}"
+        )
+
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.get(api_url)
+
+        if response.status_code == 403:
+            raise TranscriptionServiceError("YouTube API quota exceeded or key invalid.")
+
+        if response.status_code != 200:
+            raise TranscriptionServiceError(
+                f"YouTube Data API returned status {response.status_code}"
+            )
+
+        data = response.json()
+        items = data.get("items", [])
+        if not items:
+            raise VideoNotFoundError("Vídeo não encontrado ou é privado.")
+
+        item = items[0]
+        snippet = item.get("snippet", {})
+        content_details = item.get("contentDetails", {})
+        thumbnails = snippet.get("thumbnails", {})
+
+        thumbnail_url = (
+            thumbnails.get("maxres", {}).get("url")
+            or thumbnails.get("high", {}).get("url")
+            or thumbnails.get("medium", {}).get("url")
+            or f"https://img.youtube.com/vi/{video_id}/maxresdefault.jpg"
+        )
+
+        return {
+            "videoId": video_id,
+            "url": f"https://www.youtube.com/watch?v={video_id}",
+            "title": snippet.get("title", ""),
+            "channel": snippet.get("channelTitle", ""),
+            "thumbnail": thumbnail_url,
+            "duration_seconds": _parse_iso_duration(
+                content_details.get("duration", "PT0S")
+            ),
+        }
+
+    @staticmethod
+    async def _get_metadata_via_oembed(video_id: str) -> dict:
+        """Fetch video metadata from YouTube oembed endpoint (fallback)."""
         oembed_url = (
             f"https://www.youtube.com/oembed"
             f"?url=https://www.youtube.com/watch?v={video_id}&format=json"
@@ -172,6 +282,24 @@ class YouTubeService:
             )
 
     @staticmethod
+    def _build_result(
+        raw_segments: list[dict],
+        language: str,
+        caption_type: str,
+        target_duration: float,
+    ) -> dict:
+        """Build the final caption result dict from raw segments."""
+        last = raw_segments[-1]
+        total_duration = last.get("start", 0) + last.get("duration", 0)
+        merged = YouTubeService._merge_segments(raw_segments, target_duration)
+        return {
+            "segments": merged,
+            "language": language,
+            "caption_type": caption_type,
+            "total_duration_seconds": int(total_duration),
+        }
+
+    @staticmethod
     async def get_captions(
         video_id: str,
         languages: Optional[list[str]] = None,
@@ -180,17 +308,18 @@ class YouTubeService:
         """
         Fetch and merge captions for a YouTube video.
 
+        Strategy (tried in order):
+        1. InnerTube Player API via googleapis.com (proxy-free, ANDROID+WEB)
+        2. youtube-transcript-api library (with proxy if configured)
+        3. Timedtext endpoint (last resort)
+
         Args:
             video_id: 11-character YouTube video ID.
             languages: Language priority list. Defaults to ["pt", "pt-BR", "en", "es"].
             target_duration: Target duration per merged segment in seconds.
 
         Returns:
-            Dict with:
-                - segments: list of merged segment dicts
-                - language: detected caption language
-                - caption_type: "manual" or "auto-generated"
-                - total_duration_seconds: total video duration
+            Dict with segments, language, caption_type, total_duration_seconds.
 
         Raises:
             CaptionsNotAvailableError: If no captions are available.
@@ -200,27 +329,75 @@ class YouTubeService:
         if languages is None:
             languages = DEFAULT_LANGUAGES
 
+        # ── Strategy 1: InnerTube Player API (proxy-free) ──
+        logger.info(f"Trying InnerTube API for {video_id}")
+        innertube_result = await YouTubeService._fetch_captions_innertube(
+            video_id, languages
+        )
+        if innertube_result is not None:
+            raw_segments, language, caption_type = innertube_result
+            if raw_segments:
+                return YouTubeService._build_result(
+                    raw_segments, language, caption_type, target_duration
+                )
+
+        logger.info(
+            f"InnerTube did not return captions for {video_id}, "
+            f"trying youtube-transcript-api"
+        )
+
+        # ── Strategy 2: youtube-transcript-api (with proxy if available) ──
         def _fetch_transcript():
             """Synchronous call to youtube_transcript_api v1.x (runs in thread)."""
             from youtube_transcript_api import YouTubeTranscriptApi
 
-            api = YouTubeTranscriptApi()
+            proxy_config = None
+            if _WEBSHARE_PROXY_USER and _WEBSHARE_PROXY_PASS:
+                from youtube_transcript_api.proxies import WebshareProxyConfig
+                proxy_config = WebshareProxyConfig(
+                    proxy_username=_WEBSHARE_PROXY_USER,
+                    proxy_password=_WEBSHARE_PROXY_PASS,
+                )
+                logger.debug("Using Webshare proxy for YouTube transcript")
+            elif _YOUTUBE_PROXY_URL:
+                from youtube_transcript_api.proxies import GenericProxyConfig
+                proxy_config = GenericProxyConfig(
+                    https_url=_YOUTUBE_PROXY_URL,
+                    http_url=_YOUTUBE_PROXY_URL,
+                )
+                logger.debug("Using generic proxy for YouTube transcript")
 
-            # First, try direct fetch with language priority (simplest path)
-            # This handles both manual and auto-generated captions
+            api = (
+                YouTubeTranscriptApi(proxy_config=proxy_config)
+                if proxy_config
+                else YouTubeTranscriptApi()
+            )
+
+            first_error = None
             try:
                 result = api.fetch(video_id, languages=languages)
                 raw = result.to_raw_data()
                 detected_language = result.language_code
-                caption_type = "auto-generated" if result.is_generated else "manual"
+                caption_type = (
+                    "auto-generated" if result.is_generated else "manual"
+                )
                 return raw, detected_language, caption_type
-            except Exception:
-                pass
+            except Exception as e:
+                first_error = e
+                logger.debug(
+                    f"api.fetch failed for {video_id}: "
+                    f"{type(e).__name__}: {e}"
+                )
 
-            # Fallback: list available transcripts and pick best match
-            transcript_list = api.list(video_id)
+            try:
+                transcript_list = api.list(video_id)
+            except Exception as e:
+                logger.warning(
+                    f"api.list also failed for {video_id}: "
+                    f"{type(e).__name__}: {e}"
+                )
+                raise first_error or e
 
-            # Try manual transcripts first, then auto-generated
             for find_fn, c_type in [
                 (transcript_list.find_manually_created_transcript, "manual"),
                 (transcript_list.find_generated_transcript, "auto-generated"),
@@ -234,40 +411,124 @@ class YouTubeService:
                     except Exception:
                         pass
 
-            # Nothing found
             raise Exception("NoTranscriptFound")
 
         try:
-            raw_segments, language, caption_type = await asyncio.to_thread(_fetch_transcript)
+            raw_segments, language, caption_type = await asyncio.to_thread(
+                _fetch_transcript
+            )
         except Exception as e:
             error_type = type(e).__name__
             error_msg = str(e)
+            error_full = f"{error_type}: {error_msg}"
 
-            if "TranscriptsDisabled" in error_type:
+            # Definitive errors — no point trying timedtext fallback
+            if (
+                "TranscriptsDisabled" in error_type
+                or "TranscriptsDisabled" in error_msg
+            ):
                 raise CaptionsNotAvailableError(
                     "Este vídeo não possui legendas disponíveis."
                 )
-            elif "NoTranscriptFound" in error_type:
+            elif (
+                "NoTranscriptFound" in error_type
+                or "NoTranscriptFound" in error_msg
+            ):
                 raise CaptionsNotAvailableError(
-                    "Não foram encontradas legendas nos idiomas suportados (pt, en, es)."
+                    "Não foram encontradas legendas nos idiomas suportados "
+                    "(pt, en, es)."
                 )
-            elif "VideoUnavailable" in error_type:
+            elif (
+                "VideoUnavailable" in error_type
+                or "VideoUnavailable" in error_msg
+            ):
                 raise VideoNotFoundError(
                     "Vídeo não encontrado ou é privado."
                 )
-            elif "CouldNotRetrieveTranscript" in error_type:
-                # This can happen for disabled subtitles or other issues
-                if "disabled" in error_msg.lower() or "subtitles" in error_msg.lower():
+            elif (
+                "InvalidVideoId" in error_type
+                or "InvalidVideoId" in error_msg
+            ):
+                raise VideoNotFoundError("ID de vídeo inválido.")
+            elif "AgeRestricted" in error_type or "age" in error_msg.lower():
+                raise CaptionsNotAvailableError(
+                    "Este vídeo possui restrição de idade e não pode ser "
+                    "transcrito."
+                )
+            elif (
+                "CouldNotRetrieveTranscript" in error_type
+                or "CouldNotRetrieveTranscript" in error_msg
+            ):
+                if (
+                    "disabled" in error_msg.lower()
+                    or "subtitles" in error_msg.lower()
+                ):
                     raise CaptionsNotAvailableError(
                         "Este vídeo não possui legendas disponíveis."
                     )
                 raise CaptionsNotAvailableError(
                     "Não foi possível obter as legendas deste vídeo."
                 )
+
+            # Transient/blocking errors — try timedtext fallback
+            if (
+                "RequestBlocked" in error_type
+                or "RequestBlocked" in error_msg
+            ):
+                logger.warning(
+                    f"youtube-transcript-api blocked for {video_id}, "
+                    f"trying timedtext fallback"
+                )
+            elif (
+                "TooManyRequests" in error_type
+                or "TooManyRequests" in error_msg
+            ):
+                logger.warning(
+                    f"YouTube rate-limited for {video_id}, "
+                    f"trying timedtext fallback"
+                )
+            elif "FailedToCreateConsentCookie" in error_type:
+                logger.warning(
+                    f"Consent cookie issue for {video_id}, "
+                    f"trying timedtext fallback"
+                )
             else:
-                logger.exception(f"Erro ao buscar legendas do vídeo {video_id}: {e}")
+                logger.warning(
+                    f"youtube-transcript-api error for {video_id}: "
+                    f"{error_full}, trying timedtext fallback"
+                )
+
+            # ── Strategy 3: Timedtext endpoint (last resort) ──
+            timedtext_result = await YouTubeService._fetch_captions_timedtext(
+                video_id, languages
+            )
+            if timedtext_result is not None:
+                raw_fb, lang_fb, type_fb = timedtext_result
+                if raw_fb:
+                    return YouTubeService._build_result(
+                        raw_fb, lang_fb, type_fb, target_duration
+                    )
+
+            # All strategies exhausted
+            if (
+                "RequestBlocked" in error_type
+                or "RequestBlocked" in error_msg
+            ):
                 raise TranscriptionServiceError(
-                    "Erro ao buscar legendas do YouTube."
+                    "YouTube bloqueou a requisição de legendas. "
+                    "Tente novamente em alguns minutos."
+                )
+            elif (
+                "TooManyRequests" in error_type
+                or "TooManyRequests" in error_msg
+            ):
+                raise TranscriptionServiceError(
+                    "YouTube limitou as requisições. "
+                    "Tente novamente em alguns minutos."
+                )
+            else:
+                raise TranscriptionServiceError(
+                    f"Erro ao buscar legendas do YouTube. ({error_type})"
                 )
 
         if not raw_segments:
@@ -275,19 +536,230 @@ class YouTubeService:
                 "Este vídeo não possui legendas disponíveis."
             )
 
-        # Calculate total duration from last segment
-        last = raw_segments[-1]
-        total_duration = last.get("start", 0) + last.get("duration", 0)
+        return YouTubeService._build_result(
+            raw_segments, language, caption_type, target_duration
+        )
 
-        # Merge segments
-        merged = YouTubeService._merge_segments(raw_segments, target_duration)
+    @staticmethod
+    def _parse_json3_events(events: list[dict]) -> list[dict]:
+        """Parse JSON3 caption events into normalized segments."""
+        segments = []
+        for event in events:
+            segs = event.get("segs")
+            if not segs:
+                continue
+            text = "".join(s.get("utf8", "") for s in segs).strip()
+            if not text or text == "\n":
+                continue
+            segments.append({
+                "text": text,
+                "start": event.get("tStartMs", 0) / 1000.0,
+                "duration": event.get("dDurationMs", 0) / 1000.0,
+            })
+        return segments
 
-        return {
-            "segments": merged,
-            "language": language,
-            "caption_type": caption_type,
-            "total_duration_seconds": int(total_duration),
-        }
+    @staticmethod
+    async def _fetch_captions_innertube(
+        video_id: str,
+        languages: list[str],
+    ) -> tuple[list[dict], str, str] | None:
+        """
+        Fetch captions via YouTube InnerTube Player API (googleapis.com).
+
+        Uses the InnerTube `/player` endpoint which returns caption track URLs
+        with embedded auth tokens. The googleapis.com domain is NOT blocked
+        from datacenter IPs. Tries ANDROID client first, then WEB.
+
+        Returns (raw_segments, language, caption_type) or None on failure.
+        """
+        for client_cfg in _INNERTUBE_CLIENTS:
+            try:
+                player_url = (
+                    f"https://youtubei.googleapis.com/youtubei/v1/player"
+                    f"?key={client_cfg['api_key']}&prettyPrint=false"
+                )
+                player_body = {
+                    "context": client_cfg["context"],
+                    "videoId": video_id,
+                }
+                headers = {
+                    "Content-Type": "application/json",
+                    "User-Agent": client_cfg["user_agent"],
+                }
+
+                async with httpx.AsyncClient(timeout=15.0) as http:
+                    resp = await http.post(
+                        player_url, json=player_body, headers=headers
+                    )
+
+                if resp.status_code != 200:
+                    logger.debug(
+                        f"InnerTube player ({client_cfg['name']}) returned "
+                        f"{resp.status_code} for {video_id}"
+                    )
+                    continue
+
+                player_data = resp.json()
+
+                # Check for playability errors
+                status = player_data.get("playabilityStatus", {})
+                if status.get("status") == "ERROR":
+                    logger.debug(
+                        f"InnerTube playability error for {video_id}: "
+                        f"{status.get('reason', 'unknown')}"
+                    )
+                    continue
+
+                # Extract caption tracks
+                captions = player_data.get("captions", {})
+                renderer = captions.get("playerCaptionsTracklistRenderer", {})
+                caption_tracks = renderer.get("captionTracks", [])
+
+                if not caption_tracks:
+                    logger.debug(
+                        f"InnerTube ({client_cfg['name']}): no caption tracks "
+                        f"for {video_id}"
+                    )
+                    continue
+
+                # Find best matching track by language priority
+                selected_track = None
+                selected_lang = None
+                selected_type = "manual"
+
+                for lang in languages:
+                    # Prefer manual captions over auto-generated
+                    for track in caption_tracks:
+                        lang_code = track.get("languageCode", "")
+                        if lang_code == lang or lang_code.startswith(f"{lang}-"):
+                            if track.get("kind") != "asr":
+                                selected_track = track
+                                selected_lang = lang_code
+                                selected_type = "manual"
+                                break
+                    if selected_track:
+                        break
+                    # Then try auto-generated
+                    for track in caption_tracks:
+                        lang_code = track.get("languageCode", "")
+                        if lang_code == lang or lang_code.startswith(f"{lang}-"):
+                            selected_track = track
+                            selected_lang = lang_code
+                            selected_type = (
+                                "auto-generated"
+                                if track.get("kind") == "asr"
+                                else "manual"
+                            )
+                            break
+                    if selected_track:
+                        break
+
+                if not selected_track:
+                    logger.debug(
+                        f"InnerTube ({client_cfg['name']}): no matching "
+                        f"language for {video_id}, available: "
+                        f"{[t.get('languageCode') for t in caption_tracks]}"
+                    )
+                    continue
+
+                # Fetch caption content from authenticated baseUrl
+                base_url = selected_track["baseUrl"]
+                subtitle_url = f"{base_url}&fmt=json3"
+
+                async with httpx.AsyncClient(timeout=15.0) as http:
+                    sub_resp = await http.get(
+                        subtitle_url,
+                        headers={"User-Agent": client_cfg["user_agent"]},
+                    )
+
+                if sub_resp.status_code != 200:
+                    logger.debug(
+                        f"InnerTube caption content fetch returned "
+                        f"{sub_resp.status_code} for {video_id}"
+                    )
+                    continue
+
+                sub_data = sub_resp.json()
+                events = sub_data.get("events", [])
+                segments = YouTubeService._parse_json3_events(events)
+
+                if not segments:
+                    logger.debug(
+                        f"InnerTube ({client_cfg['name']}): empty segments "
+                        f"after parse for {video_id}"
+                    )
+                    continue
+
+                logger.info(
+                    f"InnerTube ({client_cfg['name']}) captions succeeded for "
+                    f"{video_id}: lang={selected_lang}, type={selected_type}, "
+                    f"{len(segments)} raw segments"
+                )
+                return segments, selected_lang, selected_type
+
+            except Exception as e:
+                logger.debug(
+                    f"InnerTube ({client_cfg['name']}) failed for "
+                    f"{video_id}: {type(e).__name__}: {e}"
+                )
+                continue
+
+        return None
+
+    @staticmethod
+    async def _fetch_captions_timedtext(
+        video_id: str,
+        languages: list[str],
+    ) -> tuple[list[dict], str, str] | None:
+        """
+        Last-resort fallback: fetch captions via YouTube's public timedtext
+        endpoint. Uses configured proxy if available. Returns (raw_segments,
+        language, caption_type) or None if all attempts fail.
+        """
+        proxy_url = _YOUTUBE_PROXY_URL if _YOUTUBE_PROXY_URL else None
+        transport = httpx.AsyncHTTPTransport(proxy=proxy_url) if proxy_url else None
+
+        try:
+            async with httpx.AsyncClient(
+                timeout=15.0,
+                transport=transport,
+                headers={
+                    "User-Agent": (
+                        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                        "AppleWebKit/537.36 (KHTML, like Gecko) "
+                        "Chrome/131.0.0.0 Safari/537.36"
+                    ),
+                    "Accept-Language": "pt-BR,pt;q=0.9,en;q=0.8",
+                },
+            ) as client:
+                for lang in languages:
+                    for kind, caption_type in [("", "manual"), ("asr", "auto-generated")]:
+                        params = {"v": video_id, "lang": lang, "fmt": "json3"}
+                        if kind:
+                            params["kind"] = kind
+
+                        url = "https://www.youtube.com/api/timedtext"
+                        resp = await client.get(url, params=params)
+
+                        if resp.status_code != 200:
+                            continue
+
+                        data = resp.json()
+                        events = data.get("events", [])
+                        segments = YouTubeService._parse_json3_events(events)
+
+                        if segments:
+                            logger.info(
+                                f"Timedtext fallback succeeded for {video_id}: "
+                                f"lang={lang}, type={caption_type}, "
+                                f"{len(segments)} raw segments"
+                            )
+                            return segments, lang, caption_type
+
+        except Exception as e:
+            logger.debug(f"Timedtext fallback failed for {video_id}: {e}")
+
+        return None
 
     @staticmethod
     def _merge_segments(
