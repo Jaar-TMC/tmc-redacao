@@ -95,6 +95,9 @@ def is_account_locked(locked_until: Optional[datetime]) -> bool:
     if not locked_until:
         return False
     now = datetime.now(timezone.utc)
+    # pymssql returns tz-naive datetimes from SQL Server; treat as UTC
+    if locked_until.tzinfo is None:
+        locked_until = locked_until.replace(tzinfo=timezone.utc)
     return now < locked_until
 
 

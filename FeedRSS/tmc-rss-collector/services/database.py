@@ -345,9 +345,9 @@ class DatabaseService:
         needs_scores_join = False
 
         if classification and classification in ('A', 'B', 'C'):
-            conditions.append("sc.classification = %s")
+            conditions.append("a.classification = %s")
             params.append(classification)
-            needs_scores_join = True
+            # No longer needs scores JOIN - classification is denormalized
 
         if category:
             conditions.append("a.category = %s")
@@ -424,32 +424,24 @@ class DatabaseService:
         limit = min(limit, 100)
         offset = (page - 1) * limit
 
-        where_clause, params, needs_scores_join = self._build_article_filters(
+        where_clause, params, _needs_scores_join = self._build_article_filters(
             category=category, source_id=source_id, period=period,
             search=search, tag=tag, classification=classification
         )
 
-        scores_join = "LEFT JOIN article_scores sc ON sc.article_id = a.id" if needs_scores_join else ""
-
-        # Combined query: data + count in single round-trip
+        # Single query with COUNT(*) OVER() - replaces separate count query
+        # No scores JOIN needed: classification filter uses a.classification (denormalized)
         query = f"""
             SELECT a.id, a.source_id, a.title, a.content, a.preview, a.url,
                    a.image_url, a.author, a.category, a.tags, a.published_at,
                    a.collected_at, a.hash,
-                   s.name as source_name, s.url as source_url, s.favicon_url
+                   s.name as source_name, s.url as source_url, s.favicon_url,
+                   COUNT(*) OVER() as total_count
             FROM collected_articles a
             JOIN sources s ON a.source_id = s.id
-            {scores_join}
             {where_clause}
             ORDER BY a.published_at DESC
             OFFSET %s ROWS FETCH NEXT %s ROWS ONLY
-        """
-
-        count_query = f"""
-            SELECT COUNT(*) FROM collected_articles a
-            JOIN sources s ON a.source_id = s.id
-            {scores_join}
-            {where_clause}
         """
 
         logger.info(f"[get_articles] search={search}, where_clause={where_clause}")
@@ -457,15 +449,16 @@ class DatabaseService:
         with self.get_connection() as conn:
             cursor = conn.cursor()
 
-            cursor.execute(count_query, tuple(params))
-            total = cursor.fetchone()[0]
-
             cursor.execute(query, tuple(params) + (offset, limit))
             rows = cursor.fetchall()
 
+            # Extract total from window function (last column of first row)
+            total = rows[0][-1] if rows else 0
+
             logger.info(f"[get_articles] total={total}, rows={len(rows)}")
 
-            articles = [self._row_to_article(row) for row in rows]
+            # Exclude the total_count column from row mapping (slice off last col)
+            articles = [self._row_to_article(row[:-1]) for row in rows]
 
         return articles, total
 
@@ -487,7 +480,7 @@ class DatabaseService:
         limit = min(limit, 100)
         offset = (page - 1) * limit
 
-        where_clause, params, needs_scores_join = self._build_article_filters(
+        where_clause, params, _needs_scores_join = self._build_article_filters(
             category=category, source_id=source_id, period=period,
             search=search, tag=tag, classification=classification
         )
@@ -495,23 +488,16 @@ class DatabaseService:
         # Build urgency WHERE: same content filters WITHOUT time restriction.
         # The CASE expressions handle time bucketing (1h, 3h, 8h),
         # and COUNT(*) gives the true "all" total for the "Todas" chip.
-        urgency_where, urgency_params, urgency_needs_scores_join = self._build_article_filters(
+        urgency_where, urgency_params, _urgency_needs_scores = self._build_article_filters(
             category=category, source_id=source_id, period=None,
             search=search, tag=tag, classification=classification
         )
 
         logger.info(f"[get_articles_with_urgency] search={search}, order_by={order_by}")
 
-        # When ordering by score, the count query also needs the scores join for consistency
+        # Dynamic ORDER BY - score sorts by denormalized total_score (no JOIN needed)
         if order_by == 'score':
-            needs_scores_join = True
-
-        scores_join = "LEFT JOIN article_scores sc ON sc.article_id = a.id" if needs_scores_join else ""
-        urgency_scores_join = "LEFT JOIN article_scores sc ON sc.article_id = a.id" if urgency_needs_scores_join else ""
-
-        # Dynamic ORDER BY - score sorts by total_score DESC, NULLs treated as -1 so they sort last
-        if order_by == 'score':
-            order_clause = "ORDER BY ISNULL(sc.total_score, -1) DESC, a.published_at DESC"
+            order_clause = "ORDER BY ISNULL(a.total_score, -1) DESC, a.published_at DESC"
         else:
             order_clause = "ORDER BY a.published_at DESC"
 
@@ -521,24 +507,17 @@ class DatabaseService:
         with self.get_connection() as conn:
             cursor = conn.cursor()
 
-            # 1. Count total (reuses same connection)
-            count_query = f"""
-                SELECT COUNT(*) FROM collected_articles a
-                JOIN sources s ON a.source_id = s.id
-                {scores_join}
-                {where_clause}
-            """
-            cursor.execute(count_query, tuple(params))
-            total = cursor.fetchone()[0]
-
-            # 2. Get page of articles (always joins article_scores for score columns)
+            # 1. Main query with COUNT(*) OVER() - replaces both count + article queries.
+            # LEFT JOIN article_scores kept only for detail columns (score_inesperado etc.).
+            # WHERE and ORDER BY use denormalized a.total_score / a.classification (no JOIN needed).
             select_cols = """
                 SELECT a.id, a.source_id, a.title, a.content, a.preview, a.url,
                        a.image_url, a.author, a.category, a.tags, a.published_at,
                        a.collected_at, a.hash,
                        s.name as source_name, s.url as source_url, s.favicon_url,
-                       sc.total_score, sc.classification,
-                       sc.score_inesperado, sc.score_impacto, sc.score_busca_agora, sc.score_conversa
+                       a.total_score, a.classification,
+                       sc.score_inesperado, sc.score_impacto, sc.score_busca_agora, sc.score_conversa,
+                       COUNT(*) OVER() as total_count
                 FROM collected_articles a
                 JOIN sources s ON a.source_id = s.id
                 LEFT JOIN article_scores sc ON sc.article_id = a.id
@@ -564,9 +543,14 @@ class DatabaseService:
                         raise e
                 else:
                     raise
-            articles = [self._row_to_article(row) for row in rows]
 
-            # 3. Urgency counts (single scan with CASE)
+            # Extract total from window function (last column of first row)
+            total = rows[0][-1] if rows else 0
+
+            # Exclude the total_count column from row mapping (slice off last col)
+            articles = [self._row_to_article(row[:-1]) for row in rows]
+
+            # 2. Urgency counts - no scores JOIN needed (classification is denormalized)
             urgency_query = f"""
                 SELECT
                     SUM(CASE WHEN a.published_at >= DATEADD(hour, -1, GETUTCDATE()) THEN 1 ELSE 0 END),
@@ -575,7 +559,6 @@ class DatabaseService:
                     COUNT(*)
                 FROM collected_articles a
                 JOIN sources s ON a.source_id = s.id
-                {urgency_scores_join}
                 {urgency_where}
             """
             cursor.execute(urgency_query, tuple(urgency_params))
@@ -643,7 +626,7 @@ class DatabaseService:
                    a.image_url, a.author, a.category, a.tags, a.published_at,
                    a.collected_at, a.hash,
                    s.name as source_name, s.url as source_url, s.favicon_url,
-                   sc.total_score, sc.classification,
+                   a.total_score, a.classification,
                    sc.score_inesperado, sc.score_impacto, sc.score_busca_agora, sc.score_conversa
             FROM collected_articles a
             JOIN sources s ON a.source_id = s.id
@@ -1060,13 +1043,12 @@ class DatabaseService:
         """
         conditions = []
         params = []
-        needs_scores_join = False
 
         # Build base filter conditions (reusing logic from _build_article_filters)
+        # classification is denormalized on collected_articles - no scores JOIN needed
         if classification and classification in ('A', 'B', 'C'):
-            conditions.append("sc.classification = %s")
+            conditions.append("a.classification = %s")
             params.append(classification)
-            needs_scores_join = True
         if category:
             conditions.append("a.category = %s")
             params.append(category)
@@ -1091,9 +1073,6 @@ class DatabaseService:
                 pass
 
         where_extra = ("AND " + " AND ".join(conditions)) if conditions else ""
-        scores_join = ""
-        if needs_scores_join:
-            scores_join = "LEFT JOIN article_scores sc ON a.id = sc.article_id"
 
         query = f"""
             WITH ArticleTags AS (
@@ -1102,7 +1081,6 @@ class DatabaseService:
                     LOWER(LTRIM(RTRIM(t.value))) as tag
                 FROM collected_articles a
                 JOIN sources s ON a.source_id = s.id
-                {scores_join}
                 CROSS APPLY OPENJSON(a.tags) t
                 WHERE 1=1 {where_extra}
             ),
@@ -2282,6 +2260,19 @@ class DatabaseService:
                     classification,
                     scored_by
                 ))
+
+                # Sync denormalized score columns in collected_articles
+                total_score = scores.get('total_score') if isinstance(scores, dict) else None
+                try:
+                    cursor.execute(
+                        """UPDATE collected_articles
+                           SET total_score = %s, classification = %s
+                           WHERE id = %s""",
+                        (total_score, classification, str(article_id))
+                    )
+                except Exception as e:
+                    logger.warning(f"Failed to sync denormalized score for {article_id}: {e}")
+
                 conn.commit()
                 return True
         except Exception as e:

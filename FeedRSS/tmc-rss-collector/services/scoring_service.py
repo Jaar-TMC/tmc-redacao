@@ -711,6 +711,18 @@ class ScoringService:
                     logger.error(f"Error saving score for article {score.article_id}: {e}")
                     continue
 
+            # Sync denormalized score columns in collected_articles
+            for score in scores:
+                try:
+                    cursor.execute(
+                        """UPDATE collected_articles
+                           SET total_score = %s, classification = %s
+                           WHERE id = %s""",
+                        (score.total_score, score.classification, str(score.article_id))
+                    )
+                except Exception as e:
+                    logger.warning(f"Failed to sync denormalized score for {score.article_id}: {e}")
+
             conn.commit()
 
         return saved

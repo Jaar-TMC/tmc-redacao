@@ -41,6 +41,7 @@ async def list_articles_handler(req: func.HttpRequest) -> func.HttpResponse:
         tag = req.params.get('tag')
         classification = req.params.get('classification')  # A, B, or C
         order_by = req.params.get('order_by')  # 'score' or 'newest' (default)
+        skip_facets = req.params.get('skip_facets', '').lower() == 'true'
 
         # Parse max_hours for urgency filter (1-24)
         max_hours = req.params.get('max_hours')
@@ -77,56 +78,61 @@ async def list_articles_handler(req: func.HttpRequest) -> func.HttpResponse:
         pages = ceil(total / limit) if total > 0 else 1
 
         # Compute facets for filter dropdowns (avoids separate API calls)
+        # Skip facet computation when client signals it doesn't need updated facets
+        # (e.g., pagination-only requests where filters haven't changed)
         facets = None
-        try:
-            # Category counts (contextual: exclude category from own filters)
-            cat_kwargs = {}
-            if tag:
-                cat_kwargs['tag'] = tag
-            if source:
-                cat_kwargs['source_id'] = source
-            if period:
-                cat_kwargs['period'] = period
-            if search:
-                cat_kwargs['search'] = search
-            if classification:
-                cat_kwargs['classification'] = classification
+        if skip_facets:
+            logger.info("[list_articles] Skipping facet computation (skip_facets=true)")
+        else:
+            try:
+                # Category counts (contextual: exclude category from own filters)
+                cat_kwargs = {}
+                if tag:
+                    cat_kwargs['tag'] = tag
+                if source:
+                    cat_kwargs['source_id'] = source
+                if period:
+                    cat_kwargs['period'] = period
+                if search:
+                    cat_kwargs['search'] = search
+                if classification:
+                    cat_kwargs['classification'] = classification
 
-            has_cat_filters = any(cat_kwargs.values())
-            if has_cat_filters:
-                cat_list = db.get_categories_filtered(**cat_kwargs)
-            else:
-                stats = db.get_collection_stats()
-                cat_list = [{"name": n, "count": c} for n, c in stats.get('by_category', {}).items()]
-            cat_list.sort(key=lambda x: x['count'], reverse=True)
+                has_cat_filters = any(cat_kwargs.values())
+                if has_cat_filters:
+                    cat_list = db.get_categories_filtered(**cat_kwargs)
+                else:
+                    stats = db.get_collection_stats()
+                    cat_list = [{"name": n, "count": c} for n, c in stats.get('by_category', {}).items()]
+                cat_list.sort(key=lambda x: x['count'], reverse=True)
 
-            # Tag counts (contextual: exclude tag from own filters)
-            tag_kwargs = {'limit': 100}
-            if category:
-                tag_kwargs['category'] = category
-            if source:
-                tag_kwargs['source_id'] = source
-            if period:
-                tag_kwargs['period'] = period
-            if search:
-                tag_kwargs['search'] = search
-            if classification:
-                tag_kwargs['classification'] = classification
+                # Tag counts (contextual: exclude tag from own filters)
+                tag_kwargs = {'limit': 100}
+                if category:
+                    tag_kwargs['category'] = category
+                if source:
+                    tag_kwargs['source_id'] = source
+                if period:
+                    tag_kwargs['period'] = period
+                if search:
+                    tag_kwargs['search'] = search
+                if classification:
+                    tag_kwargs['classification'] = classification
 
-            has_tag_filters = any(v for k, v in tag_kwargs.items() if k != 'limit')
-            if has_tag_filters:
-                tag_list = db.get_all_tags_filtered(**tag_kwargs)
-            else:
-                tag_list = db.get_all_tags(limit=100)
+                has_tag_filters = any(v for k, v in tag_kwargs.items() if k != 'limit')
+                if has_tag_filters:
+                    tag_list = db.get_all_tags_filtered(**tag_kwargs)
+                else:
+                    tag_list = db.get_all_tags(limit=100)
 
-            tag_items = [{"id": i + 1, "tag": t['tag'], "theme": t['theme'], "count": t['count']} for i, t in enumerate(tag_list)]
+                tag_items = [{"id": i + 1, "tag": t['tag'], "theme": t['theme'], "count": t['count']} for i, t in enumerate(tag_list)]
 
-            facets = {
-                "categories": cat_list,
-                "tags": tag_items
-            }
-        except Exception as e:
-            logger.warning(f"[list_articles] Failed to compute facets: {e}")
+                facets = {
+                    "categories": cat_list,
+                    "tags": tag_items
+                }
+            except Exception as e:
+                logger.warning(f"[list_articles] Failed to compute facets: {e}")
 
         # Converter para formato frontend
         response = {

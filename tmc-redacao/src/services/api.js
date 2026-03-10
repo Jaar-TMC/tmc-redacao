@@ -210,6 +210,7 @@ export async function getArticles(params = {}, options = {}) {
   if (params.max_hours) queryParams.append('max_hours', params.max_hours.toString());
   if (params.classification) queryParams.append('classification', params.classification);
   if (params.order_by) queryParams.append('order_by', params.order_by);
+  if (params.skip_facets) queryParams.append('skip_facets', 'true');
 
   const queryString = queryParams.toString();
   const endpoint = `/articles${queryString ? `?${queryString}` : ''}`;

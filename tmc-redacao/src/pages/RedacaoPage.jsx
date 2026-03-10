@@ -32,6 +32,7 @@ const ITEMS_PER_PAGE = 20;
 const buildArticleParams = (filters, page) => ({
   limit: ITEMS_PER_PAGE,
   page,
+  ...(page > 1 && { skip_facets: true }),
   ...(filters.searchQuery && { search: filters.searchQuery }),
   ...(filters.tag && { tag: filters.tag }),
   ...(filters.category && { category: filters.category }),

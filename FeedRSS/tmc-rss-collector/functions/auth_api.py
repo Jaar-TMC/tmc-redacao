@@ -94,7 +94,10 @@ async def login_handler(req: func.HttpRequest) -> func.HttpResponse:
         # Verify password
         if not verify_password(password, user.password_hash):
             db.record_failed_login(str(user.id))
-            db.log_auth_event(str(user.id), user.email, "login_failed", req.headers.get("X-Forwarded-For", "unknown"))
+            try:
+                db.log_auth_event(str(user.id), user.email, "login_failed", req.headers.get("X-Forwarded-For", "unknown"))
+            except Exception as audit_err:
+                logger.warning(f"Non-fatal: failed to log auth event: {audit_err}")
             return func.HttpResponse(
                 json.dumps({"error": "Email ou senha incorretos"}),
                 status_code=401,
@@ -103,7 +106,10 @@ async def login_handler(req: func.HttpRequest) -> func.HttpResponse:
 
         # Successful login
         db.record_successful_login(str(user.id))
-        db.log_auth_event(str(user.id), user.email, "login_success", req.headers.get("X-Forwarded-For", "unknown"))
+        try:
+            db.log_auth_event(str(user.id), user.email, "login_success", req.headers.get("X-Forwarded-For", "unknown"))
+        except Exception as audit_err:
+            logger.warning(f"Non-fatal: failed to log auth event: {audit_err}")
 
         # Create tokens
         access_token = create_access_token(
@@ -140,7 +146,7 @@ async def login_handler(req: func.HttpRequest) -> func.HttpResponse:
         )
 
     except Exception as e:
-        logger.error(f"Error in login: {e}")
+        logger.exception(f"Error in login: {e}")
         return func.HttpResponse(
             json.dumps({"error": "Internal server error"}),
             status_code=500,
