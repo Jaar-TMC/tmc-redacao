@@ -1,7 +1,7 @@
 import { Search, ChevronDown, Building2, Tag, Hash, HelpCircle, ArrowDownWideNarrow, Clock } from 'lucide-react';
 import { useState, useCallback, useEffect, useRef, useMemo } from 'react';
 import PropTypes from 'prop-types';
-import { getSources, getCategories, getAllTags } from '../../services/api';
+import { getSources } from '../../services/api';
 import { transformSources, transformCategories } from '../../utils/transformers';
 import { useFilters } from '../../context';
 import UrgencyChips from './UrgencyChips';
@@ -16,7 +16,7 @@ import { addAccents, formatTagDisplay, normalizeForSearch } from '../../utils/ac
  * - Link Purpose in Context (2.4.4): All filters have clear labels and context
  * - Headings and Labels (2.4.6): All form controls have descriptive labels
  */
-const FilterBar = ({ urgencyCounts }) => {
+const FilterBar = ({ urgencyCounts, facets }) => {
   const { filters, updateFilter } = useFilters();
   const [searchTerm, setSearchTerm] = useState(filters.searchQuery || '');
   const [openDropdown, setOpenDropdown] = useState(null);
@@ -36,42 +36,30 @@ const FilterBar = ({ urgencyCounts }) => {
   const [sources, setSources] = useState([]);
   const [tags, setTags] = useState([]);
 
-  // Fetch filter data from API - refetch when active filters change for contextual counts
+  // Use facets from articles response when available (eliminates 2 separate API calls)
   useEffect(() => {
-    const fetchFilters = async () => {
-      // Build contextual filter params (exclude the filter type being fetched)
-      const catParams = {};
-      const tagParams = {};
-
-      // Categories: filter by tag, source, urgency, search (not by category itself)
-      if (filters.tag) catParams.tag = filters.tag;
-      if (filters.source) catParams.source = filters.source;
-      if (filters.urgency) catParams.max_hours = filters.urgency;
-      if (filters.searchQuery) catParams.search = filters.searchQuery;
-
-      // Tags: filter by category, source, urgency (not by tag itself)
-      if (filters.category) tagParams.category = filters.category;
-      if (filters.source) tagParams.source = filters.source;
-      if (filters.urgency) tagParams.max_hours = filters.urgency;
-
-      const [catRes, srcRes, tagsRes] = await Promise.allSettled([
-        getCategories(catParams),
-        getSources(),
-        getAllTags(tagParams)
-      ]);
-
-      if (catRes.status === 'fulfilled') {
-        setCategories(transformCategories(catRes.value?.categories));
+    if (facets) {
+      if (facets.categories) {
+        setCategories(transformCategories(facets.categories));
       }
-      if (srcRes.status === 'fulfilled') {
-        setSources(transformSources(srcRes.value?.items || srcRes.value?.sources));
+      if (facets.tags) {
+        setTags(facets.tags);
       }
-      if (tagsRes.status === 'fulfilled') {
-        setTags(tagsRes.value?.items || []);
+    }
+  }, [facets]);
+
+  // Fetch sources once on mount (static data, not included in facets)
+  useEffect(() => {
+    const fetchSources = async () => {
+      try {
+        const srcRes = await getSources();
+        setSources(transformSources(srcRes?.items || srcRes?.sources));
+      } catch (err) {
+        console.error('Error fetching sources:', err);
       }
     };
-    fetchFilters();
-  }, [filters.tag, filters.category, filters.source, filters.urgency, filters.searchQuery]);
+    fetchSources();
+  }, []);
 
   // Sync local state when filters.searchQuery changes externally (e.g., from TrendsSidebar)
   // Only update if user is not currently typing to prevent race conditions
@@ -578,6 +566,10 @@ FilterBar.propTypes = {
     recent: PropTypes.number,
     today: PropTypes.number,
     all: PropTypes.number,
+  }),
+  facets: PropTypes.shape({
+    categories: PropTypes.array,
+    tags: PropTypes.array,
   }),
 };
 

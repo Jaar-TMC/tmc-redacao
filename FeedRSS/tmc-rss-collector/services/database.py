@@ -502,14 +502,21 @@ class DatabaseService:
 
         logger.info(f"[get_articles_with_urgency] search={search}, order_by={order_by}")
 
+        # When ordering by score, the count query also needs the scores join for consistency
+        if order_by == 'score':
+            needs_scores_join = True
+
         scores_join = "LEFT JOIN article_scores sc ON sc.article_id = a.id" if needs_scores_join else ""
         urgency_scores_join = "LEFT JOIN article_scores sc ON sc.article_id = a.id" if urgency_needs_scores_join else ""
 
-        # Dynamic ORDER BY - score sorts by total_score DESC with nulls last, then by date
+        # Dynamic ORDER BY - score sorts by total_score DESC, NULLs treated as -1 so they sort last
         if order_by == 'score':
-            order_clause = "ORDER BY COALESCE(sc.total_score, 0) DESC, a.published_at DESC"
+            order_clause = "ORDER BY ISNULL(sc.total_score, -1) DESC, a.published_at DESC"
         else:
             order_clause = "ORDER BY a.published_at DESC"
+
+        # Pre-build the fallback ORDER BY for score queries (avoids fragile str.replace)
+        fallback_order_clause = "ORDER BY a.published_at DESC"
 
         with self.get_connection() as conn:
             cursor = conn.cursor()
@@ -525,7 +532,7 @@ class DatabaseService:
             total = cursor.fetchone()[0]
 
             # 2. Get page of articles (always joins article_scores for score columns)
-            query = f"""
+            select_cols = """
                 SELECT a.id, a.source_id, a.title, a.content, a.preview, a.url,
                        a.image_url, a.author, a.category, a.tags, a.published_at,
                        a.collected_at, a.hash,
@@ -536,11 +543,27 @@ class DatabaseService:
                 JOIN sources s ON a.source_id = s.id
                 LEFT JOIN article_scores sc ON sc.article_id = a.id
                 {where_clause}
-                {order_clause}
-                OFFSET %s ROWS FETCH NEXT %s ROWS ONLY
-            """
-            cursor.execute(query, tuple(params) + (offset, limit))
-            rows = cursor.fetchall()
+            """.format(where_clause=where_clause)
+
+            query = f"{select_cols}\n                {order_clause}\n                OFFSET %s ROWS FETCH NEXT %s ROWS ONLY"
+
+            try:
+                cursor.execute(query, tuple(params) + (offset, limit))
+                rows = cursor.fetchall()
+            except Exception as e:
+                logger.error(f"[get_articles_with_urgency] Query failed (order_by={order_by}): {e}")
+                # Fallback: if score sort fails, fall back to date ordering
+                if order_by == 'score':
+                    logger.warning("[get_articles_with_urgency] Falling back to date ordering")
+                    try:
+                        fallback_query = f"{select_cols}\n                {fallback_order_clause}\n                OFFSET %s ROWS FETCH NEXT %s ROWS ONLY"
+                        cursor.execute(fallback_query, tuple(params) + (offset, limit))
+                        rows = cursor.fetchall()
+                    except Exception as fallback_err:
+                        logger.error(f"[get_articles_with_urgency] Fallback also failed: {fallback_err}")
+                        raise e
+                else:
+                    raise
             articles = [self._row_to_article(row) for row in rows]
 
             # 3. Urgency counts (single scan with CASE)
@@ -993,19 +1016,26 @@ class DatabaseService:
                                search: Optional[str] = None,
                                tag: Optional[str] = None,
                                source_id: Optional[str] = None,
-                               period: Optional[str] = None) -> List[dict]:
+                               period: Optional[str] = None,
+                               classification: Optional[str] = None) -> List[dict]:
         """
         Get categories with article counts, filtered by active filters.
         Returns counts that reflect what the user would see with those filters.
         """
-        where_clause, params, _ = self._build_article_filters(
-            search=search, tag=tag, source_id=source_id, period=period
+        where_clause, params, needs_scores_join = self._build_article_filters(
+            search=search, tag=tag, source_id=source_id, period=period,
+            classification=classification
         )
+
+        scores_join = ""
+        if needs_scores_join:
+            scores_join = "LEFT JOIN article_scores sc ON a.id = sc.article_id"
 
         query = f"""
             SELECT a.category, COUNT(*) as count
             FROM collected_articles a
             JOIN sources s ON a.source_id = s.id
+            {scores_join}
             {where_clause}
             {'AND' if where_clause else 'WHERE'} a.category IS NOT NULL
             GROUP BY a.category
@@ -1022,6 +1052,7 @@ class DatabaseService:
                               category: Optional[str] = None,
                               source_id: Optional[str] = None,
                               period: Optional[str] = None,
+                              classification: Optional[str] = None,
                               limit: int = 100) -> List[dict]:
         """
         Get tags with article counts, filtered by active filters.
@@ -1029,8 +1060,13 @@ class DatabaseService:
         """
         conditions = []
         params = []
+        needs_scores_join = False
 
         # Build base filter conditions (reusing logic from _build_article_filters)
+        if classification and classification in ('A', 'B', 'C'):
+            conditions.append("sc.classification = %s")
+            params.append(classification)
+            needs_scores_join = True
         if category:
             conditions.append("a.category = %s")
             params.append(category)
@@ -1055,6 +1091,9 @@ class DatabaseService:
                 pass
 
         where_extra = ("AND " + " AND ".join(conditions)) if conditions else ""
+        scores_join = ""
+        if needs_scores_join:
+            scores_join = "LEFT JOIN article_scores sc ON a.id = sc.article_id"
 
         query = f"""
             WITH ArticleTags AS (
@@ -1063,6 +1102,7 @@ class DatabaseService:
                     LOWER(LTRIM(RTRIM(t.value))) as tag
                 FROM collected_articles a
                 JOIN sources s ON a.source_id = s.id
+                {scores_join}
                 CROSS APPLY OPENJSON(a.tags) t
                 WHERE 1=1 {where_extra}
             ),

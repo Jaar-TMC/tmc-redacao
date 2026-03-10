@@ -33,9 +33,14 @@ export const ArticlesProvider = ({ children }) => {
     setSelectedArticles([]);
   }, []);
 
+  const selectedArticleIds = useMemo(
+    () => new Set(selectedArticles.map(a => a.id)),
+    [selectedArticles]
+  );
+
   const isArticleSelected = useCallback((articleId) => {
-    return selectedArticles.some((a) => a.id === articleId);
-  }, [selectedArticles]);
+    return selectedArticleIds.has(articleId);
+  }, [selectedArticleIds]);
 
   const value = useMemo(
     () => ({

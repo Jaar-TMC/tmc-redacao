@@ -1,3 +1,4 @@
+import { memo } from 'react';
 import { X, Search, Hash, Tag, Building2, XCircle, Award, Clock } from 'lucide-react';
 import { useFilters } from '../../context';
 import { addAccents, formatTagDisplay } from '../../utils/accentMap';
@@ -146,4 +147,4 @@ ActiveFiltersBar.propTypes = {
   className: PropTypes.string,
 };
 
-export default ActiveFiltersBar;
+export default memo(ActiveFiltersBar);

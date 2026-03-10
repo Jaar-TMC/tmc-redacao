@@ -26,6 +26,21 @@ const deduplicateByTitle = (articles) => {
   });
 };
 
+const ITEMS_PER_PAGE = 20;
+
+// Build API params from filters and page - shared between fetch and retry
+const buildArticleParams = (filters, page) => ({
+  limit: ITEMS_PER_PAGE,
+  page,
+  ...(filters.searchQuery && { search: filters.searchQuery }),
+  ...(filters.tag && { tag: filters.tag }),
+  ...(filters.category && { category: filters.category }),
+  ...(filters.source && { source: filters.source }),
+  ...(filters.urgency && { max_hours: filters.urgency }),
+  ...(filters.scoreClassification && { classification: filters.scoreClassification }),
+  ...(filters.sortOrder && filters.sortOrder !== 'newest' && { order_by: filters.sortOrder }),
+});
+
 const RedacaoPage = () => {
   const { selectedArticles, addArticle, removeArticle, clearSelection, isArticleSelected } = useArticles();
   const { filters } = useFilters();
@@ -46,12 +61,12 @@ const RedacaoPage = () => {
   const [error, setError] = useState(null);
   const [_isInitialized, setIsInitialized] = useState(false);
   const [urgencyCounts, setUrgencyCounts] = useState({ now: 0, recent: 0, today: 0, all: 0 });
+  const [facets, setFacets] = useState(null);
 
   // Pagination State
   const [currentPage, setCurrentPage] = useState(1);
   const [totalItems, setTotalItems] = useState(0);
   const [totalPages, setTotalPages] = useState(1);
-  const ITEMS_PER_PAGE = 20;
 
   // Ref for AbortController
   const abortControllerRef = useRef(null);
@@ -125,6 +140,9 @@ const RedacaoPage = () => {
       if (cachedData.urgencyCounts) {
         setUrgencyCounts(cachedData.urgencyCounts);
       }
+      if (cachedData.facets) {
+        setFacets(cachedData.facets);
+      }
       setIsLoading(false);
       setIsInitialized(true);
       return;
@@ -138,19 +156,7 @@ const RedacaoPage = () => {
       setIsLoading(true);
       setError(null);
       try {
-        // Build API params with pagination
-        const params = {
-          limit: ITEMS_PER_PAGE,
-          page: effectivePage,
-          ...(filters.searchQuery && { search: filters.searchQuery }),
-          ...(filters.tag && { tag: filters.tag }),
-          ...(filters.category && { category: filters.category }),
-          ...(filters.source && { source: filters.source }),
-          ...(filters.urgency && { max_hours: filters.urgency }),
-          ...(filters.scoreClassification && { classification: filters.scoreClassification }),
-          ...(filters.sortOrder && filters.sortOrder !== 'newest' && { order_by: filters.sortOrder }),
-        };
-
+        const params = buildArticleParams(filters, effectivePage);
         const response = await getArticles(params, { signal: abortController.signal });
 
         // Only update state if request wasn't aborted
@@ -165,6 +171,10 @@ const RedacaoPage = () => {
             setUrgencyCounts(response.urgency_counts);
           }
 
+          if (response?.facets) {
+            setFacets(response.facets);
+          }
+
           // Update pagination info from response - use nullish coalescing to handle 0 correctly
           const total = response?.total ?? uniqueArticles.length;
           setTotalItems(total);
@@ -176,6 +186,7 @@ const RedacaoPage = () => {
             totalItems: total,
             totalPages: Math.ceil(total / ITEMS_PER_PAGE) || 1,
             urgencyCounts: response?.urgency_counts || null,
+            facets: response?.facets || null,
           });
 
           setIsInitialized(true);
@@ -208,17 +219,7 @@ const RedacaoPage = () => {
     setIsLoading(true);
     setError(null);
     try {
-      const params = {
-        limit: ITEMS_PER_PAGE,
-        page: currentPage,
-        ...(filters.searchQuery && { search: filters.searchQuery }),
-        ...(filters.tag && { tag: filters.tag }),
-        ...(filters.category && { category: filters.category }),
-        ...(filters.source && { source: filters.source }),
-        ...(filters.urgency && { max_hours: filters.urgency }),
-        ...(filters.scoreClassification && { classification: filters.scoreClassification }),
-        ...(filters.sortOrder && filters.sortOrder !== 'newest' && { order_by: filters.sortOrder }),
-      };
+      const params = buildArticleParams(filters, currentPage);
       const response = await getArticles(params);
       const transformedArticles = transformArticles(response?.items);
       const uniqueArticles = deduplicateByTitle(transformedArticles);
@@ -227,6 +228,10 @@ const RedacaoPage = () => {
       // Update urgency counts from response, or calculate from article timestamps as fallback
       if (response?.urgency_counts) {
         setUrgencyCounts(response.urgency_counts);
+      }
+
+      if (response?.facets) {
+        setFacets(response.facets);
       }
 
       // Update pagination info from response - use nullish coalescing to handle 0 correctly
@@ -240,12 +245,17 @@ const RedacaoPage = () => {
         totalItems: total,
         totalPages: Math.ceil(total / ITEMS_PER_PAGE) || 1,
         urgencyCounts: response?.urgency_counts || null,
+        facets: response?.facets || null,
       });
 
       setIsInitialized(true);
     } catch (err) {
-      console.error('Error fetching articles:', err);
-      setError(err.message || 'Erro ao carregar matérias');
+      if (err.name === 'AbortError') {
+        setError('A requisição expirou. Tente novamente.');
+      } else {
+        console.error('Error fetching articles:', err);
+        setError(err.message || 'Erro ao carregar matérias');
+      }
     } finally {
       setIsLoading(false);
     }
@@ -324,7 +334,7 @@ const RedacaoPage = () => {
         {/* Main Content - Articles Grid */}
         <div className="flex-1 min-w-0 p-4 md:p-6 mt-16 lg:mt-0">
           <div data-tour="filter-bar">
-            <FilterBar urgencyCounts={urgencyCounts} />
+            <FilterBar urgencyCounts={urgencyCounts} facets={facets} />
           </div>
 
           <ActiveFiltersBar />
