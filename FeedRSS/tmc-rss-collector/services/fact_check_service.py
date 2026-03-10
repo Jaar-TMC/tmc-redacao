@@ -1158,6 +1158,10 @@ Regras:
             metadata.source_sufficiency = "sufficient"
 
         try:
+            # Determine if article will be truncated during verification (4A)
+            # _extract_and_verify_claims truncates to 5000 chars internally
+            article_truncated_for_review = len(generated_article.strip()) > 5000
+
             # Run 3 checks in parallel
             claim_task = self._extract_and_verify_claims(
                 texto_base, generated_article, enrichment

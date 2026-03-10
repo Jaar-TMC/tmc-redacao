@@ -5,7 +5,7 @@ import azure.functions as func
 import json
 import logging
 from math import ceil
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from services.database import get_db
 from services.auth_service import (
@@ -310,8 +310,16 @@ async def logout_handler(req: func.HttpRequest) -> func.HttpResponse:
         # Blacklist current access token
         jti = req.user.get("jti")
         if jti:
-            # Calculate expiry from token (default 1 hour from now as fallback)
-            exp = datetime.now(timezone.utc).replace(hour=23, minute=59, second=59)
+            # Extract actual expiry from the access token JWT
+            auth_header = req.headers.get("Authorization", "")
+            access_token = auth_header[7:] if auth_header.startswith("Bearer ") else ""
+            access_payload = decode_token(access_token) if access_token else None
+            exp_ts = access_payload.get("exp") if access_payload else None
+            if exp_ts:
+                exp = datetime.fromtimestamp(exp_ts, tz=timezone.utc)
+            else:
+                # Fallback: 1 hour from now (default access token lifetime)
+                exp = datetime.now(timezone.utc) + timedelta(hours=1)
             db.blacklist_token(jti, req.user["id"], exp)
 
         # Also blacklist refresh token if present

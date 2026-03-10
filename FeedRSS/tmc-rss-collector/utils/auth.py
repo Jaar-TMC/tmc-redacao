@@ -43,10 +43,8 @@ def get_current_user(req: func.HttpRequest) -> Optional[dict]:
                 return None
         except Exception as e:
             logger.warning(f"Could not check token blacklist: {e}")
-            # In production, deny access when blacklist cannot be checked (fail-closed)
-            if _PRODUCTION_SAFETY_MODE:
-                logger.error("Blacklist check failed in production - denying access")
-                return None
+            # Always fail-closed: deny access when blacklist cannot be checked
+            return None
 
     return {
         "id": payload["sub"],

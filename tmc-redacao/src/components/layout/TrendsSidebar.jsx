@@ -71,9 +71,19 @@ const TrendsSidebar = ({ isOpen, onClose }) => {
   }, [getCachedTrending, setCachedTrending, filters.urgency]);
 
   // Fetch on mount and when urgency filter changes (use cache, don't force refresh)
+  // Uses cancelled flag instead of AbortController to avoid StrictMode double-mount aborts
   useEffect(() => {
-    fetchThemes(false);
-  }, [filters.urgency]);
+    let cancelled = false;
+    const doFetch = async () => {
+      try {
+        await fetchThemes(false);
+      } catch (err) {
+        if (!cancelled) console.error('Error in fetchThemes effect:', err);
+      }
+    };
+    if (!cancelled) doFetch();
+    return () => { cancelled = true; };
+  }, [filters.urgency, fetchThemes]);
 
   const handleRefresh = useCallback(() => {
     if (!isPaused) {

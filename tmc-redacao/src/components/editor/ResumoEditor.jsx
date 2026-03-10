@@ -34,7 +34,7 @@ const ResumoEditor = ({
   useEffect(() => {
     if (focusIndex !== null && inputRefs.current[focusIndex]) {
       inputRefs.current[focusIndex].focus();
-      setFocusIndex(null);
+      requestAnimationFrame(() => setFocusIndex(null));
     }
   }, [focusIndex, bullets.length]);
 

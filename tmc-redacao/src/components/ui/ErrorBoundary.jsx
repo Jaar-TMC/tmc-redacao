@@ -46,7 +46,7 @@ class ErrorBoundary extends Component {
       sessionStorage.setItem('tmc_last_error', JSON.stringify(errorReport));
       // Structured log for any future log aggregation
       console.error('[TMC_ERROR_REPORT]', JSON.stringify(errorReport));
-    } catch (e) {
+    } catch {
       // Ignore storage errors
     }
   }

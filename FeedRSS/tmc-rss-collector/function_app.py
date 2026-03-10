@@ -46,7 +46,7 @@ else:
 
 def add_cors_headers(response: func.HttpResponse, origin: str = None) -> func.HttpResponse:
     """Add CORS headers to response."""
-    allowed_origin = origin if origin in ALLOWED_ORIGINS else (ALLOWED_ORIGINS[0] if ALLOWED_ORIGINS else "")
+    allowed_origin = origin if origin in ALLOWED_ORIGINS else ""
 
     # Create new response with CORS headers
     headers = dict(response.headers) if response.headers else {}
@@ -71,7 +71,7 @@ def with_cors(handler):
 
         # Handle preflight OPTIONS request
         if req.method == "OPTIONS":
-            allowed_origin = origin if origin in ALLOWED_ORIGINS else (ALLOWED_ORIGINS[0] if ALLOWED_ORIGINS else "")
+            allowed_origin = origin if origin in ALLOWED_ORIGINS else ""
             return func.HttpResponse(
                 "",
                 status_code=204,
@@ -87,13 +87,8 @@ def with_cors(handler):
         try:
             response = await handler(req)
         except Exception as e:
-            import traceback
-            tb = traceback.format_exc()
             logger.exception(f"Unhandled error in {handler.__name__}: {e}")
-            error_body = json.dumps({
-                "error": "Erro interno.",
-                "details": f"CORS_WRAPPER[{handler.__name__}]: {type(e).__name__}: {str(e)}\n{tb[-500:]}"
-            }, ensure_ascii=False)
+            error_body = json.dumps({"error": "Internal server error"})
             response = func.HttpResponse(error_body, status_code=500, mimetype="application/json")
         return add_cors_headers(response, origin)
 
@@ -264,6 +259,7 @@ async def get_article(req: func.HttpRequest) -> func.HttpResponse:
 
 @app.route(route="categories", methods=["GET", "OPTIONS"])
 @with_cors
+@require_auth
 async def get_categories(req: func.HttpRequest) -> func.HttpResponse:
     """GET /api/categories - Lista categorias com contagem."""
     from functions.articles_api import get_categories_handler
@@ -346,6 +342,11 @@ async def sources_handler(req: func.HttpRequest) -> func.HttpResponse:
     elif req.method == "POST":
         from functions.sources_api import create_source_handler
         return await create_source_handler(req)
+    return func.HttpResponse(
+        json.dumps({"error": "Method not allowed"}),
+        status_code=405,
+        mimetype="application/json"
+    )
 
 
 @app.route(route="sources/{id}", methods=["GET", "PUT", "DELETE", "OPTIONS"])
@@ -383,6 +384,11 @@ async def source_by_id_handler(req: func.HttpRequest) -> func.HttpResponse:
     elif req.method == "DELETE":
         from functions.sources_api import delete_source_handler
         return await delete_source_handler(req)
+    return func.HttpResponse(
+        json.dumps({"error": "Method not allowed"}),
+        status_code=405,
+        mimetype="application/json"
+    )
 
 
 @app.route(route="sources/{id}/collect", methods=["POST", "OPTIONS"])
@@ -622,6 +628,7 @@ async def edit_article(req: func.HttpRequest) -> func.HttpResponse:
 
 @app.route(route="transcribe-diag", methods=["GET", "OPTIONS"])
 @with_cors
+@require_admin
 async def transcribe_diag(req: func.HttpRequest) -> func.HttpResponse:
     """GET /api/transcribe-diag - Diagnostic for transcription deps."""
     import sys
@@ -804,14 +811,9 @@ async def transcribe_video(req: func.HttpRequest) -> func.HttpResponse:
         from functions.transcription_api import transcribe_handler
         return await transcribe_handler(req)
     except Exception as e:
-        import traceback
-        tb = traceback.format_exc()
         logger.exception(f"Unhandled error in transcribe_video wrapper: {e}")
         return func.HttpResponse(
-            json.dumps({
-                "error": "Erro interno no processamento.",
-                "details": f"WRAPPER: {type(e).__name__}: {str(e)}\n{tb[-500:]}"
-            }, ensure_ascii=False),
+            json.dumps({"error": "Internal server error"}),
             status_code=500,
             mimetype="application/json",
         )
@@ -837,6 +839,11 @@ async def user_articles_handler(req: func.HttpRequest) -> func.HttpResponse:
     elif req.method == "POST":
         from functions.user_articles_api import create_user_article_handler
         return await create_user_article_handler(req)
+    return func.HttpResponse(
+        json.dumps({"error": "Method not allowed"}),
+        status_code=405,
+        mimetype="application/json"
+    )
 
 
 @app.route(route="user-articles/{id}", methods=["GET", "PUT", "DELETE", "OPTIONS"])
@@ -859,6 +866,11 @@ async def user_article_by_id_handler(req: func.HttpRequest) -> func.HttpResponse
     elif req.method == "DELETE":
         from functions.user_articles_api import delete_user_article_handler
         return await delete_user_article_handler(req)
+    return func.HttpResponse(
+        json.dumps({"error": "Method not allowed"}),
+        status_code=405,
+        mimetype="application/json"
+    )
 
 
 # ========================================

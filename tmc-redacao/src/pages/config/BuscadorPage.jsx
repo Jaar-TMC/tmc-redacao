@@ -64,25 +64,30 @@ const BuscadorPage = () => {
   ], []);
 
   // Fetch sources from API on mount
+  // Uses cancelled flag instead of AbortController to avoid StrictMode double-mount aborts
   useEffect(() => {
+    let cancelled = false;
     const fetchSources = async () => {
       setIsLoading(true);
       setError(null);
       try {
         const response = await getSources();
+        if (cancelled) return;
         const transformedSources = transformSources(response?.items).map(source => ({
           ...source,
           lastFetch: source.last_fetch ? new Date(source.last_fetch) : null
         }));
         setSources(transformedSources);
       } catch (err) {
+        if (cancelled) return;
         console.error('Error fetching sources:', err);
         setError(err.message || 'Erro ao carregar fontes');
       } finally {
-        setIsLoading(false);
+        if (!cancelled) setIsLoading(false);
       }
     };
     fetchSources();
+    return () => { cancelled = true; };
   }, []);
 
   // Retry fetch after error

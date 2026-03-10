@@ -228,7 +228,7 @@ const TextoBasePage = () => {
     setTimeout(() => {
       navigate('/criar/configurar');
     }, 300);
-  }, [canProceed, variantData, setBlocos, confirmarTextoBase, navigate]);
+  }, [canProceed, variantData, fonte, setBlocos, confirmarTextoBase, navigate]);
 
   // Handler para navegação do stepper
   const handleStepClick = useCallback((stepIndex) => {

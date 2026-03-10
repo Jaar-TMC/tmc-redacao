@@ -387,7 +387,7 @@ const CriarPostPage = () => {
       targetKeyword: tags?.[0] || '',
       hasAuthor: true
     });
-  }, [title, tituloCurto, linhaFina, content, tags, slugValue, selectedArticleType]);
+  }, [title, tituloCurto, linhaFina, content, tags, slugValue]);
 
   // Funções para gerenciar tags
   const handleAddTag = () => {
@@ -1690,7 +1690,7 @@ const CriarPostPage = () => {
                   // Now includes exact scoring rules and keyword extraction
                   const prompt = generateSEOOptimizationPrompt(
                     seoAnalysis,
-                    selectedArticleType?.id || 'default',
+                    'default',
                     'quick', // Use quick mode by default
                     [], // No specific focus areas
                     { title, content, tags } // Article data for keyword extraction

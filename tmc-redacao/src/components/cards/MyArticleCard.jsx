@@ -82,15 +82,17 @@ const MyArticleCard = ({ article, onView, onEdit, onDelete, onMetrics, showAutho
             <span>{formatRelativeTime(article.createdAt)}</span>
           </div>
 
-          <div
-            className="flex items-center gap-1.5"
-            aria-label={`Categoria: ${article.category}`}
-          >
-            <Tag style={{ width: '16px', height: '16px', color: categoryColors[article.category] || '#999999' }} aria-hidden="true" />
-            <span style={{ color: categoryColors[article.category] || '#999999', fontWeight: 500 }}>
-              {article.category}
-            </span>
-          </div>
+          {article.category && (
+            <div
+              className="flex items-center gap-1.5"
+              aria-label={`Categoria: ${article.category}`}
+            >
+              <Tag style={{ width: '16px', height: '16px', color: categoryColors[article.category] || '#999999' }} aria-hidden="true" />
+              <span style={{ color: categoryColors[article.category] || '#999999', fontWeight: 500 }}>
+                {article.category}
+              </span>
+            </div>
+          )}
 
           {showAuthor && article.author && (
             <div className="flex items-center gap-1.5" aria-label={`Autor: ${article.author.name}`}>
