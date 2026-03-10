@@ -58,6 +58,7 @@ const RedacaoPage = () => {
   // API State
   const [articles, setArticles] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
+  const [showSkeleton, setShowSkeleton] = useState(false);
   const [error, setError] = useState(null);
   const [_isInitialized, setIsInitialized] = useState(false);
   const [urgencyCounts, setUrgencyCounts] = useState({ now: 0, recent: 0, today: 0, all: 0 });
@@ -70,6 +71,10 @@ const RedacaoPage = () => {
 
   // Ref for AbortController
   const abortControllerRef = useRef(null);
+  // Ref for skeleton grace period timer
+  const skeletonTimerRef = useRef(null);
+  // Ref for fetch debounce timer
+  const fetchDebounceRef = useRef(null);
 
   // Ref to track previous filter values to detect filter changes vs page changes
   const prevFiltersRef = useRef({
@@ -97,6 +102,10 @@ const RedacaoPage = () => {
     if (abortControllerRef.current) {
       abortControllerRef.current.abort();
     }
+
+    // Clear any pending debounce/skeleton timers
+    clearTimeout(fetchDebounceRef.current);
+    clearTimeout(skeletonTimerRef.current);
 
     // Check if filters changed (not just page)
     const filtersChanged =
@@ -131,7 +140,7 @@ const RedacaoPage = () => {
       // Continue with the fetch using effectivePage=1
     }
 
-    // Check cache first
+    // Check cache first (synchronous, no debounce needed)
     const cachedData = getCachedData(filters, effectivePage);
     if (cachedData) {
       setArticles(cachedData.articles);
@@ -144,73 +153,89 @@ const RedacaoPage = () => {
         setFacets(cachedData.facets);
       }
       setIsLoading(false);
+      setShowSkeleton(false);
       setIsInitialized(true);
       return;
     }
 
-    // Create new AbortController for this request
-    const abortController = new AbortController();
-    abortControllerRef.current = abortController;
+    // Debounce API call to coalesce rapid filter changes (150ms)
+    fetchDebounceRef.current = setTimeout(() => {
+      // Create new AbortController for this request
+      const abortController = new AbortController();
+      abortControllerRef.current = abortController;
 
-    const fetchArticles = async () => {
-      setIsLoading(true);
-      setError(null);
-      try {
-        const params = buildArticleParams(filters, effectivePage);
-        const response = await getArticles(params, { signal: abortController.signal });
+      const fetchArticles = async () => {
+        setIsLoading(true);
+        setError(null);
 
-        // Only update state if request wasn't aborted
-        if (!abortController.signal.aborted) {
-          const transformedArticles = transformArticles(response?.items || []);
-          const uniqueArticles = deduplicateByTitle(transformedArticles);
+        // Grace period: only show skeleton if fetch takes >200ms
+        skeletonTimerRef.current = setTimeout(() => {
+          setShowSkeleton(true);
+        }, 200);
 
-          setArticles(uniqueArticles);
+        try {
+          const params = buildArticleParams(filters, effectivePage);
+          const response = await getArticles(params, { signal: abortController.signal });
 
-          // Update urgency counts from server response
-          if (response?.urgency_counts) {
-            setUrgencyCounts(response.urgency_counts);
+          // Only update state if request wasn't aborted
+          if (!abortController.signal.aborted) {
+            const transformedArticles = transformArticles(response?.items || []);
+            const uniqueArticles = deduplicateByTitle(transformedArticles);
+
+            setArticles(uniqueArticles);
+
+            // Update urgency counts from server response
+            if (response?.urgency_counts) {
+              setUrgencyCounts(response.urgency_counts);
+            }
+
+            if (response?.facets) {
+              setFacets(response.facets);
+            }
+
+            // Update pagination info from response - use nullish coalescing to handle 0 correctly
+            const total = response?.total ?? uniqueArticles.length;
+            setTotalItems(total);
+            setTotalPages(Math.ceil(total / ITEMS_PER_PAGE) || 1);
+
+            // Save to cache
+            setCachedData(filters, effectivePage, {
+              articles: uniqueArticles,
+              totalItems: total,
+              totalPages: Math.ceil(total / ITEMS_PER_PAGE) || 1,
+              urgencyCounts: response?.urgency_counts || null,
+              facets: response?.facets || null,
+            });
+
+            setIsInitialized(true);
           }
-
-          if (response?.facets) {
-            setFacets(response.facets);
+        } catch (err) {
+          // Ignore AbortError - this is expected when request is cancelled
+          if (err.name === 'AbortError') {
+            return;
           }
-
-          // Update pagination info from response - use nullish coalescing to handle 0 correctly
-          const total = response?.total ?? uniqueArticles.length;
-          setTotalItems(total);
-          setTotalPages(Math.ceil(total / ITEMS_PER_PAGE) || 1);
-
-          // Save to cache
-          setCachedData(filters, effectivePage, {
-            articles: uniqueArticles,
-            totalItems: total,
-            totalPages: Math.ceil(total / ITEMS_PER_PAGE) || 1,
-            urgencyCounts: response?.urgency_counts || null,
-            facets: response?.facets || null,
-          });
-
-          setIsInitialized(true);
+          console.error('Error fetching articles:', err);
+          setError(err.message || 'Erro ao carregar matérias');
+        } finally {
+          // Only set loading to false if not aborted
+          if (!abortController.signal.aborted) {
+            clearTimeout(skeletonTimerRef.current);
+            setIsLoading(false);
+            setShowSkeleton(false);
+          }
         }
-      } catch (err) {
-        // Ignore AbortError - this is expected when request is cancelled
-        if (err.name === 'AbortError') {
-          return;
-        }
-        console.error('Error fetching articles:', err);
-        setError(err.message || 'Erro ao carregar matérias');
-      } finally {
-        // Only set loading to false if not aborted
-        if (!abortController.signal.aborted) {
-          setIsLoading(false);
-        }
-      }
-    };
+      };
 
-    fetchArticles();
+      fetchArticles();
+    }, 150);
 
-    // Cleanup: abort request when dependencies change or component unmounts
+    // Cleanup: abort request and clear timers when dependencies change or component unmounts
     return () => {
-      abortController.abort();
+      clearTimeout(fetchDebounceRef.current);
+      clearTimeout(skeletonTimerRef.current);
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
     };
   }, [filters.searchQuery, filters.tag, filters.category, filters.source, filters.urgency, filters.scoreClassification, filters.sortOrder, currentPage, getCachedData, setCachedData]);
 
@@ -339,7 +364,7 @@ const RedacaoPage = () => {
 
           <ActiveFiltersBar />
 
-          {isLoading ? (
+          {showSkeleton ? (
             <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-2 gap-4">
               {[...Array(6)].map((_, i) => (
                 <div key={i} className="bg-white rounded-xl border border-light-gray p-4 space-y-3">

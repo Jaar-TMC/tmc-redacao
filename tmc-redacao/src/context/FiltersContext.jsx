@@ -24,10 +24,10 @@ export const FiltersProvider = ({ children }) => {
   });
 
   const updateFilter = useCallback((filterName, value) => {
-    setFilters((prev) => ({
-      ...prev,
-      [filterName]: value,
-    }));
+    setFilters((prev) => {
+      if (prev[filterName] === value) return prev;
+      return { ...prev, [filterName]: value };
+    });
   }, []);
 
   const updateFilters = useCallback((newFilters) => {

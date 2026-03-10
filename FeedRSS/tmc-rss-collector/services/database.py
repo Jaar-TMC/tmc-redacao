@@ -384,15 +384,15 @@ class DatabaseService:
                 conditions.append("""(
                     a.title COLLATE Latin1_General_CI_AI LIKE %s COLLATE Latin1_General_CI_AI
                     OR a.title COLLATE Latin1_General_CI_AI LIKE %s COLLATE Latin1_General_CI_AI
-                    OR a.content COLLATE Latin1_General_CI_AI LIKE %s COLLATE Latin1_General_CI_AI
-                    OR a.content COLLATE Latin1_General_CI_AI LIKE %s COLLATE Latin1_General_CI_AI
+                    OR a.preview COLLATE Latin1_General_CI_AI LIKE %s COLLATE Latin1_General_CI_AI
+                    OR a.preview COLLATE Latin1_General_CI_AI LIKE %s COLLATE Latin1_General_CI_AI
                     OR a.tags COLLATE Latin1_General_CI_AI LIKE %s COLLATE Latin1_General_CI_AI
                 )""")
                 params.extend([search_param, search_param_spaces, search_param, search_param_spaces, search_param])
             else:
                 conditions.append("""(
                     a.title COLLATE Latin1_General_CI_AI LIKE %s COLLATE Latin1_General_CI_AI
-                    OR a.content COLLATE Latin1_General_CI_AI LIKE %s COLLATE Latin1_General_CI_AI
+                    OR a.preview COLLATE Latin1_General_CI_AI LIKE %s COLLATE Latin1_General_CI_AI
                     OR a.tags COLLATE Latin1_General_CI_AI LIKE %s COLLATE Latin1_General_CI_AI
                 )""")
                 params.extend([search_param, search_param, search_param])
@@ -1078,7 +1078,7 @@ class DatabaseService:
             search_param = f"%{search_escaped}%"
             conditions.append("""(
                 a.title COLLATE Latin1_General_CI_AI LIKE %s COLLATE Latin1_General_CI_AI
-                OR a.content COLLATE Latin1_General_CI_AI LIKE %s COLLATE Latin1_General_CI_AI
+                OR a.preview COLLATE Latin1_General_CI_AI LIKE %s COLLATE Latin1_General_CI_AI
             )""")
             params.extend([search_param, search_param])
         if period:
