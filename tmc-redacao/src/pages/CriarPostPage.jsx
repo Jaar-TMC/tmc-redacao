@@ -3,9 +3,7 @@ import { useNavigate, useSearchParams, useParams } from 'react-router-dom';
 import {
   ArrowLeft,
   Sparkles,
-  UserCircle,
   SpellCheck,
-  Languages,
   BarChart3,
   Lightbulb,
   Send,
@@ -13,7 +11,6 @@ import {
   Bot,
   ChevronDown,
   ChevronUp,
-  Newspaper,
   Flame,
   X,
   Link2,
@@ -32,7 +29,6 @@ import {
   ShieldCheck
 } from 'lucide-react';
 import { markdownToHtml } from '../utils/markdownRenderer';
-import { mockTones, mockPersonas } from '../data/mockData';
 import Tooltip from '../components/ui/Tooltip';
 import { SEOAnalyzerPanel, calculateSEOScore, RichTextEditor, EditorToolbar } from '../components/editor';
 import VerificationBanner from '../components/ui/VerificationBanner';
@@ -41,17 +37,6 @@ import { useCriar } from '../context';
 import { useVersionHistory, useChatEditor } from '../hooks';
 import { createUserArticle, updateUserArticle, getUserArticle, generateTags, editArticle } from '../services/api';
 import { generateSEOOptimizationPrompt } from '../utils/seoPromptGenerator';
-
-// Tipos de matéria disponíveis
-const articleTypes = [
-  { id: 'destaque', name: 'Destaque Principal', description: 'Matéria principal da home' },
-  { id: 'principal-secao', name: 'Principal da Seção', description: 'Destaque dentro de uma editoria' },
-  { id: 'secundaria', name: 'Secundária da Seção', description: 'Matéria de apoio na editoria' },
-  { id: 'coluna', name: 'Coluna', description: 'Texto opinativo ou de colunista' },
-  { id: 'mais-lidas', name: 'Mais Lidas', description: 'Conteúdo para seção popular' },
-  { id: 'original', name: 'Conteúdo Original', description: 'Reportagem exclusiva' },
-  { id: 'servico', name: 'Serviço', description: 'Informação útil ao leitor' }
-];
 
 const CriarPostPage = () => {
   const navigate = useNavigate();
@@ -72,6 +57,7 @@ const CriarPostPage = () => {
   const enrichmentDegraded = resultado?.enrichmentDegraded || false;
   const slugSugerido = resultado?.slugSugerido || null;
   const [showPublishConfirm, setShowPublishConfirm] = useState(false);
+  const [publishOverridden, setPublishOverridden] = useState(false);
   const [slugValue, setSlugValue] = useState(slugSugerido || '');
   const [slugCopied, setSlugCopied] = useState(false);
   // v7.1: additional pipeline fields
@@ -217,9 +203,6 @@ const CriarPostPage = () => {
     return () => window.removeEventListener('beforeunload', handleBeforeUnload);
   }, [title, content]);
 
-  const [selectedTone, setSelectedTone] = useState(null);
-  const [selectedPersona, setSelectedPersona] = useState(null);
-  const [selectedArticleType, setSelectedArticleType] = useState(null);
   const [openDropdown, setOpenDropdown] = useState(null);
   const [spellCheck, setSpellCheck] = useState(false);
   const [isSavingDraft, setIsSavingDraft] = useState(false);
@@ -336,8 +319,8 @@ const CriarPostPage = () => {
       // Push new version when AI edits are applied
       pushVersion(contentWithHtmlBody, 'ai', summary, messageId);
     },
-    categoria: selectedPersona?.id || 'geral',
-    tom: selectedTone?.id || 'conversacional'
+    categoria: 'geral',
+    tom: 'conversacional'
   });
 
   // Set initial welcome messages
@@ -400,7 +383,7 @@ const CriarPostPage = () => {
       content,
       tags,
       slug: slugValue,
-      articleType: selectedArticleType?.id || 'default',
+      articleType: 'default',
       targetKeyword: tags?.[0] || '',
       hasAuthor: true
     });
@@ -479,8 +462,8 @@ const CriarPostPage = () => {
         },
         instruction: 'Sugira um título mais atraente e otimizado para SEO. Mantenha o título conciso (máximo 100 caracteres). Retorne APENAS o título sugerido.',
         editScope: 'title',
-        categoria: selectedPersona?.id || 'geral',
-        tom: selectedTone?.id || 'conversacional'
+        categoria: 'geral',
+        tom: 'conversacional'
       });
 
       if (result?.titulo) {
@@ -566,19 +549,16 @@ const CriarPostPage = () => {
       content: content,
       resumo: resumoBullets,
       status: status,
-      category: selectedPersona?.name || selectedArticleType?.name || null,
+      category: null,
       tags: tags,
       authorName: null, // Could be set from user context
       sourceArticleIds: themeContext.links?.map(link => link.id).filter(Boolean) || [],
       generationConfig: {
-        tom: selectedTone?.id || null,
-        persona: selectedPersona?.id || null,
-        tipoMateria: selectedArticleType?.id || null,
         tema: themeContext.tema || null,
         geradoEm: resultado?.geradoEm || null
       }
     };
-  }, [title, tituloCurto, linhaFina, content, resumoBullets, tags, selectedTone, selectedPersona, selectedArticleType, themeContext, resultado]);
+  }, [title, tituloCurto, linhaFina, content, resumoBullets, tags, themeContext, resultado]);
 
   // Save as draft handler
   const handleSaveDraft = useCallback(async () => {
@@ -629,8 +609,8 @@ const CriarPostPage = () => {
       return;
     }
 
-    // v7: block publish if publication_status === "blocked"
-    if (publicationStatus === 'blocked') {
+    // v7: block publish if publication_status === "blocked" (unless editor overrode it)
+    if (publicationStatus === 'blocked' && !publishOverridden) {
       setSaveError(`Publicação bloqueada: ${blockReason || 'Verificação automática detectou problemas críticos.'}`);
       return;
     }
@@ -663,7 +643,7 @@ const CriarPostPage = () => {
       setIsPublishing(false);
       isPublishingRef.current = false;
     }
-  }, [title, content, articleId, buildArticleData, navigate, publicationStatus, blockReason, showPublishConfirm]);
+  }, [title, content, articleId, buildArticleData, navigate, publicationStatus, blockReason, showPublishConfirm, publishOverridden]);
 
   // Inline Version Dropdown component
   const VersionDropdown = ({ versions: versionsList, currentIdx, onSelect, onClose }) => {
@@ -886,10 +866,16 @@ const CriarPostPage = () => {
             </Tooltip>
             <div className="flex items-center gap-2">
               {/* v7: Publication status badge */}
-              {publicationStatus === 'blocked' && (
+              {publicationStatus === 'blocked' && !publishOverridden && (
                 <span className="text-xs px-2 py-1 rounded-full bg-red-100 text-red-700 font-medium flex items-center gap-1">
                   <ShieldAlert size={12} />
                   Bloqueado
+                </span>
+              )}
+              {publicationStatus === 'blocked' && publishOverridden && (
+                <span className="text-xs px-2 py-1 rounded-full bg-green-100 text-green-700 font-medium flex items-center gap-1">
+                  <ShieldCheck size={12} />
+                  Revisado
                 </span>
               )}
               {publicationStatus === 'draft_review' && !qualityLoopPassed && (
@@ -900,15 +886,15 @@ const CriarPostPage = () => {
               )}
               <button
                 onClick={handlePublish}
-                disabled={!title.trim() || !content.trim() || isPublishing || publicationStatus === 'blocked'}
+                disabled={!title.trim() || !content.trim() || isPublishing || (publicationStatus === 'blocked' && !publishOverridden)}
                 className={`flex items-center gap-2 px-3 md:px-4 py-2 text-sm font-semibold text-white rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
-                  publicationStatus === 'blocked'
+                  publicationStatus === 'blocked' && !publishOverridden
                     ? 'bg-red-400 cursor-not-allowed'
                     : publicationStatus === 'draft_review'
                     ? 'bg-amber-500 hover:bg-amber-600'
                     : 'bg-tmc-orange hover:bg-tmc-orange/90'
                 }`}
-                title={publicationStatus === 'blocked' ? (blockReason || 'Publicação bloqueada') : ''}
+                title={publicationStatus === 'blocked' && !publishOverridden ? (blockReason || 'Publicação bloqueada') : ''}
               >
                 {isPublishing ? (
                   <>
@@ -971,11 +957,23 @@ const CriarPostPage = () => {
         )}
 
         {/* v7: Blocked publish banner */}
-        {publicationStatus === 'blocked' && blockReason && (
+        {publicationStatus === 'blocked' && blockReason && !publishOverridden && (
           <div className="bg-red-50 border-t border-red-200 px-4 py-3">
-            <div className="flex items-center gap-2">
-              <ShieldAlert size={16} className="text-red-500" />
-              <span className="text-sm font-medium text-red-800">Publicação bloqueada: {blockReason}</span>
+            <div className="flex items-start gap-3">
+              <ShieldAlert size={18} className="text-red-500 mt-0.5 flex-shrink-0" />
+              <div className="flex-1">
+                <p className="text-sm font-medium text-red-800">Publicação bloqueada: {blockReason}</p>
+                <p className="text-xs text-red-600 mt-1">
+                  A verificação automática detectou problemas. Revise o conteúdo e, se estiver correto, libere manualmente.
+                </p>
+                <button
+                  onClick={() => setPublishOverridden(true)}
+                  className="mt-2 text-xs px-3 py-1.5 bg-red-600 text-white rounded font-medium hover:bg-red-700 transition-colors flex items-center gap-1.5"
+                >
+                  <ShieldCheck size={14} />
+                  Eu revisei e quero publicar
+                </button>
+              </div>
             </div>
           </div>
         )}
@@ -1188,117 +1186,6 @@ const CriarPostPage = () => {
 
             {/* AI Tools */}
             <div className="flex flex-wrap items-center gap-2 pb-2">
-              {/* Tone Dropdown */}
-              <div className="relative flex-shrink-0">
-                <Tooltip content="Escolha o tom de voz da matéria (formal, casual, etc.)" position="bottom">
-                  <button
-                    onClick={() => setOpenDropdown(openDropdown === 'tone' ? null : 'tone')}
-                    className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
-                      selectedTone
-                        ? 'bg-tmc-orange text-white'
-                        : 'bg-off-white text-dark-gray hover:bg-light-gray'
-                    }`}
-                    aria-label="Selecionar tom de voz"
-                    aria-expanded={openDropdown === 'tone'}
-                  >
-                    <Sparkles size={16} />
-                    <span className="hidden sm:inline">{selectedTone?.name || 'Tom'}</span>
-                    <ChevronDown size={14} />
-                  </button>
-                </Tooltip>
-                {openDropdown === 'tone' && (
-                  <div className="absolute top-full left-0 mt-1 w-64 bg-white rounded-lg shadow-lg border border-light-gray py-2 z-50">
-                    {mockTones.map((tone) => (
-                      <button
-                        key={tone.id}
-                        onClick={() => {
-                          setSelectedTone(tone);
-                          setOpenDropdown(null);
-                        }}
-                        className="w-full px-4 py-2 text-left hover:bg-off-white"
-                      >
-                        <p className="text-sm font-medium text-dark-gray">{tone.name}</p>
-                        <p className="text-xs text-medium-gray">{tone.description}</p>
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
-
-              {/* Persona Dropdown */}
-              <div className="relative flex-shrink-0">
-                <Tooltip content="Defina para qual público-alvo você está escrevendo" position="bottom">
-                  <button
-                    onClick={() => setOpenDropdown(openDropdown === 'persona' ? null : 'persona')}
-                    className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
-                      selectedPersona
-                        ? 'bg-tmc-dark-green text-white'
-                        : 'bg-off-white text-dark-gray hover:bg-light-gray'
-                    }`}
-                    aria-label="Selecionar persona"
-                    aria-expanded={openDropdown === 'persona'}
-                  >
-                    <UserCircle size={16} />
-                    <span className="hidden sm:inline">{selectedPersona?.name || 'Persona'}</span>
-                    <ChevronDown size={14} />
-                  </button>
-                </Tooltip>
-                {openDropdown === 'persona' && (
-                  <div className="absolute top-full left-0 mt-1 w-64 bg-white rounded-lg shadow-lg border border-light-gray py-2 z-50">
-                    {mockPersonas.map((persona) => (
-                      <button
-                        key={persona.id}
-                        onClick={() => {
-                          setSelectedPersona(persona);
-                          setOpenDropdown(null);
-                        }}
-                        className="w-full px-4 py-2 text-left hover:bg-off-white"
-                      >
-                        <p className="text-sm font-medium text-dark-gray">{persona.name}</p>
-                        <p className="text-xs text-medium-gray">{persona.description}</p>
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
-
-              {/* Article Type Dropdown */}
-              <div className="relative flex-shrink-0">
-                <Tooltip content="Escolha o tipo de matéria (destaque, coluna, serviço, etc.)" position="bottom">
-                  <button
-                    onClick={() => setOpenDropdown(openDropdown === 'articleType' ? null : 'articleType')}
-                    className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
-                      selectedArticleType
-                        ? 'bg-blue-600 text-white'
-                        : 'bg-off-white text-dark-gray hover:bg-light-gray'
-                    }`}
-                    aria-label="Selecionar tipo de matéria"
-                    aria-expanded={openDropdown === 'articleType'}
-                  >
-                    <Newspaper size={16} />
-                    <span className="hidden sm:inline">{selectedArticleType?.name || 'Tipo'}</span>
-                    <ChevronDown size={14} />
-                  </button>
-                </Tooltip>
-                {openDropdown === 'articleType' && (
-                  <div className="absolute top-full left-0 mt-1 w-64 bg-white rounded-lg shadow-lg border border-light-gray py-2 z-50">
-                    {articleTypes.map((type) => (
-                      <button
-                        key={type.id}
-                        onClick={() => {
-                          setSelectedArticleType(type);
-                          setOpenDropdown(null);
-                        }}
-                        className="w-full px-4 py-2 text-left hover:bg-off-white"
-                      >
-                        <p className="text-sm font-medium text-dark-gray">{type.name}</p>
-                        <p className="text-xs text-medium-gray">{type.description}</p>
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
-
               <Tooltip content="Ativar/desativar correção ortográfica automática" position="bottom">
                 <button
                   onClick={() => setSpellCheck(!spellCheck)}
@@ -1312,13 +1199,6 @@ const CriarPostPage = () => {
                 >
                   <SpellCheck size={16} />
                   <span className="hidden md:inline">Correção</span>
-                </button>
-              </Tooltip>
-
-              <Tooltip content="Traduzir texto selecionado para outro idioma" position="bottom">
-                <button className="hidden md:flex items-center gap-2 px-3 py-1.5 bg-off-white text-dark-gray hover:bg-light-gray rounded-lg text-sm font-medium transition-colors flex-shrink-0" aria-label="Traduzir texto">
-                  <Languages size={16} />
-                  <span>Traduzir</span>
                 </button>
               </Tooltip>
 
@@ -1804,7 +1684,7 @@ const CriarPostPage = () => {
                 slug={slugValue}
                 targetKeyword={tags?.[0] || ''}
                 hasAuthor={true}
-                articleType={selectedArticleType?.id || 'default'}
+                articleType={'default'}
                 onOptimizeWithAI={(seoAnalysis) => {
                   // Generate intelligent, data-driven prompt based on SEO analysis
                   // Now includes exact scoring rules and keyword extraction

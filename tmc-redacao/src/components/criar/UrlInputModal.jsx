@@ -212,11 +212,8 @@ const UrlInputModal = ({
                     <h3 className="font-semibold text-dark-gray mb-1">
                       {preview.title}
                     </h3>
-                    <p className="text-sm text-medium-gray mb-1">
-                      {preview.channel}
-                    </p>
                     <p className="text-sm text-medium-gray">
-                      Duração: {preview.duration}
+                      {preview.channel}
                     </p>
                   </div>
                 </div>

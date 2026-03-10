@@ -661,6 +661,88 @@ async def transcribe_diag(req: func.HttpRequest) -> func.HttpResponse:
         checks["caption_fetch"] = f"FAIL: {type(e).__name__}: {e}"
         checks["caption_traceback"] = traceback.format_exc()[-1000:]
 
+    # Direct InnerTube test
+    try:
+        result = await YouTubeService._fetch_captions_innertube(test_vid, ["pt", "pt-BR", "en", "es"])
+        if result is not None:
+            raw_segs, lang, ctype = result
+            checks["innertube_test"] = f"OK: {len(raw_segs)} raw segments, lang={lang}, type={ctype}"
+            if raw_segs:
+                checks["innertube_sample"] = raw_segs[0].get("text", "")[:100]
+        else:
+            checks["innertube_test"] = "RETURNED_NONE"
+    except Exception as e:
+        import traceback
+        checks["innertube_test"] = f"FAIL: {type(e).__name__}: {e}"
+        checks["innertube_traceback"] = traceback.format_exc()[-500:]
+
+    # Test alternative timedtext domains
+    try:
+        import httpx as _httpx
+        alt_domains = [
+            "https://video.google.com/timedtext",
+            "https://www.youtube.com/api/timedtext",
+        ]
+        for domain_url in alt_domains:
+            domain_label = domain_url.split("//")[1].split("/")[0]
+            for lang in ["pt", "en"]:
+                for kind in ["asr", ""]:
+                    params = {"v": test_vid, "lang": lang, "fmt": "json3"}
+                    if kind:
+                        params["kind"] = kind
+                    async with _httpx.AsyncClient(timeout=10.0, headers={
+                        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/131.0.0.0",
+                        "Accept-Language": "pt-BR,pt;q=0.9,en;q=0.8",
+                    }) as hc:
+                        r = await hc.get(domain_url, params=params)
+                    key = f"timedtext_{domain_label}_{lang}_{kind or 'manual'}"
+                    if r.status_code == 200:
+                        try:
+                            data = r.json()
+                            evts = data.get("events", [])
+                            checks[key] = f"OK: {len(evts)} events, {len(r.content)} bytes"
+                            break  # found captions for this domain+lang
+                        except Exception:
+                            checks[key] = f"OK_status_but_not_json: {len(r.content)} bytes"
+                    else:
+                        checks[key] = f"HTTP_{r.status_code}"
+                else:
+                    continue
+                break  # found captions for this domain
+    except Exception as e:
+        checks["timedtext_alt_error"] = f"{type(e).__name__}: {e}"
+
+    # Raw InnerTube API call diagnostic
+    try:
+        import httpx
+        from services.youtube_service import _INNERTUBE_CLIENTS
+        for client_cfg in _INNERTUBE_CLIENTS:
+            cname = client_cfg["name"]
+            player_url = f"https://youtubei.googleapis.com/youtubei/v1/player?key={client_cfg['api_key']}&prettyPrint=false"
+            player_body = {"context": client_cfg["context"], "videoId": test_vid}
+            headers = {"Content-Type": "application/json", "User-Agent": client_cfg["user_agent"]}
+            async with httpx.AsyncClient(timeout=15.0) as http:
+                resp = await http.post(player_url, json=player_body, headers=headers)
+            checks[f"innertube_raw_{cname}_status"] = resp.status_code
+            if resp.status_code == 200:
+                pd = resp.json()
+                ps = pd.get("playabilityStatus", {})
+                checks[f"innertube_raw_{cname}_playability"] = ps.get("status", "?")
+                caps = pd.get("captions", {})
+                renderer = caps.get("playerCaptionsTracklistRenderer", {})
+                tracks = renderer.get("captionTracks", [])
+                checks[f"innertube_raw_{cname}_tracks"] = [
+                    {"lang": t.get("languageCode"), "kind": t.get("kind", "manual")}
+                    for t in tracks
+                ]
+                if not caps:
+                    checks[f"innertube_raw_{cname}_captions_key"] = "MISSING"
+                    checks[f"innertube_raw_{cname}_top_keys"] = list(pd.keys())[:15]
+            else:
+                checks[f"innertube_raw_{cname}_body"] = resp.text[:300]
+    except Exception as e:
+        checks["innertube_raw_error"] = f"{type(e).__name__}: {e}"
+
     # Test full handler with mock request
     try:
         from functions.transcription_api import transcribe_handler

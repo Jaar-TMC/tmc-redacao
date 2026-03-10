@@ -1,5 +1,5 @@
 import PropTypes from 'prop-types';
-import { Play, Clock, Eye, Calendar, Tv } from 'lucide-react';
+import { Play, Tv } from 'lucide-react';
 
 /**
  * VideoPreview - Card de preview do vídeo do YouTube
@@ -44,27 +44,10 @@ function VideoPreview({ video }) {
             {video.title}
           </h3>
 
-          <div className="space-y-1.5 text-sm text-medium-gray">
+          <div className="text-sm text-medium-gray">
             <div className="flex items-center gap-2">
               <Tv className="w-4 h-4 flex-shrink-0" aria-hidden="true" />
               <span className="truncate">{video.channel}</span>
-            </div>
-
-            <div className="flex items-center gap-2">
-              <Clock className="w-4 h-4 flex-shrink-0" aria-hidden="true" />
-              <span>{video.duration} de duração</span>
-            </div>
-
-            <div className="flex items-center gap-4">
-              <div className="flex items-center gap-2">
-                <Eye className="w-4 h-4 flex-shrink-0" aria-hidden="true" />
-                <span>{video.views} visualizações</span>
-              </div>
-
-              <div className="flex items-center gap-2">
-                <Calendar className="w-4 h-4 flex-shrink-0" aria-hidden="true" />
-                <span>Publicado {video.publishedAt}</span>
-              </div>
             </div>
           </div>
         </div>

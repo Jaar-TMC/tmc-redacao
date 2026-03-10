@@ -25,8 +25,23 @@ _WEBSHARE_PROXY_USER = os.environ.get("WEBSHARE_PROXY_USER", "")
 _WEBSHARE_PROXY_PASS = os.environ.get("WEBSHARE_PROXY_PASS", "")
 _YOUTUBE_API_KEY = os.environ.get("YOUTUBE_API_KEY", "")
 
-# InnerTube client configs (ANDROID is less blocked from datacenter IPs)
+# InnerTube client configs — tried in order for caption extraction
 _INNERTUBE_CLIENTS = [
+    {
+        "name": "WEB",
+        "context": {
+            "client": {
+                "clientName": "WEB",
+                "clientVersion": "2.20250310.01.00",
+            }
+        },
+        "user_agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/131.0.0.0 Safari/537.36"
+        ),
+        "api_key": "AIzaSyAO_FJ2SlqU8Q4STEHLGCilw_Y9_11qcW8",
+    },
     {
         "name": "ANDROID",
         "context": {
@@ -39,12 +54,44 @@ _INNERTUBE_CLIENTS = [
         "api_key": "AIzaSyA8eiZmM1FaDVjRy-df2KTyQ_vz_yYM39w",
     },
     {
-        "name": "WEB",
+        "name": "IOS",
         "context": {
             "client": {
-                "clientName": "WEB",
-                "clientVersion": "2.20250626.01.00",
+                "clientName": "IOS",
+                "clientVersion": "20.10.3",
             }
+        },
+        "user_agent": "com.google.ios.youtube/20.10.3 (iPhone16,2; U; CPU iOS 18_3_2 like Mac OS X;)",
+        "api_key": "AIzaSyB-63vPrdThhKuerbB2N_l7Kwwcxj6yUAc",
+    },
+    {
+        "name": "TVHTML5_EMBEDDED",
+        "context": {
+            "client": {
+                "clientName": "TVHTML5_SIMPLY_EMBEDDED_PLAYER",
+                "clientVersion": "2.0",
+            },
+            "thirdParty": {
+                "embedUrl": "https://www.google.com",
+            },
+        },
+        "user_agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/131.0.0.0 Safari/537.36"
+        ),
+        "api_key": "AIzaSyAO_FJ2SlqU8Q4STEHLGCilw_Y9_11qcW8",
+    },
+    {
+        "name": "WEB_EMBEDDED",
+        "context": {
+            "client": {
+                "clientName": "WEB_EMBEDDED_PLAYER",
+                "clientVersion": "1.20250310.00.00",
+            },
+            "thirdParty": {
+                "embedUrl": "https://www.google.com",
+            },
         },
         "user_agent": (
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -434,9 +481,11 @@ class YouTubeService:
                 "NoTranscriptFound" in error_type
                 or "NoTranscriptFound" in error_msg
             ):
-                raise CaptionsNotAvailableError(
-                    "Não foram encontradas legendas nos idiomas suportados "
-                    "(pt, en, es)."
+                # Not definitive from datacenter — youtube-transcript-api may
+                # fail to list transcripts even when they exist. Try timedtext.
+                logger.warning(
+                    f"NoTranscriptFound for {video_id} via youtube-transcript-api, "
+                    f"trying timedtext fallback"
                 )
             elif (
                 "VideoUnavailable" in error_type
@@ -526,6 +575,14 @@ class YouTubeService:
                     "YouTube limitou as requisições. "
                     "Tente novamente em alguns minutos."
                 )
+            elif (
+                "NoTranscriptFound" in error_type
+                or "NoTranscriptFound" in error_msg
+            ):
+                raise CaptionsNotAvailableError(
+                    "Não foram encontradas legendas nos idiomas suportados "
+                    "(pt, en, es)."
+                )
             else:
                 raise TranscriptionServiceError(
                     f"Erro ao buscar legendas do YouTube. ({error_type})"
@@ -581,6 +638,8 @@ class YouTubeService:
                 player_body = {
                     "context": client_cfg["context"],
                     "videoId": video_id,
+                    "contentCheckOk": True,
+                    "racyCheckOk": True,
                 }
                 headers = {
                     "Content-Type": "application/json",
@@ -601,19 +660,31 @@ class YouTubeService:
 
                 player_data = resp.json()
 
-                # Check for playability errors
+                # Check for playability errors (but still try captions)
                 status = player_data.get("playabilityStatus", {})
-                if status.get("status") == "ERROR":
+                playability = status.get("status", "")
+                if playability == "ERROR":
                     logger.debug(
                         f"InnerTube playability error for {video_id}: "
                         f"{status.get('reason', 'unknown')}"
                     )
                     continue
+                elif playability not in ("OK", ""):
+                    logger.debug(
+                        f"InnerTube ({client_cfg['name']}) playability={playability} "
+                        f"for {video_id}, still checking captions"
+                    )
 
                 # Extract caption tracks
                 captions = player_data.get("captions", {})
                 renderer = captions.get("playerCaptionsTracklistRenderer", {})
                 caption_tracks = renderer.get("captionTracks", [])
+                logger.debug(
+                    f"InnerTube ({client_cfg['name']}) for {video_id}: "
+                    f"playability={playability}, "
+                    f"caption_tracks={len(caption_tracks)}, "
+                    f"has_captions_key={'captions' in player_data}"
+                )
 
                 if not caption_tracks:
                     logger.debug(
@@ -655,12 +726,24 @@ class YouTubeService:
                         break
 
                 if not selected_track:
-                    logger.debug(
-                        f"InnerTube ({client_cfg['name']}): no matching "
-                        f"language for {video_id}, available: "
-                        f"{[t.get('languageCode') for t in caption_tracks]}"
+                    # Fallback: accept the first available track regardless
+                    # of language — better to return captions in an unexpected
+                    # language than to fail entirely
+                    available_langs = [
+                        t.get("languageCode") for t in caption_tracks
+                    ]
+                    logger.info(
+                        f"InnerTube ({client_cfg['name']}): no exact language "
+                        f"match for {video_id}, available: {available_langs}. "
+                        f"Falling back to first available track."
                     )
-                    continue
+                    selected_track = caption_tracks[0]
+                    selected_lang = selected_track.get("languageCode", "unknown")
+                    selected_type = (
+                        "auto-generated"
+                        if selected_track.get("kind") == "asr"
+                        else "manual"
+                    )
 
                 # Fetch caption content from authenticated baseUrl
                 base_url = selected_track["baseUrl"]
