@@ -182,7 +182,10 @@ const TextoBaseFeed = ({
     }
   }, [materias.length]); // Only run when materias array length changes
 
-  // Carregar artigos disponíveis do API (excluindo já selecionados)
+  // Minimum content length for article generation (matches backend MIN_SOURCE_CHARS)
+  const MIN_CONTENT_CHARS = 300;
+
+  // Carregar artigos disponíveis do API (excluindo já selecionados e short articles)
   const loadAvailableArticles = useCallback(async () => {
     if (!fonte?.dados) return;
 
@@ -191,18 +194,23 @@ const TextoBaseFeed = ({
 
     try {
       const response = await getArticles({ limit: 50 });
-      const allArticles = (response?.articles || []).map(article => ({
-        id: article.id,
-        title: article.title,
-        preview: article.summary || article.content?.substring(0, 200) || '',
-        content: article.content,
-        category: article.category || 'Geral',
-        source: article.source_name || article.source,
-        url: article.link || article.url,
-        favicon: article.favicon_url || `https://www.google.com/s2/favicons?domain=${new URL(article.link || article.url || 'https://example.com').hostname}`,
-        publishedAt: article.published_at ? new Date(article.published_at) : new Date(),
-        tags: article.tags || []
-      }));
+      const allArticles = (response?.items || response?.articles || [])
+        .filter(article => {
+          const len = article.contentLength ?? (article.content || '').length;
+          return len >= MIN_CONTENT_CHARS;
+        })
+        .map(article => ({
+          id: article.id,
+          title: article.title,
+          preview: article.summary || article.content?.substring(0, 200) || '',
+          content: article.content,
+          category: article.category || 'Geral',
+          source: article.source_name || article.source,
+          url: article.link || article.url,
+          favicon: article.favicon_url || `https://www.google.com/s2/favicons?domain=${new URL(article.link || article.url || 'https://example.com').hostname}`,
+          publishedAt: article.published_at ? new Date(article.published_at) : new Date(),
+          tags: article.tags || []
+        }));
 
       const selectedIds = new Set(fonte.dados.map(article => article.id));
       const available = allArticles.filter(article => !selectedIds.has(article.id));

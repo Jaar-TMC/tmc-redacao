@@ -25,20 +25,30 @@ const FeedSelector = ({ onClose, onSelect }) => {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState(null);
 
+  // Minimum content length required for article generation (matches backend MIN_SOURCE_CHARS)
+  const MIN_CONTENT_CHARS = 300;
+
   // Transform API articles to local format (shared between fetch and retry)
+  // Filters out articles with content shorter than MIN_CONTENT_CHARS
   const transformApiArticles = useCallback((items) => {
-    return (items || []).map(article => ({
-      id: article.id,
-      title: article.title,
-      preview: article.summary || article.content?.substring(0, 200) || '',
-      content: article.content,
-      category: article.category || 'Geral',
-      source: article.source_name || article.source,
-      url: article.link || article.url,
-      favicon: article.favicon_url || `https://www.google.com/s2/favicons?domain=${new URL(article.link || article.url || 'https://example.com').hostname}`,
-      publishedAt: article.published_at ? new Date(article.published_at) : new Date(),
-      tags: article.tags || []
-    }));
+    return (items || [])
+      .filter(article => {
+        // Use contentLength from backend if available, otherwise measure content
+        const len = article.contentLength ?? (article.content || '').length;
+        return len >= MIN_CONTENT_CHARS;
+      })
+      .map(article => ({
+        id: article.id,
+        title: article.title,
+        preview: article.summary || article.content?.substring(0, 200) || '',
+        content: article.content,
+        category: article.category || 'Geral',
+        source: article.source_name || article.source,
+        url: article.link || article.url,
+        favicon: article.favicon_url || `https://www.google.com/s2/favicons?domain=${new URL(article.link || article.url || 'https://example.com').hostname}`,
+        publishedAt: article.published_at ? new Date(article.published_at) : new Date(),
+        tags: article.tags || []
+      }));
   }, []);
 
   // Shared fetch logic (used by effect and retry)

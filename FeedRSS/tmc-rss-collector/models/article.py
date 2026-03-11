@@ -133,7 +133,8 @@ class Article(ArticleBase):
             "scoreInesperado": self.score_inesperado,
             "scoreImpacto": self.score_impacto,
             "scoreBuscaAgora": self.score_busca_agora,
-            "scoreConversa": self.score_conversa
+            "scoreConversa": self.score_conversa,
+            "contentLength": len(self.content) if self.content else 0
         }
 
 
