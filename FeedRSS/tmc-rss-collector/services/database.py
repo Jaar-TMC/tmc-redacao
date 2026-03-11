@@ -30,10 +30,7 @@ logger = logging.getLogger(__name__)
 
 
 class ConnectionPool:
-    """Simple connection pool for pymssql with idle-based health checks."""
-
-    # Only health-check connections idle for longer than this (seconds)
-    IDLE_CHECK_THRESHOLD = 60
+    """Simple connection pool for pymssql with health checks on every retrieval."""
 
     def __init__(self, create_conn_func, max_size=10):
         self._create_conn = create_conn_func
@@ -41,27 +38,22 @@ class ConnectionPool:
         self._max_size = max_size
         self._current_size = 0
         self._lock = threading.Lock()
-        # Track when each connection was last returned to the pool
-        self._return_times: dict = {}  # id(conn) -> timestamp
 
     def get_connection(self):
-        import time
         try:
             conn = self._pool.get_nowait()
-            # Only health-check if the connection has been idle too long
-            returned_at = self._return_times.pop(id(conn), 0)
-            idle_seconds = time.monotonic() - returned_at if returned_at else 999
-            if idle_seconds > self.IDLE_CHECK_THRESHOLD:
-                try:
-                    cursor = conn.cursor()
-                    cursor.execute("SELECT 1")
-                    cursor.fetchone()
-                    return conn
-                except Exception:
-                    # Connection is dead, create a new one
-                    self.close_bad_connection(conn)
-                    return self._create_conn()
-            return conn
+            # Always health-check pooled connections — Azure SQL silently kills
+            # idle connections and there is no reliable way to know if a connection
+            # is still alive without probing it.
+            try:
+                cursor = conn.cursor()
+                cursor.execute("SELECT 1")
+                cursor.fetchone()
+                return conn
+            except Exception:
+                # Connection is dead, create a new one
+                self.close_bad_connection(conn)
+                return self._create_conn()
         except queue.Empty:
             with self._lock:
                 if self._current_size < self._max_size:
@@ -71,12 +63,9 @@ class ConnectionPool:
             return self._pool.get(timeout=30)
 
     def return_connection(self, conn):
-        import time
         try:
-            self._return_times[id(conn)] = time.monotonic()
             self._pool.put_nowait(conn)
         except queue.Full:
-            self._return_times.pop(id(conn), None)
             try:
                 conn.close()
             except Exception:
@@ -85,7 +74,6 @@ class ConnectionPool:
                 self._current_size -= 1
 
     def close_bad_connection(self, conn):
-        self._return_times.pop(id(conn), None)
         try:
             conn.close()
         except Exception:
@@ -137,12 +125,18 @@ class DatabaseService:
 
     @contextmanager
     def get_connection(self):
-        """Context manager that gets a connection from the pool and returns it after use."""
+        """Context manager that gets a connection from the pool and returns it after use.
+
+        If the connection is dead (OperationalError/InterfaceError during pool acquisition),
+        the retry decorator on _get_pooled_connection handles reconnection.
+        If the connection dies mid-query, the pool health-check on the next get_connection()
+        call will discard it and create a fresh one.
+        """
         conn = self._get_pooled_connection()
         try:
             yield conn
         except (pymssql.OperationalError, pymssql.InterfaceError):
-            # Connection went bad during use; discard it
+            # Connection went bad during use; discard it so the pool doesn't reuse it
             self._pool.close_bad_connection(conn)
             raise
         except Exception:
