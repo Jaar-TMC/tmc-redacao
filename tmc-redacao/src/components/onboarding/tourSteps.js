@@ -69,6 +69,20 @@ export const tourSteps = {
       beaconPosition: 'top-right'
     },
     {
+      target: '[data-tour="source-prompt"]',
+      title: 'Pesquisar na Web',
+      content: 'Descreva um tema e o sistema busca fontes atualizadas automaticamente.',
+      position: 'bottom',
+      beaconPosition: 'top-right'
+    },
+    {
+      target: '[data-tour="source-transcricao"]',
+      title: 'Transcrição',
+      content: 'Crie matérias a partir de transcrições de áudio ou vídeo.',
+      position: 'bottom',
+      beaconPosition: 'top-right'
+    },
+    {
       target: '[data-tour="source-zero"]',
       title: 'Criar do Zero',
       content: 'Cole qualquer texto ou comece do zero.',

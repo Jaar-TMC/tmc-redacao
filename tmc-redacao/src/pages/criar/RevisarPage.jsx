@@ -182,6 +182,7 @@ const RevisarPage = () => {
     const fonteLabel = fonte?.tipo === 'transcription' ? 'Transcrição de Vídeo'
       : fonte?.tipo === 'link' ? 'Link da Web'
       : fonte?.tipo === 'tema' ? 'Tema'
+      : fonte?.tipo === 'prompt' ? 'Pesquisa na Web'
       : 'Texto';
     const fonteTitle = fonte?.tipo === 'transcription'
       ? (fonte.dados?.video?.title || 'Vídeo do YouTube')
@@ -300,6 +301,9 @@ const RevisarPage = () => {
       // Get source title for enrichment search
       const tituloFonte = fonte?.dados?.[0]?.title || reviewData.textoBase.title || '';
 
+      // Prompt metadata from variant selections (if prompt source)
+      const promptMeta = textoBase?.variantSelections?.promptMeta;
+
       // Call the real generation API
       const result = await generateArticle({
         texto_base: reviewData._raw.textoBaseContent,
@@ -313,6 +317,9 @@ const RevisarPage = () => {
         creditos: reviewData._raw.creditos || '',
         tags: reviewData._raw.tags || [],
         titulo_fonte: tituloFonte,
+        source_type: promptMeta?.source_type || 'manual',
+        research_prompt: promptMeta?.research_prompt || null,
+        research_source_urls: promptMeta?.research_source_urls || [],
       });
 
       // Stop progress simulation
@@ -376,7 +383,7 @@ const RevisarPage = () => {
     } finally {
       isGeneratingRef.current = false;
     }
-  }, [navigate, PHASES, reviewData, setResultado, fonte?.dados]);
+  }, [navigate, PHASES, reviewData, setResultado, fonte?.dados, textoBase?.variantSelections?.promptMeta]);
 
   // Cleanup timers on unmount
   useEffect(() => {
@@ -580,6 +587,14 @@ const RevisarPage = () => {
             Confira tudo que será usado na geração da matéria
           </p>
         </div>
+
+        {/* Prompt source badge */}
+        {fonte?.tipo === 'prompt' && (
+          <div className="flex items-center gap-2 text-sm text-tmc-orange font-medium mb-4">
+            <Search size={14} />
+            <span>Fonte: Pesquisa na Web ({textoBase?.variantSelections?.promptMeta?.source_count || 0} fontes)</span>
+          </div>
+        )}
 
         {/* Two Column Layout */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">

@@ -5,3 +5,4 @@ export { default as TextoBaseFeed } from './TextoBaseFeed';
 export { default as TextoBaseLink } from './TextoBaseLink';
 export { default as TextoBaseTranscricao } from './TextoBaseTranscricao';
 export { default as TextoBaseZero } from './TextoBaseZero'; // Criar do Zero
+export { default as TextoBasePrompt } from './TextoBasePrompt'; // Criar por Prompt

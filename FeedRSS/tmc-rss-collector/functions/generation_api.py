@@ -151,6 +151,17 @@ class GenerateRequest(BaseModel):
     image_url: Optional[str] = Field(default=None, description="Article image URL for Schema.org")
     author_name: Optional[str] = Field(default=None, description="Nome do jornalista responsavel")
     author_url: Optional[str] = Field(default=None, description="URL do perfil do jornalista")
+    # Criar por Prompt support
+    source_type: str = Field(default="manual", description="Source type: manual|feed|prompt")
+
+    @field_validator('source_type')
+    @classmethod
+    def validate_source_type(cls, v):
+        if v not in ("manual", "feed", "prompt"):
+            raise ValueError("source_type must be manual, feed, or prompt")
+        return v
+    research_source_urls: list = Field(default_factory=list, description="URLs from research step")
+    research_prompt: Optional[str] = Field(default=None, description="Original topic prompt (for prompt-based generation)")
 
     @field_validator('texto_base', 'orientacao_lide', 'contexto', 'creditos', 'citacoes', mode='before')
     @classmethod
@@ -616,7 +627,12 @@ async def generate_article_handler(req: func.HttpRequest) -> func.HttpResponse:
         # Force safety in production mode
         if PRODUCTION_SAFETY_MODE:
             request_data.skip_verification = False
-            request_data.skip_enrichment = False
+            # For prompt-based sources, skip enrichment: the texto_base is already
+            # assembled from Exa research results — re-enriching would be redundant,
+            # double the Exa cost, and risk Azure Function timeout.
+            # Verification (Phase 3) still runs to catch fabrication.
+            if request_data.source_type != "prompt":
+                request_data.skip_enrichment = False
 
         # Phase 1.1: Hard minimum source threshold
         source_char_count = len(request_data.texto_base.strip())
@@ -641,13 +657,27 @@ async def generate_article_handler(req: func.HttpRequest) -> func.HttpResponse:
             nota_forced = True
 
         # Short source: force simpler article types to limit expansion
+        # SKIP for prompt-based sources — Exa material is curated web content
         if (source_char_count < SHORT_SOURCE_THRESHOLD
-                and request_data.tipo_materia in ("destaque", "reportagem", "analise")):
+                and request_data.tipo_materia in ("destaque", "reportagem", "analise")
+                and request_data.source_type != "prompt"):
             logger.info(
                 f"[{correlation_id}] Short source ({source_char_count} < {SHORT_SOURCE_THRESHOLD}), "
                 f"downgrading tipo_materia from {request_data.tipo_materia} to servico"
             )
             request_data.tipo_materia = "servico"
+
+        # For prompt-based sources:
+        # - Use research_prompt as titulo_fonte if not set
+        # - Skip enrichment (sources are already from Exa research)
+        if request_data.source_type == "prompt":
+            if not request_data.titulo_fonte and request_data.research_prompt:
+                request_data.titulo_fonte = request_data.research_prompt
+            request_data.skip_enrichment = True
+            logger.info(
+                f"[{correlation_id}] Prompt-based source: skipping enrichment "
+                f"(sources already from Exa research, {source_char_count} chars)"
+            )
 
         # Import services (lazy to avoid startup issues)
         from services.llm_service import get_llm_service
@@ -765,6 +795,7 @@ async def generate_article_handler(req: func.HttpRequest) -> func.HttpResponse:
                 f"Texto-base com apenas {source_char_count} caracteres. "
                 f"Tipo forçado para 'nota' por segurança editorial."
             )
+            result["source_type"] = request_data.source_type
 
         # ==============================================================
         # Phase 2.3: Temporal Decontamination (post-generation, pre-verification)
@@ -904,13 +935,20 @@ async def generate_article_handler(req: func.HttpRequest) -> func.HttpResponse:
 
         # Skip quality loop for nota/servico — short, source-constrained formats
         # with minimal fabrication risk. Saves 30-90s per article.
+        # Also skip for prompt-based sources — the quality loop can add 2-4 extra
+        # LLM calls (120-240s), pushing total past Azure's 230s gateway timeout.
+        # Verification (Phase 3) still runs; safety gates still block bad articles.
         quality_loop_skip_types = ("nota", "servico")
+        skip_quality_loop = (
+            request_data.tipo_materia in quality_loop_skip_types
+            or request_data.source_type == "prompt"
+        )
 
         if (QUALITY_LOOP_ENABLED
                 and is_fact_check_enabled()
                 and not request_data.skip_verification
                 and result.get("verification", {}).get("is_verified")
-                and request_data.tipo_materia not in quality_loop_skip_types):
+                and not skip_quality_loop):
 
             quality_loop_start = time.time()
             verification_data = result.get("verification", {})
@@ -1211,14 +1249,22 @@ async def generate_article_handler(req: func.HttpRequest) -> func.HttpResponse:
         # source from being inflated to 5000+ verified_chars and passing expansion gates.
         # The enrichment provides CONTEXT, not SOURCE material.
         effective_source_len = source_len  # Always use raw source length
-        # Only use enrichment-adjusted length if it's < 2x the raw source
-        # (indicates enrichment confirmed existing content, not fabricated new context)
-        if enrichment and hasattr(enrichment, 'verified_chars') and enrichment.verified_chars > 0:
-            if enrichment.verified_chars <= source_len * 2:
-                effective_source_len = enrichment.verified_chars
-        elif enrichment and isinstance(enrichment, dict) and enrichment.get('verified_chars', 0) > 0:
-            if enrichment['verified_chars'] <= source_len * 2:
-                effective_source_len = enrichment['verified_chars']
+
+        if request_data.source_type == "prompt":
+            # For prompt-based: enrichment IS the source, use verified_chars directly
+            if enrichment and hasattr(enrichment, 'verified_chars') and enrichment.verified_chars > 0:
+                effective_source_len = max(enrichment.verified_chars, source_len)
+            elif enrichment and isinstance(enrichment, dict) and enrichment.get('verified_chars', 0) > 0:
+                effective_source_len = max(enrichment['verified_chars'], source_len)
+        else:
+            # Only use enrichment-adjusted length if it's < 2x the raw source
+            # (indicates enrichment confirmed existing content, not fabricated new context)
+            if enrichment and hasattr(enrichment, 'verified_chars') and enrichment.verified_chars > 0:
+                if enrichment.verified_chars <= source_len * 2:
+                    effective_source_len = enrichment.verified_chars
+            elif enrichment and isinstance(enrichment, dict) and enrichment.get('verified_chars', 0) > 0:
+                if enrichment['verified_chars'] <= source_len * 2:
+                    effective_source_len = enrichment['verified_chars']
 
         safety = evaluate_safety_gates(
             verification_data=result.get("verification", {}),
@@ -1795,6 +1841,9 @@ def _build_audit_data(
             "persona": request_data.persona,
             "source_len": len(request_data.texto_base.strip()),
             "titulo_fonte": request_data.titulo_fonte,
+            "source_type": request_data.source_type,
+            "research_prompt": request_data.research_prompt,
+            "research_source_urls": request_data.research_source_urls,
         },
         "system_prompt_hash": prompt_hash,
         "user_prompt_text": result.pop("_user_prompt", None),

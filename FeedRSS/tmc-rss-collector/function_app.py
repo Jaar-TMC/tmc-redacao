@@ -623,6 +623,48 @@ async def edit_article(req: func.HttpRequest) -> func.HttpResponse:
 
 
 # ========================================
+# HTTP TRIGGERS - RESEARCH (Criar por Prompt)
+# ========================================
+
+@app.route(route="research", methods=["POST", "OPTIONS"])
+@with_cors
+@require_auth
+async def research(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    POST /api/research - Pesquisa fontes web via Exa AI para um dado prompt.
+
+    Body:
+        {
+            "prompt": "Descrição do assunto (30-500 chars)",
+            "categoria": "politica|economia|esportes|entretenimento|geral",
+            "date_range_days": 7,
+            "max_results": 10,
+            "language": "pt"
+        }
+
+    Returns:
+        {
+            "sources": [...],
+            "search_queries": [...],
+            "total_chars": 12345,
+            "search_duration_ms": 3200
+        }
+    """
+    from services.rate_limiter import RateLimiter
+    retry_after = RateLimiter.get().check("research")
+    if retry_after is not None:
+        import json as _json
+        return func.HttpResponse(
+            _json.dumps({"error": "Rate limit exceeded", "retry_after_seconds": round(retry_after, 1)}),
+            status_code=429,
+            headers={"Retry-After": str(int(retry_after) + 1)},
+            mimetype="application/json",
+        )
+    from functions.research_api import research_topic_handler
+    return await research_topic_handler(req)
+
+
+# ========================================
 # HTTP TRIGGERS - TRANSCRIPTION DIAGNOSTIC (temporary)
 # ========================================
 

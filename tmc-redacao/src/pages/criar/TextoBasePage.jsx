@@ -10,6 +10,7 @@ import {
   TextoBaseLink,
   TextoBaseZero
 } from './variantes';
+import TextoBasePrompt from './variantes/TextoBasePrompt';
 
 /**
  * TextoBasePage - Etapa 2 do fluxo de criação de matéria
@@ -73,6 +74,11 @@ const TextoBasePage = () => {
         selections.cachedMaterias = data.cachedMaterias;
       }
       setVariantSelections(selections);
+    }
+
+    // Persist prompt metadata (source_type, research_prompt, research_source_urls, source_count)
+    if (data && data._promptMeta) {
+      setVariantSelections({ promptMeta: data._promptMeta });
     }
 
     // Verificar se pode prosseguir baseado nos dados
@@ -289,6 +295,14 @@ const TextoBasePage = () => {
             onChangeSource={handleChangeSource}
             onDataChange={handleDataChange}
             savedSelections={textoBase.variantSelections}
+          />
+        );
+      case 'prompt':
+        return (
+          <TextoBasePrompt
+            fonte={fonte}
+            onChangeSource={handleChangeSource}
+            onDataChange={handleDataChange}
           />
         );
       case 'zero':

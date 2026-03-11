@@ -24,7 +24,7 @@ export const useCriar = () => {
 const initialState = {
   // Etapa 1: Fonte selecionada
   fonte: {
-    tipo: null, // 'tema' | 'feed' | 'transcription' | 'link'
+    tipo: null, // 'tema' | 'feed' | 'transcription' | 'link' | 'prompt'
     dados: null, // Dados específicos da fonte (tema, artigos do feed, trechos transcrição, etc.)
   },
 
@@ -35,7 +35,7 @@ const initialState = {
     modoEdicao: 'blocos', // 'blocos' | 'texto'
     blocosSelecionados: new Set(),
     // Persisted variant selections (survives navigation between steps)
-    variantSelections: null, // { selectedTopics: string[], editedTexts: {}, topicTexts: {} }
+    variantSelections: null, // { selectedTopics: string[], editedTexts: {}, topicTexts: {}, promptMeta: null }
   },
 
   // Etapa 2 (Multi-Source): Story Fusion state

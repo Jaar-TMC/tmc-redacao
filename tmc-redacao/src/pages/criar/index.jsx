@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowLeft, HelpCircle, Video, Flame, Newspaper, PenLine } from 'lucide-react';
+import { ArrowLeft, HelpCircle, Video, Flame, Newspaper, PenLine, Search, Mic } from 'lucide-react';
 import { Stepper } from '../../components/criar';
 import SourceCard from '../../components/criar/SourceCard';
 import UrlInputModal from '../../components/criar/UrlInputModal';
@@ -62,9 +62,14 @@ const CriarMateria = () => {
     } else if (sourceType === 'feed') {
       setExpandedSelector('feed');
       setSelectedSource('feed');
+    } else if (sourceType === 'prompt') {
+      setFonte('prompt', {});
+      navigate('/criar/texto-base');
     } else if (sourceType === 'zero') {
       setFonte('zero', {});
       navigate('/criar/texto-base');
+    } else if (sourceType === 'transcricao') {
+      navigate('/transcricao');
     }
   };
 
@@ -216,6 +221,28 @@ const CriarMateria = () => {
                   />
                 </div>
               )}
+
+              {/* Pesquisar na Web */}
+              <div data-tour="source-prompt">
+                <SourceCard
+                  icon={<Search size={28} strokeWidth={1.5} />}
+                  title="PESQUISAR NA WEB"
+                  description="Descreva um tema e encontre fontes atualizadas para sua matéria"
+                  selected={selectedSource === 'prompt'}
+                  onClick={() => handleSourceClick('prompt')}
+                />
+              </div>
+
+              {/* Transcrição - áudio/vídeo */}
+              <div data-tour="source-transcricao">
+                <SourceCard
+                  icon={<Mic size={28} strokeWidth={1.5} />}
+                  title="TRANSCRIÇÃO"
+                  description="Crie a partir de uma transcrição de áudio ou vídeo"
+                  selected={selectedSource === 'transcricao'}
+                  onClick={() => handleSourceClick('transcricao')}
+                />
+              </div>
 
               {/* Criar do Zero - texto livre */}
               <div data-tour="source-zero">

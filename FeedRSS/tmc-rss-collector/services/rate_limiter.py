@@ -52,6 +52,7 @@ class RateLimiter:
         "generate-tags": {"rate": 2.0, "burst": 10},
         "merge-topics": {"rate": 1.0, "burst": 5},
         "edit-article": {"rate": 1.0, "burst": 5},
+        "research": {"rate": 1.0, "burst": 3},
         "transcribe": {"rate": 0.167, "burst": 10},
         "auth-login": {"rate": 0.2, "burst": 5},
         "auth-forgot-password": {"rate": 0.1, "burst": 3},

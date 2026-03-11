@@ -516,6 +516,27 @@ export async function editArticle({
 }
 
 /**
+ * Research a topic using web search via Exa AI
+ * @param {Object} params - Research parameters
+ * @param {string} params.prompt - Topic description to research
+ * @param {number} [params.dateRangeDays=7] - Number of days to search back
+ * @param {number} [params.maxResults=10] - Maximum sources to return
+ * @param {string} [params.categoria] - Optional editorial category filter
+ * @returns {Promise<{sources: Array, search_queries: string[]}>}
+ */
+export async function researchTopic({ prompt, dateRangeDays = 7, maxResults = 10, categoria = null }) {
+  return fetchApi('/research', {
+    method: 'POST',
+    body: JSON.stringify({
+      prompt,
+      date_range_days: dateRangeDays,
+      max_results: maxResults,
+      categoria,
+    }),
+  });
+}
+
+/**
  * Merge topics from multiple articles into a story-centric structure.
  *
  * Transforms article-by-article view into unified story view,
@@ -813,6 +834,7 @@ export default {
   extractTopics,
   generateTags,
   mergeTopics,
+  researchTopic,
   editArticle,
   transcribeVideo,
   getUserArticles,
