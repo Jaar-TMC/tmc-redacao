@@ -102,15 +102,6 @@ const RedacaoPage = () => {
       return;
     }
 
-    // Cancel any in-flight request
-    if (abortControllerRef.current) {
-      abortControllerRef.current.abort();
-    }
-
-    // Clear any pending debounce/skeleton timers
-    clearTimeout(fetchDebounceRef.current);
-    clearTimeout(skeletonTimerRef.current);
-
     // Check if filters changed (not just page)
     const filtersChanged =
       prevFiltersRef.current.searchQuery !== filters.searchQuery ||
@@ -162,11 +153,14 @@ const RedacaoPage = () => {
       return;
     }
 
+    // Create AbortController BEFORE debounce so cleanup can always cancel it
+    const abortController = new AbortController();
+    abortControllerRef.current = abortController;
+
     // Debounce API call to coalesce rapid filter changes (150ms)
     fetchDebounceRef.current = setTimeout(() => {
-      // Create new AbortController for this request
-      const abortController = new AbortController();
-      abortControllerRef.current = abortController;
+      // Don't start fetch if already aborted (cleanup ran during debounce wait)
+      if (abortController.signal.aborted) return;
 
       const fetchArticles = async () => {
         setIsLoading(true);
@@ -174,7 +168,9 @@ const RedacaoPage = () => {
 
         // Grace period: only show skeleton if fetch takes >200ms
         skeletonTimerRef.current = setTimeout(() => {
-          setShowSkeleton(true);
+          if (!abortController.signal.aborted) {
+            setShowSkeleton(true);
+          }
         }, 200);
 
         try {
@@ -218,7 +214,9 @@ const RedacaoPage = () => {
           if (err.name === 'AbortError') {
             return;
           }
-          setError(err.message || 'Erro ao carregar matérias');
+          if (!abortController.signal.aborted) {
+            setError(err.message || 'Erro ao carregar matérias');
+          }
         } finally {
           // Only set loading to false if not aborted
           if (!abortController.signal.aborted) {
@@ -236,9 +234,7 @@ const RedacaoPage = () => {
     return () => {
       clearTimeout(fetchDebounceRef.current);
       clearTimeout(skeletonTimerRef.current);
-      if (abortControllerRef.current) {
-        abortControllerRef.current.abort();
-      }
+      abortController.abort();
     };
   }, [filters.searchQuery, filters.tag, filters.category, filters.source, filters.urgency, filters.scoreClassification, filters.sortOrder, currentPage, getCachedData, setCachedData]);
 
