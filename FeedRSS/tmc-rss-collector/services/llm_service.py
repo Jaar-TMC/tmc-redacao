@@ -1795,8 +1795,8 @@ class LLMService:
         _cost_map = {
             "claude-sonnet-4-5": (3.00 / 1_000_000, 15.00 / 1_000_000),
             "claude-sonnet-4-5-20250929": (3.00 / 1_000_000, 15.00 / 1_000_000),
-            "claude-haiku-4-5": (0.80 / 1_000_000, 4.00 / 1_000_000),
-            "claude-haiku-4-5-20251001": (0.80 / 1_000_000, 4.00 / 1_000_000),
+            "claude-haiku-4-5": (1.00 / 1_000_000, 5.00 / 1_000_000),
+            "claude-haiku-4-5-20251001": (1.00 / 1_000_000, 5.00 / 1_000_000),
         }
         input_rate, output_rate = _cost_map.get(effective_model, (3.00 / 1_000_000, 15.00 / 1_000_000))
         input_cost = input_tokens * input_rate

@@ -24,6 +24,7 @@ logger = logging.getLogger(__name__)
 MAX_CONCURRENT = int(os.environ.get('RSS_MAX_CONCURRENT', '10'))
 FETCH_TIMEOUT = int(os.environ.get('RSS_FETCH_TIMEOUT', '30'))
 MAX_ARTICLES = int(os.environ.get('RSS_MAX_ARTICLES_PER_FEED', '100'))
+MIN_CONTENT_CHARS = int(os.environ.get('RSS_MIN_CONTENT_CHARS', '300'))
 
 
 async def rss_collector_handler(timer: func.TimerRequest) -> None:
@@ -89,6 +90,7 @@ async def rss_collector_handler(timer: func.TimerRequest) -> None:
     total_found = 0
     total_errors = 0
     total_scored = 0
+    total_short_filtered = 0
 
     for result in results:
         if isinstance(result, Exception):
@@ -97,13 +99,15 @@ async def rss_collector_handler(timer: func.TimerRequest) -> None:
             total_new += result.get('new', 0)
             total_found += result.get('found', 0)
             total_scored += result.get('scored', 0)
+            total_short_filtered += result.get('short_filtered', 0)
 
     # Log final
     duration = (datetime.utcnow() - start_time).total_seconds()
     logger.info(
         f"[{execution_id}] RSS Collector finished: "
         f"{len(sources)} sources, {total_found} found, {total_new} new, "
-        f"{total_scored} scored, {total_errors} errors, {duration:.2f}s"
+        f"{total_scored} scored, {total_short_filtered} short filtered, "
+        f"{total_errors} errors, {duration:.2f}s"
     )
 
 
@@ -155,6 +159,32 @@ async def process_single_source(source: Source, db, parser: RSSParser,
         articles_duplicate = articles_found - len(unique_articles)
 
         logger.debug(f"[{execution_id}] {source_name}: {len(unique_articles)} unique, {articles_duplicate} duplicates")
+
+        # 2b. Filter out short articles (< MIN_CONTENT_CHARS) to avoid wasting
+        # AI tokens on classification, scoring, embedding for unusable articles
+        before_filter = len(unique_articles)
+        unique_articles = [
+            a for a in unique_articles
+            if a.content and len(a.content) >= MIN_CONTENT_CHARS
+        ]
+        articles_short = before_filter - len(unique_articles)
+        if articles_short > 0:
+            logger.info(
+                f"[{execution_id}] {source_name}: Filtered {articles_short} articles "
+                f"with content < {MIN_CONTENT_CHARS} chars"
+            )
+
+        if not unique_articles:
+            db.update_source_last_fetch(source.id, 0)
+            db.log_collection(
+                source_id=source.id,
+                status='success',
+                articles_found=articles_found,
+                articles_new=0,
+                articles_duplicate=articles_duplicate,
+                duration_ms=_get_duration_ms(start_time)
+            )
+            return {'found': articles_found, 'new': 0, 'duplicate': articles_duplicate, 'short_filtered': articles_short}
 
         # 3. Enriquecer artigos sem imagem (limitar a 5, processar em paralelo)
         articles_to_enrich = [a for a in unique_articles if not a.image_url][:5]
@@ -220,7 +250,8 @@ async def process_single_source(source: Source, db, parser: RSSParser,
             'found': articles_found,
             'new': articles_new,
             'duplicate': articles_duplicate,
-            'scored': articles_scored
+            'scored': articles_scored,
+            'short_filtered': articles_short
         }
 
     except Exception as e:
@@ -278,5 +309,6 @@ async def collect_single_source_handler(source_id: str) -> Dict[str, Any]:
         'source_name': source.name,
         'articles_found': result.get('found', 0),
         'articles_new': result.get('new', 0),
-        'articles_duplicate': result.get('duplicate', 0)
+        'articles_duplicate': result.get('duplicate', 0),
+        'articles_short_filtered': result.get('short_filtered', 0)
     }
