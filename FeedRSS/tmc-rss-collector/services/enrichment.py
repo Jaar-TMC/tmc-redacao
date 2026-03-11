@@ -11,6 +11,26 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+# Module-level shared HTTP client for image enrichment (connection pooling)
+_shared_http_client: Optional[httpx.AsyncClient] = None
+
+
+def _get_enrichment_client() -> httpx.AsyncClient:
+    """Get or create the shared HTTP client for enrichment requests."""
+    global _shared_http_client
+    if _shared_http_client is None:
+        _shared_http_client = httpx.AsyncClient(
+            timeout=10,
+            follow_redirects=True,
+            limits=httpx.Limits(max_connections=10, max_keepalive_connections=5),
+            headers={
+                'User-Agent': 'TMC-RSS-Collector/1.0 (+https://tmc.com.br)',
+                'Accept': 'text/html,application/xhtml+xml',
+                'Accept-Language': 'pt-BR,pt;q=0.9,en;q=0.8'
+            }
+        )
+    return _shared_http_client
+
 
 async def extract_image_url(article_url: str, timeout: int = 10) -> Optional[str]:
     """
@@ -29,17 +49,8 @@ async def extract_image_url(article_url: str, timeout: int = 10) -> Optional[str
         URL da imagem ou None se não encontrar
     """
     try:
-        async with httpx.AsyncClient() as client:
-            response = await client.get(
-                article_url,
-                timeout=timeout,
-                follow_redirects=True,
-                headers={
-                    'User-Agent': 'TMC-RSS-Collector/1.0 (+https://tmc.com.br)',
-                    'Accept': 'text/html,application/xhtml+xml',
-                    'Accept-Language': 'pt-BR,pt;q=0.9,en;q=0.8'
-                }
-            )
+        client = _get_enrichment_client()
+        response = await client.get(article_url)
 
         if response.status_code != 200:
             logger.warning(f"Failed to fetch {article_url}: status {response.status_code}")

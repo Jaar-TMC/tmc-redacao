@@ -1076,38 +1076,7 @@ const CriarPostPage = () => {
 
         {/* v7.1: Regeneration notice — HIDDEN (quality loop handles this internally) */}
 
-        {/* v7.1: Schema.org preview */}
-        {schemaOrg && (
-          <div className="px-4 pb-1">
-            <div className="text-xs px-3 py-2 rounded border bg-gray-50 border-gray-200 text-gray-700">
-              <div className="flex items-center justify-between">
-                <button
-                  onClick={() => setShowSchemaOrg(!showSchemaOrg)}
-                  className="flex items-center gap-1 hover:text-gray-900 font-medium"
-                >
-                  <Code size={14} />
-                  <span>Schema.org (JSON-LD)</span>
-                  {showSchemaOrg ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
-                </button>
-                <button
-                  onClick={() => {
-                    navigator.clipboard.writeText(JSON.stringify(schemaOrg, null, 2));
-                    setSchemaCopied(true);
-                    setTimeout(() => setSchemaCopied(false), 2000);
-                  }}
-                  className="text-xs px-2 py-0.5 rounded bg-gray-200 hover:bg-gray-300"
-                >
-                  {schemaCopied ? 'Copiado!' : 'Copiar'}
-                </button>
-              </div>
-              {showSchemaOrg && (
-                <pre className="mt-2 text-[10px] bg-gray-100 p-2 rounded overflow-x-auto max-h-48 overflow-y-auto">
-                  {JSON.stringify(schemaOrg, null, 2)}
-                </pre>
-              )}
-            </div>
-          </div>
-        )}
+        {/* v7.1: Schema.org preview — HIDDEN */}
 
         {/* v7.1: Correlation ID for support */}
         {correlationId && (

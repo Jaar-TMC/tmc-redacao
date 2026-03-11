@@ -1,4 +1,6 @@
-const Skeleton = ({ className = '', variant = 'default' }) => {
+import { memo } from 'react';
+
+const Skeleton = memo(({ className = '', variant = 'default' }) => {
   const baseClasses = 'bg-light-gray animate-pulse rounded';
 
   const variants = {
@@ -22,6 +24,8 @@ const Skeleton = ({ className = '', variant = 'default' }) => {
       <span className="sr-only">Carregando...</span>
     </div>
   );
-};
+});
+
+Skeleton.displayName = 'Skeleton';
 
 export default Skeleton;

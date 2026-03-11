@@ -317,25 +317,41 @@ async def enrich_articles_with_ai(
         logger.warning(f"Failed to initialize LLM service: {e}")
         return articles
 
-    enriched_articles = []
     total_enriched = 0
 
-    # Process in batches
+    # Build all batches upfront
+    batches = []
     for batch_start in range(0, len(articles_to_process), batch_size):
         batch_end = min(batch_start + batch_size, len(articles_to_process))
-        batch = articles_to_process[batch_start:batch_end]
+        batches.append(articles_to_process[batch_start:batch_end])
 
-        logger.debug(f"AI enrichment: processing batch {batch_start//batch_size + 1} ({len(batch)} articles)")
+    # Process all batches concurrently (up to 3 concurrent LLM calls)
+    semaphore = asyncio.Semaphore(3)
 
-        # Get classifications for batch
-        classifications = await _classify_batch(llm, batch)
+    async def _process_batch(batch_idx: int, batch: list) -> Dict[str, Dict[str, Any]]:
+        async with semaphore:
+            logger.debug(f"AI enrichment: processing batch {batch_idx + 1} ({len(batch)} articles)")
+            return await _classify_batch(llm, batch)
 
-        # Apply classifications to articles
+    batch_results = await asyncio.gather(
+        *[_process_batch(i, b) for i, b in enumerate(batches)],
+        return_exceptions=True
+    )
+
+    # Apply classifications to articles in order
+    enriched_articles = []
+    for batch, result in zip(batches, batch_results):
+        if isinstance(result, Exception):
+            logger.warning(f"AI enrichment batch failed: {result}")
+            classifications = {}
+        else:
+            classifications = result
+
         for idx, article in enumerate(batch):
-            batch_idx = str(idx)
+            batch_idx_str = str(idx)
 
-            if batch_idx in classifications:
-                classification = classifications[batch_idx]
+            if batch_idx_str in classifications:
+                classification = classifications[batch_idx_str]
 
                 # Apply category if valid
                 if classification.get("category"):

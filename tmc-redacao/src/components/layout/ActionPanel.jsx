@@ -1,4 +1,4 @@
-import { useCallback, useMemo } from 'react';
+import { useCallback, useMemo, memo } from 'react';
 import { Sparkles, X, FileText, AlertTriangle } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import PropTypes from 'prop-types';
@@ -194,4 +194,4 @@ ActionPanel.propTypes = {
   onClose: PropTypes.func.isRequired,
 };
 
-export default ActionPanel;
+export default memo(ActionPanel);

@@ -35,6 +35,14 @@ class RSSParser:
         """
         self.timeout = timeout
         self.user_agent = "TMC-RSS-Collector/1.0 (+https://tmc.com.br)"
+        # Reuse a single HTTP client across all feed fetches (connection pooling)
+        self._http_client = httpx.AsyncClient(
+            timeout=timeout,
+            follow_redirects=True,
+            limits=httpx.Limits(max_connections=20, max_keepalive_connections=10),
+        )
+        # In-memory cache for HTTP conditional requests (ETag / Last-Modified)
+        self._feed_cache: dict = {}  # url -> {etag, last_modified, content}
 
     async def parse_feed(self, url: str, source_id: UUID,
                         source_category: Optional[str] = None,
@@ -93,12 +101,16 @@ class RSSParser:
     @retry(
         stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=1, min=2, max=10),
-        retry=retry_if_exception_type((Exception,)),
+        # PERF: Only retry transient errors (timeouts, 5xx). Don't retry 4xx client errors.
+        retry=retry_if_exception_type((httpx.TimeoutException, httpx.ConnectError, ConnectionError, OSError)),
         reraise=True
     )
     async def _fetch_feed(self, url: str) -> Optional[bytes]:
         """
         Faz fetch do conteudo do feed via HTTP.
+
+        Uses HTTP conditional requests (ETag / If-Modified-Since) to avoid
+        re-downloading unchanged feeds. Returns cached content on 304.
 
         Args:
             url: URL do feed
@@ -114,19 +126,40 @@ class RSSParser:
             'Accept-Encoding': 'gzip, deflate',
         }
 
-        try:
-            async with httpx.AsyncClient() as client:
-                response = await client.get(
-                    url,
-                    headers=headers,
-                    timeout=self.timeout,
-                    follow_redirects=True
-                )
+        # Add conditional request headers if we have cached data
+        cached = self._feed_cache.get(url)
+        if cached:
+            if cached.get('etag'):
+                headers['If-None-Match'] = cached['etag']
+            if cached.get('last_modified'):
+                headers['If-Modified-Since'] = cached['last_modified']
 
-                response.raise_for_status()
-                # Return raw bytes - feedparser handles encoding detection
-                # better than httpx, using XML declaration and content sniffing
-                return response.content
+        try:
+            response = await self._http_client.get(
+                url,
+                headers=headers,
+            )
+
+            # 304 Not Modified - feed hasn't changed, return cached content
+            if response.status_code == 304 and cached and cached.get('content'):
+                logger.info(f"Feed not modified (304): {url}")
+                return cached['content']
+
+            response.raise_for_status()
+
+            content = response.content
+
+            # Cache the response with HTTP caching headers for next fetch
+            cache_entry = {'content': content}
+            etag = response.headers.get('ETag')
+            last_modified = response.headers.get('Last-Modified')
+            if etag:
+                cache_entry['etag'] = etag
+            if last_modified:
+                cache_entry['last_modified'] = last_modified
+            self._feed_cache[url] = cache_entry
+
+            return content
 
         except httpx.TimeoutException:
             logger.error(f"Timeout fetching {url}")
@@ -137,6 +170,10 @@ class RSSParser:
         except Exception as e:
             logger.error(f"Error fetching {url}: {e}")
             raise
+
+    async def close(self):
+        """Close the HTTP client. Call when parser is no longer needed."""
+        await self._http_client.aclose()
 
     def _parse_entry(self, entry, source_id: UUID,
                      source_category: Optional[str]) -> Optional[ArticleCreate]:

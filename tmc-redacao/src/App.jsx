@@ -60,10 +60,36 @@ function DocumentTitleUpdater() {
 
 /**
  * Loading fallback component for Suspense
+ * Uses skeleton layout instead of full-page spinner for better perceived performance
  */
 const PageLoadingFallback = () => (
-  <div className="flex items-center justify-center min-h-screen bg-off-white">
-    <Spinner size="lg" />
+  <div className="min-h-screen pt-16 bg-off-white">
+    <div className="flex">
+      {/* Skeleton sidebar */}
+      <div className="hidden lg:block w-72 shrink-0 h-[calc(100vh-4rem)] bg-white border-r border-light-gray p-4">
+        <div className="h-10 bg-light-gray animate-pulse rounded mb-4" />
+        <div className="space-y-3">
+          {[...Array(6)].map((_, i) => (
+            <div key={i} className="h-8 bg-light-gray/60 animate-pulse rounded" />
+          ))}
+        </div>
+      </div>
+      {/* Skeleton main content */}
+      <div className="flex-1 p-4 md:p-6">
+        <div className="bg-white rounded-xl border border-light-gray p-4 mb-6">
+          <div className="h-10 bg-light-gray animate-pulse rounded w-full" />
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {[...Array(4)].map((_, i) => (
+            <div key={i} className="bg-white rounded-xl border border-light-gray p-4 space-y-3">
+              <div className="h-6 bg-light-gray animate-pulse rounded w-3/4" />
+              <div className="h-4 bg-light-gray/60 animate-pulse rounded w-full" />
+              <div className="h-4 bg-light-gray/60 animate-pulse rounded w-2/3" />
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
   </div>
 );
 

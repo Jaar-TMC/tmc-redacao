@@ -1,5 +1,5 @@
 import { Eye, Edit, Trash2, BarChart3, Calendar, Tag, User } from 'lucide-react';
-import { useState } from 'react';
+import { memo, useCallback } from 'react';
 import StatusBadge from '../ui/StatusBadge';
 import { formatRelativeTime } from '../../data/mockData';
 import PropTypes from 'prop-types';
@@ -29,26 +29,24 @@ const categoryColors = {
  * - Keyboard accessible with visible focus states
  * - Proper semantic HTML structure
  */
-const MyArticleCard = ({ article, onView, onEdit, onDelete, onMetrics, showAuthor = false }) => {
-  const [isHovered, setIsHovered] = useState(false);
+const formatViews = (views) => {
+  if (views >= 1000) {
+    return `${(views / 1000).toFixed(1)}k`;
+  }
+  return views.toString();
+};
+
+const MyArticleCard = memo(({ article, onView, onEdit, onDelete, onMetrics, showAuthor = false }) => {
   const isDraft = article.status === 'draft';
 
-  const formatViews = (views) => {
-    if (views >= 1000) {
-      return `${(views / 1000).toFixed(1)}k`;
-    }
-    return views.toString();
-  };
+  const handleView = useCallback(() => onView(article.id), [onView, article.id]);
+  const handleEdit = useCallback(() => onEdit(article.id), [onEdit, article.id]);
+  const handleDelete = useCallback(() => onDelete(article.id), [onDelete, article.id]);
+  const handleMetrics = useCallback(() => onMetrics(article.id), [onMetrics, article.id]);
 
   return (
     <article
-      className={`bg-white rounded-xl border transition-all duration-200 ${
-        isHovered
-          ? 'border-tmc-orange shadow-lg transform -translate-y-0.5'
-          : 'border-light-gray'
-      }`}
-      onMouseEnter={() => setIsHovered(true)}
-      onMouseLeave={() => setIsHovered(false)}
+      className="bg-white rounded-xl border border-light-gray transition-all duration-200 hover:border-tmc-orange hover:shadow-lg hover:-translate-y-0.5"
       aria-labelledby={`article-title-${article.id}`}
       aria-describedby={`article-preview-${article.id}`}
     >
@@ -62,7 +60,7 @@ const MyArticleCard = ({ article, onView, onEdit, onDelete, onMetrics, showAutho
         <h3
           id={`article-title-${article.id}`}
           className="font-bold text-dark-gray text-lg leading-snug mb-3 line-clamp-2 hover:text-tmc-orange transition-colors cursor-pointer"
-          onClick={() => onView(article.id)}
+          onClick={handleView}
         >
           {article.title}
         </h3>
@@ -113,7 +111,7 @@ const MyArticleCard = ({ article, onView, onEdit, onDelete, onMetrics, showAutho
         <div className="flex gap-2" role="group" aria-label="Ações da matéria">
           {/* Ver */}
           <button
-            onClick={() => onView(article.id)}
+            onClick={handleView}
             className="flex items-center gap-2 px-4 py-2 bg-tmc-orange text-white rounded-lg text-sm font-medium hover:bg-tmc-orange/90 transition-colors focus:outline-none focus:ring-2 focus:ring-tmc-orange focus:ring-offset-2"
             aria-label={`Visualizar matéria: ${article.title}`}
           >
@@ -123,7 +121,7 @@ const MyArticleCard = ({ article, onView, onEdit, onDelete, onMetrics, showAutho
 
           {/* Editar */}
           <button
-            onClick={() => onEdit(article.id)}
+            onClick={handleEdit}
             className="flex items-center gap-2 px-4 py-2 bg-tmc-orange text-white rounded-lg text-sm font-medium hover:bg-tmc-orange/90 transition-colors focus:outline-none focus:ring-2 focus:ring-tmc-orange focus:ring-offset-2"
             aria-label={`Editar matéria: ${article.title}`}
           >
@@ -134,7 +132,7 @@ const MyArticleCard = ({ article, onView, onEdit, onDelete, onMetrics, showAutho
           {/* Excluir (apenas rascunhos) ou Métricas (publicadas) */}
           {isDraft ? (
             <button
-              onClick={() => onDelete(article.id)}
+              onClick={handleDelete}
               className="flex items-center gap-2 px-4 py-2 bg-white text-error-red border border-error-red rounded-lg text-sm font-medium hover:bg-red-50 transition-colors focus:outline-none focus:ring-2 focus:ring-error-red focus:ring-offset-2"
               aria-label={`Excluir matéria: ${article.title}`}
             >
@@ -143,7 +141,7 @@ const MyArticleCard = ({ article, onView, onEdit, onDelete, onMetrics, showAutho
             </button>
           ) : (
             <button
-              onClick={() => onMetrics(article.id)}
+              onClick={handleMetrics}
               className="flex items-center gap-2 px-4 py-2 bg-off-white text-medium-gray border border-light-gray rounded-lg text-sm font-medium hover:bg-light-gray transition-colors focus:outline-none focus:ring-2 focus:ring-tmc-orange focus:ring-offset-2"
               aria-label={`Ver métricas da matéria: ${article.title}`}
             >
@@ -155,7 +153,9 @@ const MyArticleCard = ({ article, onView, onEdit, onDelete, onMetrics, showAutho
       </div>
     </article>
   );
-};
+});
+
+MyArticleCard.displayName = 'MyArticleCard';
 
 MyArticleCard.propTypes = {
   article: PropTypes.shape({

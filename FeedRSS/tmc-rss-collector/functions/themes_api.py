@@ -87,22 +87,18 @@ async def list_themes_handler(req: func.HttpRequest) -> func.HttpResponse:
         elif sort == 'recent':
             order_by = "last_updated_at DESC"
 
-        # Main query for themes
+        # PERF: Main query with COUNT(*) OVER() replaces separate count query
         query = f"""
             SELECT
                 t.id, t.name, t.slug, t.classification,
                 COALESCE(t.avg_score, 0) as score,
                 t.article_count,
-                t.status, t.first_seen_at, t.last_updated_at
+                t.status, t.first_seen_at, t.last_updated_at,
+                COUNT(*) OVER() as total_count
             FROM themes t
             WHERE {where_clause}
             ORDER BY {order_by}
             OFFSET %s ROWS FETCH NEXT %s ROWS ONLY
-        """
-
-        # Count query for pagination
-        count_query = f"""
-            SELECT COUNT(*) FROM themes WHERE {where_clause}
         """
 
         # Stats query for classification distribution
@@ -118,10 +114,6 @@ async def list_themes_handler(req: func.HttpRequest) -> func.HttpResponse:
         with db.get_connection() as conn:
             cursor = conn.cursor()
 
-            # Get total count
-            cursor.execute(count_query, params)
-            total = cursor.fetchone()[0]
-
             # Get classification stats
             cursor.execute(stats_query)
             stats_rows = cursor.fetchall()
@@ -134,38 +126,88 @@ async def list_themes_handler(req: func.HttpRequest) -> func.HttpResponse:
                 elif row[0] == 'C':
                     stats["totalC"] = row[1]
 
-            # Get themes
+            # Get themes (total_count is last column via COUNT(*) OVER())
             cursor.execute(query, params + [offset, limit])
             rows = cursor.fetchall()
 
-            items = []
-            for row in rows:
-                theme_id = row[0]
+            # Extract total from window function (last column of first row)
+            total = rows[0][-1] if rows else 0
 
-                # Get recent article count (last 24h)
-                recent_count = _get_recent_article_count(cursor, theme_id)
+            if not rows:
+                items = []
+            else:
+                # Collect all theme IDs for batch queries (eliminates N+1)
+                theme_ids = [row[0] for row in rows]
+                theme_id_strs = [str(tid) for tid in theme_ids]
 
-                # Get representative tags
-                tags = _get_representative_tags(cursor, theme_id, limit=5)
+                # Batch: recent article counts for all themes in one query
+                placeholders = ','.join(['%s'] * len(theme_id_strs))
+                recent_counts_query = f"""
+                    SELECT theme_id, COUNT(*)
+                    FROM article_themes
+                    WHERE theme_id IN ({placeholders})
+                    AND assigned_at >= DATEADD(hour, -24, GETUTCDATE())
+                    GROUP BY theme_id
+                """
+                cursor.execute(recent_counts_query, tuple(theme_id_strs))
+                recent_counts_map = {str(r[0]): r[1] for r in cursor.fetchall()}
 
-                # Calculate trend based on recent activity
-                trend = _calculate_trend(row[5], recent_count)
+                # Batch: representative tags for all themes in one query
+                # Uses ROW_NUMBER to limit tags per theme without N separate queries
+                tags_query = f"""
+                    WITH ThemeTags AS (
+                        SELECT
+                            r.theme_id,
+                            LOWER(LTRIM(RTRIM(t.value))) as tag,
+                            COUNT(*) as cnt,
+                            ROW_NUMBER() OVER (PARTITION BY r.theme_id ORDER BY COUNT(*) DESC) as rn
+                        FROM article_themes r
+                        JOIN collected_articles a ON r.article_id = a.id
+                        CROSS APPLY OPENJSON(a.tags) t
+                        WHERE r.theme_id IN ({placeholders})
+                        AND t.value IS NOT NULL
+                        AND LEN(t.value) > 2
+                        GROUP BY r.theme_id, LOWER(LTRIM(RTRIM(t.value)))
+                    )
+                    SELECT theme_id, tag
+                    FROM ThemeTags
+                    WHERE rn <= 5
+                    ORDER BY theme_id, rn
+                """
+                cursor.execute(tags_query, tuple(theme_id_strs))
+                tags_map = {}
+                for tag_row in cursor.fetchall():
+                    tid = str(tag_row[0])
+                    if tid not in tags_map:
+                        tags_map[tid] = []
+                    tags_map[tid].append(tag_row[1])
 
-                # Determine if emergent (new theme with rapid growth)
-                is_emergent = _is_theme_emergent(row[8], row[5], recent_count)
+                items = []
+                for row in rows:
+                    theme_id = row[0]
+                    tid_str = str(theme_id)
 
-                items.append({
-                    "id": str(theme_id),
-                    "name": row[1],
-                    "slug": row[2],
-                    "classification": row[3],
-                    "score": round(row[4], 2) if row[4] else 0,
-                    "articleCount": row[5],
-                    "recentArticleCount": recent_count,
-                    "trend": trend,
-                    "isEmergent": is_emergent,
-                    "representativeTags": tags
-                })
+                    recent_count = recent_counts_map.get(tid_str, 0)
+                    tags = tags_map.get(tid_str, [])
+
+                    # Calculate trend based on recent activity
+                    trend = _calculate_trend(row[5], recent_count)
+
+                    # Determine if emergent (new theme with rapid growth)
+                    is_emergent = _is_theme_emergent(row[8], row[5], recent_count)
+
+                    items.append({
+                        "id": tid_str,
+                        "name": row[1],
+                        "slug": row[2],
+                        "classification": row[3],
+                        "score": round(row[4], 2) if row[4] else 0,
+                        "articleCount": row[5],
+                        "recentArticleCount": recent_count,
+                        "trend": trend,
+                        "isEmergent": is_emergent,
+                        "representativeTags": tags
+                    })
 
         pages = ceil(total / limit) if total > 0 else 1
 

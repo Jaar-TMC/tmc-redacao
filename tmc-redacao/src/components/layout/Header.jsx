@@ -1,10 +1,11 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { User, PenLine, Menu, X, HelpCircle, ChevronDown, FileText, Youtube, LogOut } from 'lucide-react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import LogoTMC from '../../assets/logo-tmc.svg?react';
 import { useAuth } from '../../context/AuthContext';
 import usePermissions from '../../hooks/usePermissions';
 import { useOnboarding, TOUR_IDS } from '../onboarding';
+import { prefetchData } from '../../services/api';
 
 /**
  * Header Component
@@ -107,6 +108,12 @@ const Header = () => {
     return null;
   };
 
+  // Prefetch data on hover over "Criar" button to warm cache before user navigates
+  const handleCreateHover = useCallback(() => {
+    prefetchData('sources');
+    prefetchData('feedArticles');
+  }, []);
+
   const headerClasses = "bg-tmc-dark-green text-white h-16 fixed top-0 left-0 right-0 z-50 shadow-lg";
 
   return (
@@ -144,6 +151,8 @@ const Header = () => {
             <button
               type="button"
               onClick={() => setCreateMenuOpen(!createMenuOpen)}
+              onMouseEnter={handleCreateHover}
+              onFocus={handleCreateHover}
               className="flex items-center gap-2 bg-tmc-orange hover:bg-tmc-orange/90 text-white px-3 md:px-4 py-2 rounded-lg text-sm font-semibold transition-colors"
               aria-label="Abrir menu de criação"
               aria-expanded={createMenuOpen}

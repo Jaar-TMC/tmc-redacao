@@ -1,7 +1,7 @@
 import { useState, useMemo, useEffect, useCallback } from 'react';
 import PropTypes from 'prop-types';
 import { X, Search, FileText, Check, RefreshCw, AlertCircle, Tag } from 'lucide-react';
-import { getArticles, getSources } from '../../services/api';
+import { getFeedArticlesCached, getSourcesCached } from '../../services/api';
 import { formatRelativeTime } from '../../data/mockData';
 import SearchableSelect from '../ui/SearchableSelect';
 
@@ -25,84 +25,56 @@ const FeedSelector = ({ onClose, onSelect }) => {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState(null);
 
-  // Fetch articles from API
-  useEffect(() => {
-    const fetchData = async () => {
-      setIsLoading(true);
-      setError(null);
-
-      try {
-        // Fetch articles and sources in parallel
-        const [articlesResponse, sourcesResponse] = await Promise.all([
-          getArticles({ limit: 100 }),
-          getSources()
-        ]);
-
-        // Transform API response to match expected format
-        const transformedArticles = (articlesResponse?.items || []).map(article => ({
-          id: article.id,
-          title: article.title,
-          preview: article.summary || article.content?.substring(0, 200) || '',
-          content: article.content,
-          category: article.category || 'Geral',
-          source: article.source_name || article.source,
-          url: article.link || article.url,
-          favicon: article.favicon_url || `https://www.google.com/s2/favicons?domain=${new URL(article.link || article.url || 'https://example.com').hostname}`,
-          publishedAt: article.published_at ? new Date(article.published_at) : new Date(),
-          tags: article.tags || []
-        }));
-
-        setArticles(transformedArticles);
-        setSources(sourcesResponse?.sources || []);
-      } catch (err) {
-        setError(err.message || 'Erro ao carregar matérias');
-      } finally {
-        setIsLoading(false);
-      }
-    };
-
-    fetchData();
+  // Transform API articles to local format (shared between fetch and retry)
+  const transformApiArticles = useCallback((items) => {
+    return (items || []).map(article => ({
+      id: article.id,
+      title: article.title,
+      preview: article.summary || article.content?.substring(0, 200) || '',
+      content: article.content,
+      category: article.category || 'Geral',
+      source: article.source_name || article.source,
+      url: article.link || article.url,
+      favicon: article.favicon_url || `https://www.google.com/s2/favicons?domain=${new URL(article.link || article.url || 'https://example.com').hostname}`,
+      publishedAt: article.published_at ? new Date(article.published_at) : new Date(),
+      tags: article.tags || []
+    }));
   }, []);
 
-  // Retry fetch
-  const handleRetry = () => {
-    setArticles([]);
-    setSources([]);
+  // Shared fetch logic (used by effect and retry)
+  const fetchData = useCallback(async (options = {}) => {
     setIsLoading(true);
     setError(null);
 
-    // Re-trigger the effect by updating state
-    const fetchData = async () => {
-      try {
-        const [articlesResponse, sourcesResponse] = await Promise.all([
-          getArticles({ limit: 100 }),
-          getSources()
-        ]);
+    try {
+      // Fetch articles and sources in parallel with caching
+      const [articlesResponse, sourcesResponse] = await Promise.all([
+        getFeedArticlesCached({ limit: 100 }, { forceRefresh: options.forceRefresh }),
+        getSourcesCached({ forceRefresh: options.forceRefresh })
+      ]);
 
-        const transformedArticles = (articlesResponse?.items || []).map(article => ({
-          id: article.id,
-          title: article.title,
-          preview: article.summary || article.content?.substring(0, 200) || '',
-          content: article.content,
-          category: article.category || 'Geral',
-          source: article.source_name || article.source,
-          url: article.link || article.url,
-          favicon: article.favicon_url || `https://www.google.com/s2/favicons?domain=${new URL(article.link || article.url || 'https://example.com').hostname}`,
-          publishedAt: article.published_at ? new Date(article.published_at) : new Date(),
-          tags: article.tags || []
-        }));
+      const transformedArticles = transformApiArticles(articlesResponse?.items);
+      setArticles(transformedArticles);
+      setSources(sourcesResponse?.sources || []);
+    } catch (err) {
+      if (err.name === 'AbortError') return;
+      setError(err.message || 'Erro ao carregar matérias');
+    } finally {
+      setIsLoading(false);
+    }
+  }, [transformApiArticles]);
 
-        setArticles(transformedArticles);
-        setSources(sourcesResponse?.sources || []);
-      } catch (err) {
-        setError(err.message || 'Erro ao carregar matérias');
-      } finally {
-        setIsLoading(false);
-      }
-    };
-
+  // Fetch articles from API (cached - instant if data is warm)
+  useEffect(() => {
     fetchData();
-  };
+  }, [fetchData]);
+
+  // Retry fetch (force refresh to bypass cache)
+  const handleRetry = useCallback(() => {
+    setArticles([]);
+    setSources([]);
+    fetchData({ forceRefresh: true });
+  }, [fetchData]);
 
   // Filtrar matérias
   const filteredArticles = useMemo(() => {

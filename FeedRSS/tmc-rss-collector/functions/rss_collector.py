@@ -78,6 +78,12 @@ async def rss_collector_handler(timer: func.TimerRequest) -> None:
     tasks = [process_with_semaphore(s) for s in sources]
     results = await asyncio.gather(*tasks, return_exceptions=True)
 
+    # Close the shared HTTP client after all feeds are processed
+    try:
+        await parser.close()
+    except Exception:
+        pass
+
     # Agregar resultados
     total_new = 0
     total_found = 0
@@ -150,13 +156,15 @@ async def process_single_source(source: Source, db, parser: RSSParser,
 
         logger.debug(f"[{execution_id}] {source_name}: {len(unique_articles)} unique, {articles_duplicate} duplicates")
 
-        # 3. Enriquecer artigos sem imagem (limitar a 5 para nao atrasar)
+        # 3. Enriquecer artigos sem imagem (limitar a 5, processar em paralelo)
         articles_to_enrich = [a for a in unique_articles if not a.image_url][:5]
-        for article in articles_to_enrich:
-            try:
-                article.image_url = await enrich_article_image(article.url, timeout=10)
-            except Exception as e:
-                logger.debug(f"[{execution_id}] Failed to enrich image for {article.url}: {e}")
+        if articles_to_enrich:
+            async def _enrich_one(article):
+                try:
+                    article.image_url = await enrich_article_image(article.url, timeout=10)
+                except Exception as e:
+                    logger.debug(f"[{execution_id}] Failed to enrich image for {article.url}: {e}")
+            await asyncio.gather(*[_enrich_one(a) for a in articles_to_enrich])
 
         # 4. Enriquecer artigos com AI (categoria semantica e tags SEO)
         try:
@@ -257,7 +265,13 @@ async def collect_single_source_handler(source_id: str) -> Dict[str, Any]:
         raise ValueError(f"Source not found: {source_id}")
 
     execution_id = datetime.utcnow().strftime('%Y%m%d_%H%M%S')
-    result = await process_single_source(source, db, parser, execution_id)
+    try:
+        result = await process_single_source(source, db, parser, execution_id)
+    finally:
+        try:
+            await parser.close()
+        except Exception:
+            pass
 
     return {
         'source_id': str(source.id),

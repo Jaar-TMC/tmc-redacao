@@ -87,23 +87,30 @@ async def embedding_generator_handler(timer: func.TimerRequest) -> None:
         logger.info(f"[{execution_id}] Generating embeddings for {len(texts)} articles")
         embeddings = await embedding_service.generate_embeddings_batch(texts)
 
-        # Save embeddings to database
+        # Save embeddings to database in batch (single connection + transaction)
         saved_count = 0
-        for article_id, embedding in zip(article_ids, embeddings):
-            try:
-                # Save embedding to dedicated table
-                success = db.save_article_embedding(
-                    article_id=article_id,
-                    embedding=embedding,
-                    model_version='text-embedding-3-small'
-                )
-                if success:
-                    # Mark article as having embedding
-                    db.mark_article_has_embedding(article_id)
-                    saved_count += 1
-            except Exception as e:
-                logger.error(f"[{execution_id}] Error saving embedding for article {article_id}: {e}")
-                continue
+        try:
+            saved_count = db.save_article_embeddings_batch(
+                article_ids=article_ids,
+                embeddings=embeddings,
+                model_version='text-embedding-3-small'
+            )
+        except Exception as e:
+            logger.error(f"[{execution_id}] Batch embedding save failed, falling back to individual: {e}")
+            # Fallback to individual saves
+            for article_id, embedding in zip(article_ids, embeddings):
+                try:
+                    success = db.save_article_embedding(
+                        article_id=article_id,
+                        embedding=embedding,
+                        model_version='text-embedding-3-small'
+                    )
+                    if success:
+                        db.mark_article_has_embedding(article_id)
+                        saved_count += 1
+                except Exception as inner_e:
+                    logger.error(f"[{execution_id}] Error saving embedding for article {article_id}: {inner_e}")
+                    continue
 
         # Log results
         duration = (datetime.utcnow() - start_time).total_seconds()

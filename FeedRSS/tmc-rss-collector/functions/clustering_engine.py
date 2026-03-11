@@ -96,6 +96,7 @@ async def clustering_engine_handler(timer: func.TimerRequest) -> None:
 async def _get_theme_statistics(db) -> dict:
     """
     Get statistics about themes for logging.
+    Uses a single query with conditional aggregation instead of 3 separate queries.
 
     Args:
         db: DatabaseService instance
@@ -103,40 +104,27 @@ async def _get_theme_statistics(db) -> dict:
     Returns:
         Dict with theme statistics
     """
-    query_total = """
-        SELECT COUNT(*) FROM themes WHERE status = 'active'
-    """
-
-    query_new = """
-        SELECT COUNT(*) FROM themes
+    # Combined single query replaces 3 separate queries
+    combined_query = """
+        SELECT
+            COUNT(*) as total,
+            SUM(CASE WHEN first_seen_at >= DATEADD(day, -1, GETUTCDATE()) THEN 1 ELSE 0 END) as new_today,
+            SUM(CASE WHEN last_updated_at >= DATEADD(day, -1, GETUTCDATE())
+                      AND last_updated_at > first_seen_at THEN 1 ELSE 0 END) as updated_today
+        FROM themes
         WHERE status = 'active'
-        AND first_seen_at >= DATEADD(day, -1, GETUTCDATE())
-    """
-
-    query_updated = """
-        SELECT COUNT(*) FROM themes
-        WHERE status = 'active'
-        AND last_updated_at >= DATEADD(day, -1, GETUTCDATE())
-        AND last_updated_at > first_seen_at
     """
 
     try:
         with db.get_connection() as conn:
             cursor = conn.cursor()
-
-            cursor.execute(query_total)
-            total = cursor.fetchone()[0]
-
-            cursor.execute(query_new)
-            new_today = cursor.fetchone()[0]
-
-            cursor.execute(query_updated)
-            updated_today = cursor.fetchone()[0]
+            cursor.execute(combined_query)
+            row = cursor.fetchone()
 
             return {
-                'total': total,
-                'new_today': new_today,
-                'updated_today': updated_today
+                'total': row[0] or 0,
+                'new_today': row[1] or 0,
+                'updated_today': row[2] or 0
             }
     except Exception as e:
         logger.warning(f"Error getting theme statistics: {e}")

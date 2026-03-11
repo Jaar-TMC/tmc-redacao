@@ -1,7 +1,7 @@
 import { useState, useMemo, useEffect, useCallback } from 'react';
 import PropTypes from 'prop-types';
 import { X, Search, Flame, TrendingUp, Twitter, RefreshCw, AlertCircle } from 'lucide-react';
-import { getArticles } from '../../services/api';
+import { getFeedArticlesCached } from '../../services/api';
 import { transformArticles, computeFeedThemes } from '../../utils/transformers';
 
 /**
@@ -24,13 +24,13 @@ const TemaSelector = ({ onClose, onSelect }) => {
   const googleTrends = [];
   const twitterTrends = [];
 
-  // Fetch articles and compute themes
-  const fetchThemes = useCallback(async () => {
+  // Fetch articles and compute themes (uses cached data when available)
+  const fetchThemes = useCallback(async (forceRefresh = false) => {
     setIsLoading(true);
     setError(null);
     try {
-      const response = await getArticles({ limit: 100 });
-      const articles = transformArticles(response?.articles);
+      const response = await getFeedArticlesCached({ limit: 100 }, { forceRefresh });
+      const articles = transformArticles(response?.items || response?.articles);
       const themes = computeFeedThemes(articles);
       setFeedThemes(themes);
     } catch (err) {

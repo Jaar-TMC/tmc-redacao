@@ -1,5 +1,5 @@
-import { useState, useCallback, useEffect } from 'react';
-import { TrendingUp, Twitter, RefreshCw, Pause, Play, Flame, Info, Filter, AlertCircle } from 'lucide-react';
+import { useState, useCallback, useEffect, memo } from 'react';
+import { TrendingUp, Twitter, RefreshCw, Pause, Play, Flame, Info, Filter } from 'lucide-react';
 import { getTrendingTags } from '../../services/api';
 import { useFilters } from '../../context';
 import { useArticlesCache } from '../../context/ArticlesCacheContext';
@@ -63,8 +63,8 @@ const TrendsSidebar = ({ isOpen, onClose }) => {
       // Save to cache with urgency key
       setCachedTrending({ items, timestamp: Date.now() }, cacheKey);
     } catch (err) {
-      console.error('Error fetching themes:', err);
-      setError(err.message || 'Erro ao carregar temas');
+      if (err.name === 'AbortError') return;
+      setError(err.message || 'Não foi possível carregar os temas.');
     } finally {
       setIsLoading(false);
     }
@@ -238,8 +238,10 @@ const TrendsSidebar = ({ isOpen, onClose }) => {
               </div>
             ) : error ? (
               <div className="flex flex-col items-center py-6 text-center">
-                <AlertCircle size={24} className="text-red-500 mb-2" />
-                <p className="text-xs text-medium-gray mb-3">{error}</p>
+                <div className="w-10 h-10 bg-orange-100 rounded-full flex items-center justify-center mb-2">
+                  <RefreshCw size={16} className="text-tmc-orange" />
+                </div>
+                <p className="text-xs text-medium-gray mb-3">Temas indisponíveis no momento</p>
                 <button
                   onClick={handleRefresh}
                   className="text-xs text-tmc-orange hover:underline flex items-center gap-1"
@@ -436,4 +438,4 @@ TrendsSidebar.propTypes = {
   onClose: PropTypes.func.isRequired,
 };
 
-export default TrendsSidebar;
+export default memo(TrendsSidebar);

@@ -99,11 +99,10 @@ async def list_articles_handler(req: func.HttpRequest) -> func.HttpResponse:
                     cat_kwargs['classification'] = classification
 
                 has_cat_filters = any(cat_kwargs.values())
-                if has_cat_filters:
-                    cat_list = db.get_categories_filtered(**cat_kwargs)
-                else:
-                    stats = db.get_collection_stats()
-                    cat_list = [{"name": n, "count": c} for n, c in stats.get('by_category', {}).items()]
+                # PERF: Always use get_categories_filtered (even with no filters)
+                # instead of get_collection_stats which runs 2 extra unnecessary queries
+                # just to extract category counts.
+                cat_list = db.get_categories_filtered(**cat_kwargs)
                 cat_list.sort(key=lambda x: x['count'], reverse=True)
 
                 # Tag counts (contextual: exclude tag from own filters)
@@ -135,8 +134,9 @@ async def list_articles_handler(req: func.HttpRequest) -> func.HttpResponse:
                 logger.warning(f"[list_articles] Failed to compute facets: {e}")
 
         # Converter para formato frontend
+        # PERF: list_mode=True truncates content field to reduce payload (~60-80% smaller)
         response = {
-            "items": [article.to_frontend_format() for article in articles],
+            "items": [article.to_frontend_format(list_mode=True) for article in articles],
             "total": total,
             "page": page,
             "pages": pages,
@@ -238,18 +238,11 @@ async def get_categories_handler(req: func.HttpRequest) -> func.HttpResponse:
             except ValueError:
                 pass
 
-        has_filters = any([search, tag, source, period])
-
-        if has_filters:
-            categories = db.get_categories_filtered(
-                search=search, tag=tag, source_id=source, period=period
-            )
-        else:
-            stats = db.get_collection_stats()
-            categories = [
-                {"name": name, "count": count}
-                for name, count in stats.get('by_category', {}).items()
-            ]
+        # PERF: Always use get_categories_filtered (works with or without filters)
+        # instead of get_collection_stats which runs extra queries for unused data
+        categories = db.get_categories_filtered(
+            search=search, tag=tag, source_id=source, period=period
+        )
 
         # Ordenar por contagem
         categories.sort(key=lambda x: x['count'], reverse=True)

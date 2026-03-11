@@ -1,5 +1,5 @@
-import { useState, useCallback, useEffect, useRef } from 'react';
-import { TrendingUp, Sparkles, FileText, RefreshCw, AlertCircle } from 'lucide-react';
+import { useState, useCallback, useEffect, useRef, useMemo } from 'react';
+import { TrendingUp, Sparkles, FileText, RefreshCw } from 'lucide-react';
 import TrendsSidebar from '../components/layout/TrendsSidebar';
 import ActionPanel from '../components/layout/ActionPanel';
 import FilterBar from '../components/ui/FilterBar';
@@ -28,6 +28,9 @@ const deduplicateByTitle = (articles) => {
 
 const ITEMS_PER_PAGE = 20;
 
+// Stable noop function - avoids creating new arrow function on each render
+const noop = () => {};
+
 // Build API params from filters and page - shared between fetch and retry
 const buildArticleParams = (filters, page) => ({
   limit: ITEMS_PER_PAGE,
@@ -43,7 +46,7 @@ const buildArticleParams = (filters, page) => ({
 });
 
 const RedacaoPage = () => {
-  const { selectedArticles, addArticle, removeArticle, clearSelection, isArticleSelected } = useArticles();
+  const { selectedArticles, addArticle, removeArticle, clearSelection } = useArticles();
   const { filters } = useFilters();
   const {
     trendsSidebarOpen,
@@ -215,7 +218,6 @@ const RedacaoPage = () => {
           if (err.name === 'AbortError') {
             return;
           }
-          console.error('Error fetching articles:', err);
           setError(err.message || 'Erro ao carregar matérias');
         } finally {
           // Only set loading to false if not aborted
@@ -279,7 +281,6 @@ const RedacaoPage = () => {
       if (err.name === 'AbortError') {
         setError('A requisição expirou. Tente novamente.');
       } else {
-        console.error('Error fetching articles:', err);
         setError(err.message || 'Erro ao carregar matérias');
       }
     } finally {
@@ -298,6 +299,12 @@ const RedacaoPage = () => {
   const handleClearAll = useCallback(() => {
     clearSelection();
   }, [clearSelection]);
+
+  // Memoize set of selected article IDs for stable O(1) lookups without re-creating on each render
+  const selectedArticleIds = useMemo(
+    () => new Set(selectedArticles.map(a => a.id)),
+    [selectedArticles]
+  );
 
   // Handle page change from Pagination component
   const handlePageChange = useCallback((page) => {
@@ -346,7 +353,7 @@ const RedacaoPage = () => {
       <div className="flex">
         {/* Left Sidebar - Trends (Desktop sticky, Mobile slideover) */}
         <div className="hidden lg:block w-72 shrink-0 sticky top-16 h-[calc(100vh-4rem)]" data-tour="trends-sidebar">
-          <TrendsSidebar isOpen={true} onClose={() => {}} />
+          <TrendsSidebar isOpen={true} onClose={noop} />
         </div>
 
         {/* Mobile Trends Sidebar - Hidden on desktop */}
@@ -382,9 +389,13 @@ const RedacaoPage = () => {
             </div>
           ) : error ? (
             <div className="flex flex-col items-center justify-center py-16">
-              <AlertCircle size={48} className="text-red-500 mb-4" />
-              <h3 className="text-lg font-semibold text-dark-gray mb-2">Erro ao carregar matérias</h3>
-              <p className="text-sm text-medium-gray mb-6 text-center max-w-md">{error}</p>
+              <div className="w-16 h-16 bg-orange-100 rounded-full flex items-center justify-center mb-4">
+                <RefreshCw size={28} className="text-tmc-orange" />
+              </div>
+              <h3 className="text-lg font-semibold text-dark-gray mb-2">Não foi possível carregar as matérias</h3>
+              <p className="text-sm text-medium-gray mb-6 text-center max-w-md">
+                {error}
+              </p>
               <button
                 onClick={handleRetry}
                 className="px-6 py-3 bg-tmc-orange text-white rounded-lg hover:bg-tmc-orange/90 transition-colors font-medium flex items-center gap-2"
@@ -410,7 +421,7 @@ const RedacaoPage = () => {
                   <div key={article.id} data-tour={index === 0 ? "article-card" : undefined}>
                     <ArticleCard
                       article={article}
-                      isSelected={isArticleSelected(article.id)}
+                      isSelected={selectedArticleIds.has(article.id)}
                       onSelect={handleSelectArticle}
                     />
                   </div>
@@ -441,7 +452,7 @@ const RedacaoPage = () => {
             onRemove={handleRemoveArticle}
             onClearAll={handleClearAll}
             isOpen={true}
-            onClose={() => {}}
+            onClose={noop}
           />
         </div>
 

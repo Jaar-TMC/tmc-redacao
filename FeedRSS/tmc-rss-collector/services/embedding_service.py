@@ -361,18 +361,24 @@ class EmbeddingService:
             WHERE id = %s
         """
 
+        # Pre-serialize all embeddings to JSON outside the DB connection
+        # to minimize connection hold time (JSON serialization of 1536-dim
+        # vectors is CPU-intensive)
+        prepared = []
+        for article_id, embedding in zip(article_ids, embeddings):
+            embedding_json = json.dumps(embedding)
+            prepared.append((embedding_json, str(article_id)))
+
         def _update():
             updated = 0
             with db_service.get_connection() as conn:
                 cursor = conn.cursor()
-                for article_id, embedding in zip(article_ids, embeddings):
+                for params in prepared:
                     try:
-                        # Store embedding as JSON string
-                        embedding_json = json.dumps(embedding)
-                        cursor.execute(update_query, (embedding_json, str(article_id)))
+                        cursor.execute(update_query, params)
                         updated += 1
                     except Exception as e:
-                        logger.error(f"Failed to update article {article_id}: {e}")
+                        logger.error(f"Failed to update article {params[1]}: {e}")
                         continue
                 conn.commit()
             return updated

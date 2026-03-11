@@ -65,7 +65,7 @@ QUALITY_LOOP_ENABLED = os.environ.get("QUALITY_LOOP_ENABLED", "true").lower() ==
 QUALITY_LOOP_MAX_ATTEMPTS = int(os.environ.get("QUALITY_LOOP_MAX_ATTEMPTS", "3"))
 QUALITY_LOOP_MAX_CLAIM_SEARCHES = int(os.environ.get("QUALITY_LOOP_MAX_CLAIM_SEARCHES", "5"))
 QUALITY_LOOP_FLESCH_THRESHOLD = float(os.environ.get("QUALITY_LOOP_FLESCH_THRESHOLD", "55"))
-QUALITY_LOOP_CONFIDENCE_THRESHOLD = float(os.environ.get("QUALITY_LOOP_CONFIDENCE_THRESHOLD", "0.50"))
+QUALITY_LOOP_CONFIDENCE_THRESHOLD = float(os.environ.get("QUALITY_LOOP_CONFIDENCE_THRESHOLD", "0.65"))  # matches publish_confidence_floor so loop targets publishable confidence
 QUALITY_LOOP_NOVEL_ENTITY_THRESHOLD = float(os.environ.get("QUALITY_LOOP_NOVEL_ENTITY_THRESHOLD", "0.75"))
 QUALITY_LOOP_UNVERIFIABLE_THRESHOLD = int(os.environ.get("QUALITY_LOOP_UNVERIFIABLE_THRESHOLD", "3"))
 QUALITY_LOOP_UNVERIFIABLE_RATIO = float(os.environ.get("QUALITY_LOOP_UNVERIFIABLE_RATIO", "0.40"))
@@ -508,7 +508,22 @@ def evaluate_quality_criteria(
                 ),
             })
 
-    # 6. Bold count - NO LONGER in quality loop (post-processed by _enforce_bold_limit)
+    # 6. Risk level check (production only) — risk is derived from confidence so this
+    # catches cases where confidence improved slightly but risk is still "high"
+    if PRODUCTION_SAFETY_MODE:
+        risk_level = verification_data.get("risk_level", "low")
+        if risk_level in ("high", "critical"):
+            failures.append({
+                "criterion": "risk_level",
+                "detail": f"Nivel de risco {risk_level.upper()} bloquearia publicacao",
+                "instruction": (
+                    "Restrinja o artigo ESTRITAMENTE ao que consta no material-fonte. "
+                    "NAO adicione contexto, especulacoes ou afirmacoes externas. "
+                    "Prefira frases mais curtas e diretas com atribuicao clara da fonte."
+                ),
+            })
+
+    # 7. Bold count - NO LONGER in quality loop (post-processed by _enforce_bold_limit)
     # Bold enforcement is handled programmatically after generation since LLMs
     # cannot reliably count bold instances while generating text.
 
@@ -1127,7 +1142,7 @@ async def generate_article_handler(req: func.HttpRequest) -> func.HttpResponse:
                     f"using best version. Remaining: {remaining}"
                 )
                 # Block if critical quality criteria still fail
-                critical_failures = [c for c in remaining if c in ("fabrication", "confidence", "unverifiable")]
+                critical_failures = [c for c in remaining if c in ("fabrication", "confidence", "unverifiable", "risk_level")]
                 if critical_failures:
                     result["publish_blocked"] = True
                     result["block_reason"] = (

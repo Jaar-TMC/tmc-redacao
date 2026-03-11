@@ -6,6 +6,8 @@
  * Supports both standalone development and WordPress plugin contexts.
  */
 
+import { cachedFetch, prefetch as _prefetch, invalidate as _invalidate, CACHE_TTL } from './apiCache';
+
 /**
  * Get the API base URL from WordPress config or environment variable
  * @returns {string} API base URL
@@ -61,6 +63,26 @@ class ApiError extends Error {
     this.status = status;
     this.data = data;
   }
+}
+
+/**
+ * Map HTTP status codes to user-friendly Portuguese messages.
+ * Prevents raw server errors from leaking to the UI.
+ */
+function friendlyErrorMessage(status, serverMessage) {
+  const messages = {
+    400: 'Requisição inválida. Tente novamente.',
+    401: 'Sua sessão expirou. Faça login novamente.',
+    403: 'Você não tem permissão para acessar este recurso.',
+    404: 'O recurso solicitado não foi encontrado.',
+    408: 'A requisição expirou. Tente novamente.',
+    429: 'Muitas requisições. Aguarde um momento e tente novamente.',
+    500: 'O servidor está temporariamente indisponível. Tente novamente em alguns instantes.',
+    502: 'O servidor está temporariamente indisponível. Tente novamente em alguns instantes.',
+    503: 'O servidor está em manutenção. Tente novamente em alguns instantes.',
+    504: 'O servidor demorou para responder. Tente novamente.',
+  };
+  return messages[status] || serverMessage || 'Erro inesperado. Tente novamente.';
 }
 
 /**
@@ -135,7 +157,7 @@ async function fetchApi(endpoint, options = {}) {
       }
       const errorData = await response.json().catch(() => null);
       throw new ApiError(
-        errorData?.error || `HTTP error ${response.status}`,
+        friendlyErrorMessage(response.status, errorData?.error),
         response.status,
         errorData
       );
@@ -250,10 +272,13 @@ export async function getSources() {
  * @returns {Promise<Object>} Created source
  */
 export async function createSource(sourceData) {
-  return fetchApi('/sources', {
+  const result = await fetchApi('/sources', {
     method: 'POST',
     body: JSON.stringify(sourceData),
   });
+  // Invalidate sources cache after mutation
+  _invalidate('sources');
+  return result;
 }
 
 /**
@@ -263,10 +288,13 @@ export async function createSource(sourceData) {
  * @returns {Promise<Object>} Updated source
  */
 export async function updateSource(sourceId, sourceData) {
-  return fetchApi(`/sources/${sourceId}`, {
+  const result = await fetchApi(`/sources/${sourceId}`, {
     method: 'PUT',
     body: JSON.stringify(sourceData),
   });
+  // Invalidate sources cache after mutation
+  _invalidate('sources');
+  return result;
 }
 
 /**
@@ -275,9 +303,12 @@ export async function updateSource(sourceId, sourceData) {
  * @returns {Promise<{message: string}>}
  */
 export async function deleteSource(sourceId) {
-  return fetchApi(`/sources/${sourceId}`, {
+  const result = await fetchApi(`/sources/${sourceId}`, {
     method: 'DELETE',
   });
+  // Invalidate sources cache after mutation
+  _invalidate('sources');
+  return result;
 }
 
 /**
@@ -658,6 +689,82 @@ export async function deleteUserArticle(articleId) {
 }
 
 // ============================================
+// Cached API Functions (Performance Optimization)
+// ============================================
+
+/**
+ * Get all RSS sources with caching (sources rarely change).
+ * Deduplicates concurrent requests and caches for 10 minutes.
+ * @param {Object} [options]
+ * @param {boolean} [options.forceRefresh=false] - Bypass cache
+ * @returns {Promise<{items: Array, total: number}>}
+ */
+export async function getSourcesCached(options = {}) {
+  return cachedFetch('sources', () => getSources(), {
+    ttl: CACHE_TTL.SOURCES,
+    forceRefresh: options.forceRefresh,
+  });
+}
+
+/**
+ * Get feed articles with caching (for FeedSelector / TemaSelector).
+ * Caches the large article list to avoid re-fetching when user opens selector.
+ * @param {Object} [params] - Article query params
+ * @param {Object} [options]
+ * @param {boolean} [options.forceRefresh=false] - Bypass cache
+ * @returns {Promise<{items: Array, total: number}>}
+ */
+export async function getFeedArticlesCached(params = { limit: 100 }, options = {}) {
+  const key = `feed-articles-${params.limit || 100}`;
+  return cachedFetch(key, () => getArticles(params), {
+    ttl: CACHE_TTL.FEED_ARTICLES,
+    forceRefresh: options.forceRefresh,
+  });
+}
+
+/**
+ * Prefetch data that will likely be needed soon.
+ * Call on hover over navigation links or on idle.
+ * Fire-and-forget - errors are silently ignored.
+ *
+ * @param {'sources' | 'feedArticles' | 'trending'} dataType - What to prefetch
+ */
+export function prefetchData(dataType) {
+  switch (dataType) {
+    case 'sources':
+      _prefetch('sources', () => getSources(), { ttl: CACHE_TTL.SOURCES });
+      break;
+    case 'feedArticles':
+      _prefetch('feed-articles-100', () => getArticles({ limit: 100 }), { ttl: CACHE_TTL.FEED_ARTICLES });
+      break;
+    case 'trending':
+      _prefetch('trending-20', () => getTrendingTags({ limit: 20 }), { ttl: CACHE_TTL.TRENDING });
+      break;
+  }
+}
+
+/**
+ * Invalidate specific cached data (e.g., after creating/updating sources).
+ * @param {'sources' | 'feedArticles' | 'trending' | 'all'} dataType
+ */
+export function invalidateCache(dataType) {
+  switch (dataType) {
+    case 'sources':
+      _invalidate('sources');
+      break;
+    case 'feedArticles':
+      _invalidate('feed-articles-100');
+      break;
+    case 'trending':
+      _invalidate('trending-20');
+      break;
+    case 'all':
+      _invalidate();
+      break;
+  }
+}
+
+// ============================================
 // Utility Functions
 // ============================================
 
@@ -692,6 +799,10 @@ export default {
   getArticles,
   getArticle,
   getSources,
+  getSourcesCached,
+  getFeedArticlesCached,
+  prefetchData,
+  invalidateCache,
   createSource,
   updateSource,
   deleteSource,

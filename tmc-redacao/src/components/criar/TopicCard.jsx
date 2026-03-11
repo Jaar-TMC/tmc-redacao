@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, memo } from 'react';
 import PropTypes from 'prop-types';
 import { Check, Edit2, Save, X, ChevronDown, ChevronUp } from 'lucide-react';
 
@@ -206,4 +206,4 @@ TopicCard.propTypes = {
   expandable: PropTypes.bool
 };
 
-export default TopicCard;
+export default memo(TopicCard);

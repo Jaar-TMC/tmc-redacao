@@ -1,7 +1,7 @@
 import { Search, ChevronDown, Building2, Tag, Hash, HelpCircle, ArrowDownWideNarrow, Clock } from 'lucide-react';
-import { useState, useCallback, useEffect, useRef, useMemo } from 'react';
+import { useState, useCallback, useEffect, useRef, useMemo, memo } from 'react';
 import PropTypes from 'prop-types';
-import { getSources } from '../../services/api';
+import { getSourcesCached } from '../../services/api';
 import { transformSources, transformCategories } from '../../utils/transformers';
 import { useFilters } from '../../context';
 import UrgencyChips from './UrgencyChips';
@@ -48,17 +48,21 @@ const FilterBar = ({ urgencyCounts, facets }) => {
     }
   }, [facets]);
 
-  // Fetch sources once on mount (static data, not included in facets)
+  // Fetch sources once on mount (static data, cached for 10 min via apiCache)
   useEffect(() => {
+    let cancelled = false;
     const fetchSources = async () => {
       try {
-        const srcRes = await getSources();
-        setSources(transformSources(srcRes?.items || srcRes?.sources));
+        const srcRes = await getSourcesCached();
+        if (!cancelled) {
+          setSources(transformSources(srcRes?.items || srcRes?.sources));
+        }
       } catch (err) {
-        console.error('Error fetching sources:', err);
+        if (!cancelled) console.error('Error fetching sources:', err);
       }
     };
     fetchSources();
+    return () => { cancelled = true; };
   }, []);
 
   // Sync local state when filters.searchQuery changes externally (e.g., from TrendsSidebar)
@@ -573,4 +577,4 @@ FilterBar.propTypes = {
   }),
 };
 
-export default FilterBar;
+export default memo(FilterBar);

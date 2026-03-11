@@ -1,3 +1,4 @@
+import { memo } from 'react';
 import PropTypes from 'prop-types';
 
 /**
@@ -98,4 +99,4 @@ SourceCard.propTypes = {
   onClick: PropTypes.func.isRequired,
 };
 
-export default SourceCard;
+export default memo(SourceCard);

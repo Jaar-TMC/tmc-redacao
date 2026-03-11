@@ -1,8 +1,9 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { PenLine, Loader2, AlertCircle, RefreshCw } from 'lucide-react';
+import { PenLine, AlertCircle, RefreshCw } from 'lucide-react';
 import MyArticleFilterBar from '../components/ui/MyArticleFilterBar';
 import MyArticleCard from '../components/cards/MyArticleCard';
+import Skeleton from '../components/ui/Skeleton';
 import Pagination from '../components/ui/Pagination';
 import EmptyState, { EmptyStatePresets } from '../components/ui/EmptyState';
 import ConfirmDialog from '../components/ui/ConfirmDialog';
@@ -50,13 +51,35 @@ const MinhasMaterias = () => {
   const [totalArticles, setTotalArticles] = useState(0);
   const [totalPages, setTotalPages] = useState(1);
   const [isLoading, setIsLoading] = useState(true);
+  const [isRefreshing, setIsRefreshing] = useState(false); // Stale-while-revalidate indicator
+  const [showSkeleton, setShowSkeleton] = useState(false);
   const [error, setError] = useState(null);
   const [isDeleting, setIsDeleting] = useState(false);
 
-  // Fetch articles from API
+  // Track if we have shown data at least once (for stale-while-revalidate)
+  const hasDataRef = useRef(false);
+  // Ref for skeleton grace period timer
+  const skeletonTimerRef = useRef(null);
+
+  // Fetch articles from API - stale-while-revalidate pattern:
+  // First load: full skeleton. Subsequent fetches: keep stale data visible with subtle indicator.
   const fetchArticles = useCallback(async (options = {}) => {
-    setIsLoading(true);
+    if (hasDataRef.current) {
+      // Subsequent fetch: keep existing data visible, show subtle refresh indicator
+      setIsRefreshing(true);
+    } else {
+      // First fetch: show full loading state
+      setIsLoading(true);
+    }
     setError(null);
+
+    // Grace period: only show skeleton on first load if fetch takes >200ms
+    clearTimeout(skeletonTimerRef.current);
+    if (!hasDataRef.current) {
+      skeletonTimerRef.current = setTimeout(() => {
+        setShowSkeleton(true);
+      }, 200);
+    }
 
     try {
       const params = {
@@ -94,12 +117,16 @@ const MinhasMaterias = () => {
       setArticles(articlesWithDates);
       setTotalArticles(response.total);
       setTotalPages(response.pages);
+      hasDataRef.current = true;
     } catch (err) {
       if (err.name === 'AbortError') return;
       setError(err.message || 'Erro ao carregar matérias');
     } finally {
       if (!options.signal?.aborted) {
+        clearTimeout(skeletonTimerRef.current);
         setIsLoading(false);
+        setIsRefreshing(false);
+        setShowSkeleton(false);
       }
     }
   }, [currentPage, filters]);
@@ -191,8 +218,8 @@ const MinhasMaterias = () => {
   }, []);
 
   const hasActiveFilters = Object.values(filters).some(v => v !== null && v !== '');
-  const hasNoArticles = totalArticles === 0 && !hasActiveFilters && !isLoading;
-  const hasNoResults = articles.length === 0 && !hasNoArticles && !isLoading;
+  const hasNoArticles = totalArticles === 0 && !hasActiveFilters && !isLoading && !showSkeleton;
+  const hasNoResults = articles.length === 0 && !hasNoArticles && !isLoading && !showSkeleton;
 
   return (
     <div className="min-h-screen pt-16 bg-off-white">
@@ -205,10 +232,13 @@ const MinhasMaterias = () => {
                 Minhas Matérias
               </h1>
               <p className="text-sm text-medium-gray">
-                {isLoading ? (
+                {showSkeleton && !isRefreshing ? (
                   'Carregando...'
                 ) : (
-                  `${totalArticles} ${totalArticles === 1 ? 'matéria encontrada' : 'matérias encontradas'}`
+                  <>
+                    {`${totalArticles} ${totalArticles === 1 ? 'matéria encontrada' : 'matérias encontradas'}`}
+                    {isRefreshing && <span className="ml-2 text-tmc-orange">Atualizando...</span>}
+                  </>
                 )}
               </p>
             </div>
@@ -233,11 +263,26 @@ const MinhasMaterias = () => {
 
         {/* Content Area */}
         <main>
-          {/* Loading State */}
-          {isLoading ? (
-            <div className="flex flex-col items-center justify-center py-16">
-              <Loader2 className="w-10 h-10 text-tmc-orange animate-spin mb-4" />
-              <p className="text-medium-gray">Carregando matérias...</p>
+          {/* Loading State - Skeleton cards with grace period */}
+          {showSkeleton ? (
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+              {[...Array(ITEMS_PER_PAGE)].map((_, i) => (
+                <div key={i} className="bg-white rounded-xl border border-light-gray p-6 space-y-4">
+                  <Skeleton variant="button" className="w-24" />
+                  <Skeleton variant="title" />
+                  <Skeleton className="w-full" />
+                  <Skeleton className="w-2/3" />
+                  <div className="flex gap-4 pt-2 border-t border-light-gray">
+                    <Skeleton className="w-24 h-3" />
+                    <Skeleton className="w-20 h-3" />
+                  </div>
+                  <div className="flex gap-2 pt-2">
+                    <Skeleton variant="button" className="w-16" />
+                    <Skeleton variant="button" className="w-20" />
+                    <Skeleton variant="button" className="w-20" />
+                  </div>
+                </div>
+              ))}
             </div>
           ) : error ? (
             /* Error State */
@@ -271,8 +316,16 @@ const MinhasMaterias = () => {
             )
           ) : (
             <>
+              {/* Background refresh indicator (stale-while-revalidate) */}
+              {isRefreshing && (
+                <div className="flex items-center gap-2 mb-4 px-3 py-2 bg-blue-50 border border-blue-100 rounded-lg">
+                  <RefreshCw size={14} className="text-blue-500 animate-spin" />
+                  <span className="text-xs text-blue-600">Atualizando...</span>
+                </div>
+              )}
+
               {/* Articles Grid */}
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+              <div className={`grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8 ${isRefreshing ? 'opacity-75 transition-opacity' : ''}`}>
                 {articles.map((article) => (
                   <MyArticleCard
                     key={article.id}

@@ -1,4 +1,4 @@
-import { useEffect, useCallback } from 'react';
+import { useEffect, useCallback, memo } from 'react';
 import PropTypes from 'prop-types';
 import DOMPurify from 'dompurify';
 import { X, Calendar, Tag, User, Clock, Edit3, ExternalLink } from 'lucide-react';
@@ -170,9 +170,9 @@ const ArticleViewModal = ({ article, isOpen, onClose, onEdit }) => {
             <div className="mt-8 pt-6 border-t border-light-gray">
               <div className="flex items-center gap-2 flex-wrap">
                 <Tag size={16} className="text-medium-gray" />
-                {article.tags.map((tag, index) => (
+                {article.tags.map((tag) => (
                   <span
-                    key={index}
+                    key={tag}
                     className="px-3 py-1 bg-off-white text-medium-gray text-sm rounded-full"
                   >
                     {tag}
@@ -241,4 +241,4 @@ ArticleViewModal.propTypes = {
   onEdit: PropTypes.func
 };
 
-export default ArticleViewModal;
+export default memo(ArticleViewModal);

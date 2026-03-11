@@ -82,9 +82,13 @@ class Article(ArticleBase):
 
         return text[:max_length-3] + '...'
 
-    def to_frontend_format(self) -> dict:
+    def to_frontend_format(self, list_mode: bool = False) -> dict:
         """
         Converte para formato esperado pelo frontend React.
+
+        Args:
+            list_mode: If True, truncates content to reduce payload for list endpoints.
+                       Full content is still available via GET /api/articles/{id}.
 
         Formato esperado (baseado em mockData.js):
         {
@@ -101,6 +105,14 @@ class Article(ArticleBase):
             url: "https://g1.globo.com/noticia/1"
         }
         """
+        # PERF: In list mode, truncate content to avoid sending megabytes of HTML
+        # for 20+ articles. Frontend uses preview for display; content is a fallback.
+        # Full content available via single-article endpoint.
+        if list_mode and self.content and len(self.content) > 1000:
+            content = self.content[:1000] + '...'
+        else:
+            content = self.content
+
         return {
             "id": str(self.id),
             "title": self.title,
@@ -111,7 +123,7 @@ class Article(ArticleBase):
             "tags": self.tags,
             "publishedAt": self.published_at.isoformat() if self.published_at else None,
             "preview": self.generate_preview(),
-            "content": self.content,
+            "content": content,
             "url": self.url,
             "imageUrl": self.image_url,
             "author": self.author,

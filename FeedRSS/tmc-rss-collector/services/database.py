@@ -30,7 +30,10 @@ logger = logging.getLogger(__name__)
 
 
 class ConnectionPool:
-    """Simple connection pool for pymssql."""
+    """Simple connection pool for pymssql with idle-based health checks."""
+
+    # Only health-check connections idle for longer than this (seconds)
+    IDLE_CHECK_THRESHOLD = 60
 
     def __init__(self, create_conn_func, max_size=10):
         self._create_conn = create_conn_func
@@ -38,20 +41,27 @@ class ConnectionPool:
         self._max_size = max_size
         self._current_size = 0
         self._lock = threading.Lock()
+        # Track when each connection was last returned to the pool
+        self._return_times: dict = {}  # id(conn) -> timestamp
 
     def get_connection(self):
+        import time
         try:
             conn = self._pool.get_nowait()
-            # Test if connection is still alive
-            try:
-                cursor = conn.cursor()
-                cursor.execute("SELECT 1")
-                cursor.fetchone()
-                return conn
-            except Exception:
-                # Connection is dead, create a new one
-                self.close_bad_connection(conn)
-                return self._create_conn()
+            # Only health-check if the connection has been idle too long
+            returned_at = self._return_times.pop(id(conn), 0)
+            idle_seconds = time.monotonic() - returned_at if returned_at else 999
+            if idle_seconds > self.IDLE_CHECK_THRESHOLD:
+                try:
+                    cursor = conn.cursor()
+                    cursor.execute("SELECT 1")
+                    cursor.fetchone()
+                    return conn
+                except Exception:
+                    # Connection is dead, create a new one
+                    self.close_bad_connection(conn)
+                    return self._create_conn()
+            return conn
         except queue.Empty:
             with self._lock:
                 if self._current_size < self._max_size:
@@ -61,9 +71,12 @@ class ConnectionPool:
             return self._pool.get(timeout=30)
 
     def return_connection(self, conn):
+        import time
         try:
+            self._return_times[id(conn)] = time.monotonic()
             self._pool.put_nowait(conn)
         except queue.Full:
+            self._return_times.pop(id(conn), None)
             try:
                 conn.close()
             except Exception:
@@ -72,6 +85,7 @@ class ConnectionPool:
                 self._current_size -= 1
 
     def close_bad_connection(self, conn):
+        self._return_times.pop(id(conn), None)
         try:
             conn.close()
         except Exception:
@@ -186,11 +200,34 @@ class DatabaseService:
     def get_sources_to_fetch(self) -> List[Source]:
         """
         Retorna fontes que devem ser coletadas agora.
-        Filtra por active=1 e verifica frequencia vs last_fetch.
+        PERF: Filters in SQL instead of fetching all active sources then filtering in Python.
+        Uses CASE to map frequency string to minutes, then checks elapsed time.
         """
-        sources = self.get_active_sources()
-        now = datetime.utcnow()
-        return [s for s in sources if s.should_fetch(now)]
+        # -- INDEX suggestion: CREATE INDEX IX_sources_active_lastfetch ON sources (active, last_fetch) INCLUDE (frequency);
+        query = """
+            SELECT id, name, url, favicon_url, active, frequency, category,
+                   last_fetch, last_error, articles_count, created_at, updated_at
+            FROM sources
+            WHERE active = 1
+            AND (
+                last_fetch IS NULL
+                OR DATEDIFF(minute, last_fetch, GETUTCDATE()) >=
+                    CASE frequency
+                        WHEN '15min' THEN 15
+                        WHEN '30min' THEN 30
+                        WHEN '1h' THEN 60
+                        WHEN '2h' THEN 120
+                        WHEN '6h' THEN 360
+                        ELSE 60
+                    END
+            )
+            ORDER BY last_fetch ASC
+        """
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(query)
+            rows = cursor.fetchall()
+            return [self._row_to_source(row) for row in rows]
 
     def get_source_by_id(self, source_id: UUID) -> Optional[Source]:
         """Retorna uma fonte especifica pelo ID."""
@@ -324,6 +361,24 @@ class DatabaseService:
     # ========================================
     # ARTICLES
     # ========================================
+    # RECOMMENDED INDEXES for article query performance:
+    # -- Primary listing (published_at DESC is the default sort):
+    # CREATE INDEX IX_articles_published_at ON collected_articles (published_at DESC) INCLUDE (source_id, category, classification, title, preview, tags, image_url, url, hash);
+    # -- Category filter:
+    # CREATE INDEX IX_articles_category ON collected_articles (category) INCLUDE (published_at);
+    # -- Classification filter (denormalized from article_scores):
+    # CREATE INDEX IX_articles_classification ON collected_articles (classification) INCLUDE (published_at);
+    # -- Score ordering:
+    # CREATE INDEX IX_articles_total_score ON collected_articles (total_score DESC, published_at DESC);
+    # -- Tag search (LIKE on JSON):
+    # CREATE INDEX IX_articles_tags ON collected_articles (tags) INCLUDE (published_at);
+    # -- Hash deduplication:
+    # CREATE UNIQUE INDEX IX_articles_hash ON collected_articles (hash);
+    # -- Collected_at for cleanup:
+    # CREATE INDEX IX_articles_collected_at ON collected_articles (collected_at);
+    # -- article_themes for theme queries:
+    # CREATE INDEX IX_article_themes_theme_id ON article_themes (theme_id) INCLUDE (article_id, assigned_at, similarity_score);
+    # CREATE INDEX IX_article_themes_article_id ON article_themes (article_id) INCLUDE (theme_id);
 
     def _build_article_filters(self,
                                category: Optional[str] = None,
@@ -706,6 +761,8 @@ class DatabaseService:
         """
         Insere multiplos artigos e retorna dados dos artigos inseridos.
 
+        Pre-serializes all data outside DB connection to minimize hold time.
+
         Args:
             articles: Lista de artigos para inserir
 
@@ -724,28 +781,33 @@ class DatabaseService:
             VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         """
 
+        # Pre-serialize all data outside the DB connection to minimize hold time
+        prepared = []
+        for article in articles:
+            tags_json = json.dumps(article.tags) if article.tags else '[]'
+            prepared.append((
+                str(article.source_id),
+                article.title,
+                article.content,
+                article.preview,
+                article.url,
+                article.image_url,
+                article.author,
+                article.category,
+                tags_json,
+                article.published_at,
+                article.collected_at,
+                article.hash
+            ))
+
         inserted = 0
         inserted_articles = []
         with self.get_connection() as conn:
             cursor = conn.cursor()
 
-            for article in articles:
+            for i, params in enumerate(prepared):
                 try:
-                    tags_json = json.dumps(article.tags) if article.tags else '[]'
-                    cursor.execute(query, (
-                        str(article.source_id),
-                        article.title,
-                        article.content,
-                        article.preview,
-                        article.url,
-                        article.image_url,
-                        article.author,
-                        article.category,
-                        tags_json,
-                        article.published_at,
-                        article.collected_at,
-                        article.hash
-                    ))
+                    cursor.execute(query, params)
                     row = cursor.fetchone()
                     if row:
                         inserted_articles.append({
@@ -755,12 +817,12 @@ class DatabaseService:
                             'category': row[3] or ''
                         })
                     inserted += 1
-                except pymssql.IntegrityError as e:
+                except pymssql.IntegrityError:
                     # Duplicata (hash ou url ja existe)
-                    logger.debug(f"Skipping duplicate article: {article.url}")
+                    logger.debug(f"Skipping duplicate article: {articles[i].url}")
                     continue
                 except Exception as e:
-                    logger.error(f"Error inserting article {article.url}: {e}")
+                    logger.error(f"Error inserting article {articles[i].url}: {e}")
                     continue
 
             conn.commit()
@@ -800,10 +862,13 @@ class DatabaseService:
         Uses SQL to keep only one article per similar title (based on first 100 chars).
         This is a simplified approach - keeps the article with earliest collected_at.
 
+        PERF: Limited to TOP 500 per run to avoid long-running locks.
+        The timer trigger runs every 15 minutes, so duplicates are cleaned incrementally.
+
         Returns:
             Number of articles deleted
         """
-        # Delete articles with exact same title (keep oldest)
+        # Delete articles with exact same title (keep oldest), batch limited
         query = """
             WITH Duplicates AS (
                 SELECT id,
@@ -814,7 +879,7 @@ class DatabaseService:
                        ) as rn
                 FROM collected_articles
             )
-            DELETE FROM collected_articles
+            DELETE TOP (500) FROM collected_articles
             WHERE id IN (
                 SELECT id FROM Duplicates WHERE rn > 1
             )
@@ -1124,33 +1189,31 @@ class DatabaseService:
             return result
 
     def get_collection_stats(self) -> dict:
-        """Retorna estatisticas de coleta."""
+        """Retorna estatisticas de coleta.
+
+        PERF: Uses 2 queries instead of 5 - one for scalar aggregates, one for categories.
+        """
         with self.get_connection() as conn:
             cursor = conn.cursor()
 
-            # Total de artigos
-            cursor.execute("SELECT COUNT(*) FROM collected_articles")
-            total_articles = cursor.fetchone()[0]
-
-            # Artigos hoje
+            # Single query for all scalar stats (replaces 4 separate queries)
             cursor.execute("""
-                SELECT COUNT(*) FROM collected_articles
-                WHERE collected_at >= DATEADD(day, -1, GETUTCDATE())
+                SELECT
+                    (SELECT COUNT(*) FROM collected_articles) as total_articles,
+                    (SELECT COUNT(*) FROM collected_articles
+                     WHERE collected_at >= DATEADD(day, -1, GETUTCDATE())) as articles_today,
+                    (SELECT COUNT(*) FROM sources WHERE active = 1) as active_sources,
+                    (SELECT MAX(finished_at) FROM collection_logs
+                     WHERE status = 'success') as last_collection
             """)
-            articles_today = cursor.fetchone()[0]
+            stats_row = cursor.fetchone()
 
-            # Fontes ativas
-            cursor.execute("SELECT COUNT(*) FROM sources WHERE active = 1")
-            active_sources = cursor.fetchone()[0]
+            total_articles = stats_row[0]
+            articles_today = stats_row[1]
+            active_sources = stats_row[2]
+            last_collection = stats_row[3]
 
-            # Ultima coleta
-            cursor.execute("""
-                SELECT MAX(finished_at) FROM collection_logs
-                WHERE status = 'success'
-            """)
-            last_collection = cursor.fetchone()[0]
-
-            # Por categoria
+            # Category breakdown (kept separate since it returns multiple rows)
             cursor.execute("""
                 SELECT category, COUNT(*) as count
                 FROM collected_articles
@@ -1284,35 +1347,30 @@ class DatabaseService:
 
         where_clause = "WHERE " + " AND ".join(conditions)
 
-        # Query para dados
+        # PERF: Single query with COUNT(*) OVER() replaces separate count query
         query = f"""
             SELECT id, title, linha_fina, content, preview, status, category,
                    tags, source_article_ids, generation_config, author_name,
                    created_at, updated_at, published_at, deleted_at,
-                   titulo_curto, resumo
+                   titulo_curto, resumo,
+                   COUNT(*) OVER() as total_count
             FROM user_articles
             {where_clause}
             ORDER BY updated_at DESC
             OFFSET %s ROWS FETCH NEXT %s ROWS ONLY
         """
 
-        # Query para total
-        count_query = f"""
-            SELECT COUNT(*) FROM user_articles {where_clause}
-        """
-
         with self.get_connection() as conn:
             cursor = conn.cursor()
 
-            # Executar count
-            cursor.execute(count_query, tuple(params))
-            total = cursor.fetchone()[0]
-
-            # Executar query principal
             cursor.execute(query, tuple(params) + (offset, limit))
             rows = cursor.fetchall()
 
-            articles = [self._row_to_user_article(row) for row in rows]
+            # Extract total from window function (last column of first row)
+            total = rows[0][-1] if rows else 0
+
+            # Exclude the total_count column from row mapping (slice off last col)
+            articles = [self._row_to_user_article(row[:-1]) for row in rows]
 
         return articles, total
 
@@ -1614,6 +1672,82 @@ class DatabaseService:
         except Exception as e:
             logger.error(f"Error saving embedding for article {article_id}: {e}")
             return False
+
+    def save_article_embeddings_batch(
+        self,
+        article_ids: List,
+        embeddings: List,
+        model_version: str = 'text-embedding-3-small'
+    ) -> int:
+        """
+        Save multiple embeddings in a single connection and transaction.
+
+        Uses MERGE to handle both inserts and updates. Also marks articles
+        as having embeddings in the same transaction.
+
+        Args:
+            article_ids: List of article UUIDs
+            embeddings: List of embedding vectors (parallel to article_ids)
+            model_version: Model version string
+
+        Returns:
+            Number of embeddings saved successfully
+        """
+        if not article_ids or not embeddings:
+            return 0
+
+        merge_query = """
+            MERGE INTO article_embeddings AS target
+            USING (SELECT %s AS article_id) AS source
+            ON target.article_id = source.article_id
+            WHEN MATCHED THEN
+                UPDATE SET
+                    embedding = %s,
+                    model_version = %s,
+                    updated_at = GETUTCDATE()
+            WHEN NOT MATCHED THEN
+                INSERT (article_id, embedding, model_version)
+                VALUES (%s, %s, %s);
+        """
+
+        mark_query = """
+            UPDATE collected_articles
+            SET has_embedding = 1
+            WHERE id = %s AND (has_embedding = 0 OR has_embedding IS NULL)
+        """
+
+        # Pre-serialize all embeddings outside the connection
+        prepared = []
+        for article_id, embedding in zip(article_ids, embeddings):
+            embedding_json = json.dumps(embedding)
+            aid = str(article_id)
+            prepared.append((aid, embedding_json, model_version))
+
+        saved = 0
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+
+                for aid, embedding_json, mv in prepared:
+                    try:
+                        cursor.execute(merge_query, (
+                            aid, embedding_json, mv,
+                            aid, embedding_json, mv
+                        ))
+                        cursor.execute(mark_query, (aid,))
+                        saved += 1
+                    except Exception as e:
+                        logger.error(f"Error saving embedding for article {aid}: {e}")
+                        continue
+
+                conn.commit()
+
+        except Exception as e:
+            logger.error(f"Batch embedding save connection error: {e}")
+            raise
+
+        logger.info(f"Batch saved {saved}/{len(article_ids)} embeddings")
+        return saved
 
     def get_article_embedding(self, article_id: UUID) -> Optional[dict]:
         """
@@ -2041,13 +2175,14 @@ class DatabaseService:
         Returns:
             Tuple (lista de artigos, total de artigos no tema)
         """
-        # Query para dados com JOIN para obter detalhes do artigo
+        # PERF: Single query with COUNT(*) OVER() replaces separate count query
         query = """
             SELECT a.id, a.source_id, a.title, a.content, a.preview, a.url,
                    a.image_url, a.author, a.category, a.tags, a.published_at,
                    a.collected_at, a.hash,
                    s.name as source_name, s.url as source_url, s.favicon_url,
-                   r.similarity_score, r.is_seed
+                   r.similarity_score, r.is_seed,
+                   COUNT(*) OVER() as total_count
             FROM article_themes r
             JOIN collected_articles a ON r.article_id = a.id
             JOIN sources s ON a.source_id = s.id
@@ -2056,25 +2191,20 @@ class DatabaseService:
             OFFSET %s ROWS FETCH NEXT %s ROWS ONLY
         """
 
-        # Query para total
-        count_query = """
-            SELECT COUNT(*) FROM article_themes WHERE theme_id = %s
-        """
-
         try:
             with self.get_connection() as conn:
                 cursor = conn.cursor()
 
-                # Executar count
-                cursor.execute(count_query, (str(theme_id),))
-                total = cursor.fetchone()[0]
-
-                # Executar query principal
+                # PERF: Single query - total extracted from COUNT(*) OVER()
                 cursor.execute(query, (str(theme_id), offset, limit))
                 rows = cursor.fetchall()
 
+                # Extract total from window function (last column of first row)
+                total = rows[0][-1] if rows else 0
+
                 articles = []
                 for row in rows:
+                    # Exclude total_count (last col), pass first 16 cols as article data
                     article = self._row_to_article(row[:16])
                     # Adicionar campos extras da relacao
                     article.similarity_score = row[16]

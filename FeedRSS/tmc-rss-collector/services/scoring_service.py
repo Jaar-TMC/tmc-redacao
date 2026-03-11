@@ -536,48 +536,50 @@ class ScoringService:
         self,
         articles: List[Dict[str, Any]],
         use_heuristic_fallback: bool = True,
-        batch_delay: float = 0.5
+        batch_delay: float = 0.3,
+        max_concurrent: int = 5
     ) -> List[ArticleScore]:
         """
         Score multiple articles in batch. GUARANTEED to return a score for every article.
+
+        Uses a semaphore to allow concurrent LLM calls (up to max_concurrent)
+        instead of purely sequential processing with sleeps.
 
         Args:
             articles: List of dicts with 'id', 'title', 'content' keys
             use_heuristic_fallback: If True, use heuristics when LLM fails
             batch_delay: Delay between API calls in seconds (rate limiting)
+            max_concurrent: Maximum number of concurrent scoring calls
 
         Returns:
             List of ArticleScore objects (same length as input)
         """
-        logger.info(f"Scoring batch of {len(articles)} articles")
+        logger.info(f"Scoring batch of {len(articles)} articles (concurrency={max_concurrent})")
 
-        results = []
-        for i, article in enumerate(articles):
+        semaphore = asyncio.Semaphore(max_concurrent)
+
+        async def _score_one(article: Dict[str, Any]) -> ArticleScore:
             article_id = article['id'] if isinstance(article['id'], UUID) else UUID(str(article['id']))
-            try:
-                score = await self.score_article(
-                    article_id=article_id,
-                    title=article['title'],
-                    content=article.get('content', ''),
-                    use_heuristic_fallback=use_heuristic_fallback,
-                    category=article.get('category', '')
-                )
-                results.append(score)
+            async with semaphore:
+                try:
+                    score = await self.score_article(
+                        article_id=article_id,
+                        title=article['title'],
+                        content=article.get('content', ''),
+                        use_heuristic_fallback=use_heuristic_fallback,
+                        category=article.get('category', '')
+                    )
+                    return score
+                except Exception as e:
+                    logger.error(f"Error scoring article {article.get('id')}: {e}, using guaranteed fallback")
+                    return self._create_default_score(
+                        article_id, article.get('title', ''), article.get('content', '')
+                    )
 
-                # Rate limiting delay between calls (skip for last item)
-                if i < len(articles) - 1 and batch_delay > 0:
-                    await asyncio.sleep(batch_delay)
-
-            except Exception as e:
-                logger.error(f"Error scoring article {article.get('id')}: {e}, using guaranteed fallback")
-                # GUARANTEED: never skip an article — always produce a score
-                fallback_score = self._create_default_score(
-                    article_id, article.get('title', ''), article.get('content', '')
-                )
-                results.append(fallback_score)
+        results = await asyncio.gather(*[_score_one(a) for a in articles])
 
         logger.info(f"Batch scoring complete: {len(results)}/{len(articles)} scored")
-        return results
+        return list(results)
 
     async def process_pending_articles(
         self,
@@ -667,6 +669,9 @@ class ScoringService:
         """
         Save article scores to database.
 
+        Pre-serializes all parameters outside the DB connection, then executes
+        all INSERTs and denormalization UPDATEs in a single transaction.
+
         Args:
             scores: List of ArticleScore objects to save
 
@@ -676,7 +681,7 @@ class ScoringService:
         if not scores:
             return 0
 
-        query = """
+        insert_query = """
             INSERT INTO article_scores
             (article_id, sinal_inesperado, sinal_impacto, sinal_busca_agora, sinal_conversa,
              score_inesperado, score_impacto, score_busca_agora, score_conversa,
@@ -684,44 +689,52 @@ class ScoringService:
             VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         """
 
+        denorm_query = """UPDATE collected_articles
+                          SET total_score = %s, classification = %s
+                          WHERE id = %s"""
+
+        # Pre-serialize all parameters outside the DB connection
+        insert_params = []
+        denorm_params = []
+        for score in scores:
+            aid = str(score.article_id)
+            insert_params.append((
+                aid,
+                score.sinal_inesperado,
+                score.sinal_impacto,
+                score.sinal_busca_agora,
+                score.sinal_conversa,
+                score.score_inesperado,
+                score.score_impacto,
+                score.score_busca_agora,
+                score.score_conversa,
+                score.total_score,
+                score.classification,
+                score.scored_by,
+                score.reasoning,
+                score.scored_at
+            ))
+            denorm_params.append((score.total_score, score.classification, aid))
+
         saved = 0
         with self.db_service.get_connection() as conn:
             cursor = conn.cursor()
 
-            for score in scores:
+            # Batch INSERT scores
+            for params in insert_params:
                 try:
-                    cursor.execute(query, (
-                        str(score.article_id),
-                        score.sinal_inesperado,
-                        score.sinal_impacto,
-                        score.sinal_busca_agora,
-                        score.sinal_conversa,
-                        score.score_inesperado,
-                        score.score_impacto,
-                        score.score_busca_agora,
-                        score.score_conversa,
-                        score.total_score,
-                        score.classification,
-                        score.scored_by,
-                        score.reasoning,
-                        score.scored_at
-                    ))
+                    cursor.execute(insert_query, params)
                     saved += 1
                 except Exception as e:
-                    logger.error(f"Error saving score for article {score.article_id}: {e}")
+                    logger.error(f"Error saving score for article {params[0]}: {e}")
                     continue
 
-            # Sync denormalized score columns in collected_articles
-            for score in scores:
+            # Batch UPDATE denormalized columns
+            for params in denorm_params:
                 try:
-                    cursor.execute(
-                        """UPDATE collected_articles
-                           SET total_score = %s, classification = %s
-                           WHERE id = %s""",
-                        (score.total_score, score.classification, str(score.article_id))
-                    )
+                    cursor.execute(denorm_query, params)
                 except Exception as e:
-                    logger.warning(f"Failed to sync denormalized score for {score.article_id}: {e}")
+                    logger.warning(f"Failed to sync denormalized score for {params[2]}: {e}")
 
             conn.commit()
 

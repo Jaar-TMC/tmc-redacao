@@ -335,22 +335,12 @@ async def cleanup_orphan_themes(
 
             logger.info(f"Found {len(orphans)} orphan themes to deactivate")
 
-            # Desativar cada tema orfao
-            deactivate_query = """
-                UPDATE themes
-                SET status = 'inactive',
-                    article_count = 0,
-                    last_updated_at = GETUTCDATE()
-                WHERE id = %s
-            """
-
-            deactivated_count = 0
+            # Collect orphan IDs for batch deactivation
+            orphan_ids = []
             for orphan in orphans:
                 theme_id = orphan[0]
                 theme_name = orphan[1]
-
-                cursor.execute(deactivate_query, (str(theme_id),))
-                deactivated_count += 1
+                orphan_ids.append(str(theme_id))
 
                 report.themes_deactivated.append({
                     'id': str(theme_id),
@@ -360,8 +350,20 @@ async def cleanup_orphan_themes(
 
                 logger.info(f"Deactivated orphan theme: {theme_name} (ID: {theme_id})")
 
+            # Batch deactivate all orphan themes in one query
+            if orphan_ids:
+                placeholders = ','.join(['%s'] * len(orphan_ids))
+                batch_deactivate = f"""
+                    UPDATE themes
+                    SET status = 'inactive',
+                        article_count = 0,
+                        last_updated_at = GETUTCDATE()
+                    WHERE id IN ({placeholders})
+                """
+                cursor.execute(batch_deactivate, tuple(orphan_ids))
+
             conn.commit()
-            return deactivated_count
+            return len(orphan_ids)
 
     except Exception as e:
         logger.error(f"Error in cleanup_orphan_themes: {e}")
