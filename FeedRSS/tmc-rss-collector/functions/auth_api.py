@@ -130,11 +130,12 @@ async def login_handler(req: func.HttpRequest) -> func.HttpResponse:
         }
 
         # Set refresh token as HttpOnly cookie
-        # SameSite=Lax for CSRF protection
+        # SameSite=None required: frontend (azurestaticapps.net) and API (azurewebsites.net)
+        # are cross-site — Lax blocks cookies on cross-site POST (refresh never works).
         max_age = 30 * 24 * 3600 if remember_me else 7 * 24 * 3600
         cookie = (
             f"refresh_token={refresh_token}; "
-            f"HttpOnly; SameSite=Lax; Secure; "
+            f"HttpOnly; SameSite=None; Secure; "
             f"Path=/api/auth; Max-Age={max_age}"
         )
 
@@ -346,7 +347,7 @@ async def logout_handler(req: func.HttpRequest) -> func.HttpResponse:
         db.log_auth_event(req.user["id"], req.user["email"], "logout", req.headers.get("X-Forwarded-For", "unknown"))
 
         # Clear refresh_token cookie
-        clear_cookie = "refresh_token=; HttpOnly; SameSite=Lax; Secure; Path=/api/auth; Max-Age=0"
+        clear_cookie = "refresh_token=; HttpOnly; SameSite=None; Secure; Path=/api/auth; Max-Age=0"
 
         return func.HttpResponse(
             json.dumps({"message": "Logout successful"}),

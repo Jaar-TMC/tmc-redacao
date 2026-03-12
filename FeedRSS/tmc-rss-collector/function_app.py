@@ -87,10 +87,18 @@ def with_cors(handler):
         try:
             response = await handler(req)
         except Exception as e:
+            import traceback
+            tb = traceback.format_exc()
             logger.exception(f"Unhandled error in {handler.__name__}: {e}")
-            error_body = json.dumps({"error": "Internal server error"})
+            error_body = json.dumps({"error": "Internal server error", "debug": str(e), "type": type(e).__name__, "trace": tb[-500:]})
             response = func.HttpResponse(error_body, status_code=500, mimetype="application/json")
-        return add_cors_headers(response, origin)
+
+        try:
+            return add_cors_headers(response, origin)
+        except Exception as cors_err:
+            # Safety net: if CORS header addition crashes, return response without CORS
+            logger.error(f"add_cors_headers failed: {cors_err}")
+            return response
 
     return wrapper
 

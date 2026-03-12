@@ -81,6 +81,27 @@ class ConnectionPool:
         with self._lock:
             self._current_size -= 1
 
+    def purge_all(self):
+        """Discard all idle pooled connections.
+
+        Called when a connection dies mid-query: if one is stale, the rest
+        likely are too (Azure SQL kills idle connections in bulk).
+        """
+        purged = 0
+        while True:
+            try:
+                conn = self._pool.get_nowait()
+                try:
+                    conn.close()
+                except Exception:
+                    pass
+                with self._lock:
+                    self._current_size -= 1
+                purged += 1
+            except queue.Empty:
+                break
+        return purged
+
 
 class DatabaseService:
     """Servico de acesso ao banco de dados."""
@@ -101,7 +122,7 @@ class DatabaseService:
 
     def _create_raw_connection(self) -> pymssql.Connection:
         """Create a new raw pymssql connection (used by pool internally)."""
-        query_timeout = int(os.environ.get('SQL_QUERY_TIMEOUT', '30'))
+        query_timeout = int(os.environ.get('SQL_QUERY_TIMEOUT', '60'))
         return pymssql.connect(
             server=self.server,
             user=self.username,
@@ -135,9 +156,15 @@ class DatabaseService:
         conn = self._get_pooled_connection()
         try:
             yield conn
-        except (pymssql.OperationalError, pymssql.InterfaceError):
+        except (pymssql.OperationalError, pymssql.InterfaceError) as e:
             # Connection went bad during use; discard it so the pool doesn't reuse it
+            logger.warning(f"Stale connection discarded during query: {e}")
             self._pool.close_bad_connection(conn)
+            # Purge remaining pooled connections — if one died mid-query,
+            # the rest are likely stale too (Azure SQL kills idle conns in bulk)
+            purged = self._pool.purge_all()
+            if purged:
+                logger.warning(f"Purged {purged} additional pooled connections after stale connection")
             raise
         except Exception:
             # Non-connection error; connection is likely still good, return it

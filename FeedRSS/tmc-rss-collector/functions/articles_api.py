@@ -158,9 +158,11 @@ async def list_articles_handler(req: func.HttpRequest) -> func.HttpResponse:
             mimetype="application/json"
         )
     except Exception as e:
-        logger.error(f"Error listing articles: {e}", exc_info=True)
+        import traceback
+        tb = traceback.format_exc()
+        logger.error(f"Error listing articles: {e}\n{tb}")
         return func.HttpResponse(
-            json.dumps({"error": "Internal server error"}),
+            json.dumps({"error": "Internal server error", "debug": str(e), "type": type(e).__name__, "trace": tb[-800:]}),
             status_code=500,
             mimetype="application/json"
         )
