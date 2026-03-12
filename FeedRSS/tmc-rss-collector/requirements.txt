@@ -13,3 +13,4 @@ numpy==1.24.0
 PyJWT==2.8.0
 bcrypt==4.1.0
 youtube-transcript-api>=1.2.4
+google-auth>=2.20.0

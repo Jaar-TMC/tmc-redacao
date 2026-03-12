@@ -1125,11 +1125,12 @@ class ClusteringService:
 Sua tarefa e criar um nome curto e descritivo para um agrupamento tematico de noticias.
 
 Regras:
-- Nome deve ter no maximo 50 caracteres
+- Nome deve ter entre 15 e 50 caracteres
 - Use palavras-chave que descrevam o tema principal
 - Seja especifico (nao use termos genericos como "Noticias do Brasil")
 - Em portugues brasileiro, sem acentos
-- Formato: substantivo + complemento (ex: "Eleicoes Municipais 2024")
+- Formato: substantivo + complemento (ex: "Crise no transporte publico de SP", "Eleicoes Municipais 2024")
+- Responda APENAS com o nome, sem aspas, sem explicacao
 """
 
         user_prompt = f"""Analise os titulos abaixo e crie um nome para este agrupamento tematico:

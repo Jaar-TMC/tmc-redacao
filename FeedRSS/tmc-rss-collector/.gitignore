@@ -21,6 +21,10 @@ local.settings.json
 # Logs
 *.log
 
+# Service account keys (NEVER commit)
+*-sa-key.json
+*-service-account.json
+
 # Testing
 .pytest_cache/
 .coverage

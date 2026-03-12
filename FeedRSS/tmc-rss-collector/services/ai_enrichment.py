@@ -72,17 +72,13 @@ Use EXATAMENTE uma destas categorias (sem acentos):
 - Separar palavras compostas com hífen (ex: "meio-ambiente", "copa-do-mundo")
 
 ## FORMATO DE RESPOSTA
-Responda APENAS com JSON válido no formato:
-```json
-{
-  "classifications": [
-    {"id": "0", "category": "Categoria", "tags": ["tag1", "tag2", "tag3", "tag4", "tag5"]},
-    {"id": "1", "category": "Categoria", "tags": ["tag1", "tag2", "tag3", "tag4", "tag5"]}
-  ]
-}
-```
+Responda APENAS com JSON válido puro (sem markdown, sem backticks, sem explicação).
+Formato exato:
+{"classifications": [{"id": "0", "category": "Categoria", "tags": ["tag1", "tag2", "tag3", "tag4", "tag5"]}]}
 
-IMPORTANTE: O campo "id" deve corresponder ao índice do artigo na lista fornecida."""
+IMPORTANTE:
+- O campo "id" deve corresponder ao índice do artigo na lista fornecida.
+- NÃO use blocos de código markdown. Retorne JSON puro diretamente."""
 
 
 def _build_batch_prompt(articles: List[ArticleCreate]) -> str:

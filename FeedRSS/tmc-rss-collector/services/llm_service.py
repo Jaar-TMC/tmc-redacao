@@ -1136,6 +1136,240 @@ def _enforce_bold_limit(content: str, max_bold: int = 25) -> str:
     return "".join(result_parts)
 
 
+# Common Portuguese words that require accents — used as a fallback
+# to fix tags the LLM might return without proper diacritics.
+_PORTUGUESE_ACCENT_MAP = {
+    # Common topics
+    "politica": "Política",
+    "economia": "Economia",
+    "saude": "Saúde",
+    "educacao": "Educação",
+    "educaçao": "Educação",
+    "seguranca": "Segurança",
+    "segurança": "Segurança",
+    "tecnologia": "Tecnologia",
+    "ciencia": "Ciência",
+    "justica": "Justiça",
+    "justiça": "Justiça",
+    "habitacao": "Habitação",
+    "habitaçao": "Habitação",
+    "comercio": "Comércio",
+    "eleicoes": "Eleições",
+    "eleiçoes": "Eleições",
+    "eleições": "Eleições",
+    "inflacao": "Inflação",
+    "inflaçao": "Inflação",
+    "corrupcao": "Corrupção",
+    "corrupçao": "Corrupção",
+    "corrupção": "Corrupção",
+    "violencia": "Violência",
+    "violência": "Violência",
+    "amazonia": "Amazônia",
+    "amazônia": "Amazônia",
+    "transicao": "Transição",
+    "transiçao": "Transição",
+    "imigracao": "Imigração",
+    "imigraçao": "Imigração",
+    "administracao": "Administração",
+    "administraçao": "Administração",
+    "legislacao": "Legislação",
+    "legislaçao": "Legislação",
+    "infraestrutura": "Infraestrutura",
+    "sustentabilidade": "Sustentabilidade",
+    "previdencia": "Previdência",
+    "previdência": "Previdência",
+    "agronegocio": "Agronegócio",
+    "agronegócio": "Agronegócio",
+    "mineracao": "Mineração",
+    "mineraçao": "Mineração",
+    "comunicacao": "Comunicação",
+    "comunicaçao": "Comunicação",
+    "populacao": "População",
+    "populaçao": "População",
+    "aviacao": "Aviação",
+    "aviaçao": "Aviação",
+    "exportacao": "Exportação",
+    "exportaçao": "Exportação",
+    "importacao": "Importação",
+    "importaçao": "Importação",
+    "tributacao": "Tributação",
+    "tributaçao": "Tributação",
+    "privatizacao": "Privatização",
+    "privatizaçao": "Privatização",
+    "petroleo": "Petróleo",
+    "petróleo": "Petróleo",
+    "exercito": "Exército",
+    "exército": "Exército",
+    "industria": "Indústria",
+    "indústria": "Indústria",
+    "comercio exterior": "Comércio Exterior",
+    "seguranca publica": "Segurança Pública",
+    "segurança publica": "Segurança Pública",
+    "defesa": "Defesa",
+    "diplomacia": "Diplomacia",
+    "geopolitica": "Geopolítica",
+    "geopolítica": "Geopolítica",
+    "negocios": "Negócios",
+    "negócios": "Negócios",
+    "orcamento": "Orçamento",
+    "orçamento": "Orçamento",
+    "previdencia social": "Previdência Social",
+    "previdência social": "Previdência Social",
+    "cambio": "Câmbio",
+    "câmbio": "Câmbio",
+    "logistica": "Logística",
+    "logística": "Logística",
+    "agropecuaria": "Agropecuária",
+    "agropecuária": "Agropecuária",
+    # Compound topics / multi-word
+    "meio ambiente": "Meio Ambiente",
+    "inteligencia artificial": "Inteligência Artificial",
+    "inteligencia artificial": "Inteligência Artificial",
+    "oriente medio": "Oriente Médio",
+    "oriente médio": "Oriente Médio",
+    "guerra no oriente medio": "Guerra no Oriente Médio",
+    "guerra no oriente médio": "Guerra no Oriente Médio",
+    "estreito de ormuz": "Estreito de Ormuz",
+    "america latina": "América Latina",
+    "américa latina": "América Latina",
+    "uniao europeia": "União Europeia",
+    "união europeia": "União Europeia",
+    "banco central": "Banco Central",
+    "taxa de juros": "Taxa de Juros",
+    "mercado financeiro": "Mercado Financeiro",
+    "bolsa de valores": "Bolsa de Valores",
+    "mudancas climaticas": "Mudanças Climáticas",
+    "mudanças climaticas": "Mudanças Climáticas",
+    "mudanças climáticas": "Mudanças Climáticas",
+    "direitos humanos": "Direitos Humanos",
+    # Organizations / agencies
+    "agencia internacional de energia": "Agência Internacional de Energia",
+    "agência internacional de energia": "Agência Internacional de Energia",
+    "organizacao mundial da saude": "Organização Mundial da Saúde",
+    "organização mundial da saude": "Organização Mundial da Saúde",
+    "organização mundial da saúde": "Organização Mundial da Saúde",
+    "fundo monetario internacional": "Fundo Monetário Internacional",
+    "fundo monetário internacional": "Fundo Monetário Internacional",
+    "banco mundial": "Banco Mundial",
+    "supremo tribunal federal": "Supremo Tribunal Federal",
+    "tribunal superior eleitoral": "Tribunal Superior Eleitoral",
+    "ministerio publico": "Ministério Público",
+    "ministério publico": "Ministério Público",
+    "ministério público": "Ministério Público",
+    "policia federal": "Polícia Federal",
+    "polícia federal": "Polícia Federal",
+    "camara dos deputados": "Câmara dos Deputados",
+    "câmara dos deputados": "Câmara dos Deputados",
+    "senado federal": "Senado Federal",
+    # News agencies / media
+    "reuters": "Reuters",
+    "associated press": "Associated Press",
+    "agencia brasil": "Agência Brasil",
+    "agência brasil": "Agência Brasil",
+    "folha de s.paulo": "Folha de S.Paulo",
+    "folha de sao paulo": "Folha de São Paulo",
+    "folha de são paulo": "Folha de São Paulo",
+    # Brazilian cities / states
+    "sao paulo": "São Paulo",
+    "rio de janeiro": "Rio de Janeiro",
+    "brasilia": "Brasília",
+    "maranhao": "Maranhão",
+    "ceara": "Ceará",
+    "goias": "Goiás",
+    "amapa": "Amapá",
+    "para": "Pará",
+    "rondonia": "Rondônia",
+    "piaui": "Piauí",
+    "belo horizonte": "Belo Horizonte",
+    "porto alegre": "Porto Alegre",
+    "curitiba": "Curitiba",
+    "salvador": "Salvador",
+    "recife": "Recife",
+    "fortaleza": "Fortaleza",
+    "manaus": "Manaus",
+    "belem": "Belém",
+    "belém": "Belém",
+    "vitoria": "Vitória",
+    "vitória": "Vitória",
+    "florianopolis": "Florianópolis",
+    "florianópolis": "Florianópolis",
+    "goiania": "Goiânia",
+    "goiânia": "Goiânia",
+}
+
+# Known acronyms that should be ALL CAPS
+_ACRONYM_SET = {
+    "aie", "eua", "onu", "otan", "fmi", "oms", "omc", "opep",
+    "pib", "ipca", "igpm", "stf", "tse", "tst", "stj", "trf",
+    "pf", "prf", "mpf", "tcu", "cgu", "bndes", "bcb", "cvm",
+    "inss", "sus", "ibge", "inpe", "embrapa", "anvisa", "aneel",
+    "anatel", "anp", "ancine", "cade", "coaf", "dnit", "ibama",
+    "icmbio", "funai", "incra", "iphan", "capes", "cnpq",
+    "pt", "psd", "mdb", "psdb", "pp", "pl", "psol", "pdt",
+    "pcb", "pcdob", "rede", "novo", "pode",
+    "g7", "g20", "oea", "mercosul", "brics",
+    "ue", "otan", "aiea", "opas",
+    "cpi", "pec", "plc", "pls", "mpt", "trt",
+    "lgpd", "pix", "selic", "cdi", "lci", "lca",
+    "covid", "hiv", "aids",
+    "ia", "ti", "iot", "api", "gpt", "llm",
+    "sp", "rj", "mg", "ba", "rs", "pr", "pe", "ce", "pa",
+    "ma", "go", "am", "es", "pb", "rn", "mt", "ms", "df",
+    "se", "al", "pi", "sc", "ac", "ro", "to", "ap", "rr",
+}
+
+
+def _normalize_tag_portuguese(tag: str) -> str:
+    """
+    Normalize a tag to correct Portuguese: proper accents, first letter
+    uppercase, and acronyms in ALL CAPS.
+
+    Processing order:
+    1. Strip whitespace and '#' prefix.
+    2. Check against known accent/capitalization map (exact match).
+    3. Check if the tag is a known acronym → ALL CAPS.
+    4. Otherwise, ensure first letter of each word is uppercase
+       (except Portuguese prepositions/articles in the middle).
+    """
+    tag = tag.strip().lstrip("#").strip()
+    if not tag:
+        return tag
+
+    # Check known accent corrections (exact match, case-insensitive)
+    tag_lower = tag.lower()
+    if tag_lower in _PORTUGUESE_ACCENT_MAP:
+        return _PORTUGUESE_ACCENT_MAP[tag_lower]
+
+    # Check if it's a known acronym → ALL CAPS
+    if tag_lower in _ACRONYM_SET:
+        return tag.upper()
+
+    # Heuristic: if tag is all-alpha, ≤4 chars, all lowercase, and all consonants
+    # it's likely an acronym the LLM didn't capitalize (e.g., "stf", "pf", "bcb")
+    if len(tag) <= 4 and tag.isalpha() and tag.isascii() and tag_lower == tag:
+        vowels = sum(1 for c in tag_lower if c in 'aeiou')
+        if vowels == 0:
+            return tag.upper()
+
+    # Multi-word: capitalize each word except PT prepositions/articles in the middle
+    _PT_STOP_WORDS = {"de", "da", "do", "das", "dos", "no", "na", "nos", "nas",
+                      "em", "e", "ou", "a", "o", "as", "os", "com", "por", "para",
+                      "ao", "aos", "à", "às", "num", "numa"}
+    words = tag.split()
+    result = []
+    for i, word in enumerate(words):
+        if i > 0 and word.lower() in _PT_STOP_WORDS:
+            result.append(word.lower())
+        elif word.isupper() and len(word) >= 2:
+            # Preserve existing ALL CAPS (likely acronym within multi-word tag)
+            result.append(word)
+        elif word[0].islower():
+            result.append(word[0].upper() + word[1:])
+        else:
+            result.append(word)
+    return " ".join(result)
+
+
 def get_system_prompt(
     persona: str = "imparcial",
     tom: str = "formal",
@@ -1250,10 +1484,11 @@ def get_system_prompt(
      "linha_fina": "Linha fina descritiva (max 120 caracteres)",
      "resumo": ["Ponto-chave 1 da matéria", "Ponto-chave 2", "Ponto-chave 3", "Ponto-chave 4"],
      "conteudo": "Corpo completo da matéria com **negritos** para destaques e CTA após 2º/3º parágrafo...",
-     "tags_sugeridas": ["tag1", "tag2", "tag3"],
+     "tags_sugeridas": ["Economia", "Política", "São Paulo"],
      "slug_sugerido": "palavras-chave-separadas-por-hifen"
    }}
-   ```"""
+   ```
+   REGRAS para tags_sugeridas: primeira letra maiúscula, acentuação correta do português (ex: "Saúde", "Educação", "Política", "Tecnologia", "Ciência"), nomes próprios capitalizados."""
 
 
 def _build_category_prompt(
@@ -1422,10 +1657,11 @@ Mantenha os vetos universais (sem preconceito, ataques pessoais, etc.)"""
      "linha_fina": "Linha fina descritiva (max 120 caracteres)",
      "resumo": ["Ponto-chave 1 da matéria", "Ponto-chave 2", "Ponto-chave 3", "Ponto-chave 4"],
      "conteudo": "Corpo completo da matéria com **negritos** para destaques e CTA após 2º/3º parágrafo...",
-     "tags_sugeridas": ["tag1", "tag2", "tag3"],
+     "tags_sugeridas": ["Economia", "Política", "São Paulo"],
      "slug_sugerido": "palavras-chave-separadas-por-hifen"
    }}
-   ```"""
+   ```
+   REGRAS para tags_sugeridas: primeira letra maiúscula, acentuação correta do português (ex: "Saúde", "Educação", "Política", "Tecnologia", "Ciência"), nomes próprios capitalizados."""
 
 
 def build_user_prompt(
@@ -1697,6 +1933,25 @@ class LLMService:
         import time as _time
         _cid = f"[{correlation_id}] " if correlation_id else ""
 
+        effective_model = model or self.model
+
+        # Route Gemini models to GeminiService
+        if effective_model.startswith("gemini"):
+            from services.gemini_service import get_gemini_service
+            gemini = get_gemini_service()
+            if not gemini.is_configured:
+                logger.warning(f"{_cid}Gemini not configured, falling back to Claude for {task_type}")
+                effective_model = "claude-haiku-4-5"
+            else:
+                return await gemini.call_api(
+                    system=system,
+                    user_content=user_content,
+                    max_tokens=max_tokens,
+                    correlation_id=correlation_id,
+                    model=effective_model,
+                    task_type=task_type,
+                )
+
         # Circuit breaker check
         if self._llm_circuit_open:
             if _time.time() < self._llm_circuit_open_until:
@@ -1708,7 +1963,6 @@ class LLMService:
 
         headers = self._get_headers()
 
-        effective_model = model or self.model
         payload = {
             "model": effective_model,
             "max_tokens": max_tokens,
@@ -1931,9 +2185,15 @@ class LLMService:
                     titulo = result.get("titulo", "")
                     result["titulo_curto"] = titulo[:70] if len(titulo) > 70 else titulo
 
-                # Ensure tags_sugeridas exists
+                # Ensure tags_sugeridas exists and normalize Portuguese
                 if "tags_sugeridas" not in result:
                     result["tags_sugeridas"] = []
+                else:
+                    result["tags_sugeridas"] = [
+                        _normalize_tag_portuguese(t)
+                        for t in result["tags_sugeridas"]
+                        if isinstance(t, str) and t.strip()
+                    ]
 
                 # Phase 3.6: Slug generation - ensure slug_sugerido exists
                 if "slug_sugerido" not in result or not result["slug_sugerido"]:
@@ -2092,16 +2352,23 @@ Responda APENAS com JSON válido, sem markdown:
 TEXTO:
 {texto}
 
-Gere até {max_tags} tags em português, em formato de hashtag (sem o #), relevantes para:
+Gere até {max_tags} tags em português brasileiro correto, relevantes para:
 - SEO
 - Categorização
 - Temas principais
 - Entidades mencionadas
 
+REGRAS OBRIGATÓRIAS para cada tag:
+- Primeira letra MAIÚSCULA (ex: "Economia", "Meio ambiente", "São Paulo")
+- Acentuação correta do português (ex: "Saúde", "Educação", "Política", "Tecnologia", "Ciência", "Habitação", "Comércio", "Eleições")
+- Nomes próprios com capitalização correta (ex: "Lula", "São Paulo", "Petrobras")
+- Sem # no início
+- NUNCA use tags sem acento quando a palavra exige (ex: "Saude" → "Saúde", "Educacao" → "Educação", "Politica" → "Política")
+
 Responda em JSON:
 ```json
 {{
-  "tags": ["tag1", "tag2", "tag3"]
+  "tags": ["Tag1", "Tag2", "Tag3"]
 }}
 ```"""
 
@@ -2113,7 +2380,8 @@ Responda em JSON:
 
             if json_start != -1 and json_end > json_start:
                 result = json.loads(response_text[json_start:json_end])
-                return result.get("tags", [])[:max_tags]
+                raw_tags = result.get("tags", [])[:max_tags]
+                return [_normalize_tag_portuguese(t) for t in raw_tags if isinstance(t, str) and t.strip()]
 
             return []
 

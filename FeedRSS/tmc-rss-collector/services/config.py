@@ -26,12 +26,18 @@ class AppConfig:
     anthropic_api_key: str = ""
     azure_ai_api_key: str = ""
     azure_ai_endpoint: str = ""
+    # Gemini (Vertex AI) - used for classification, scoring, theme naming
+    gemini_sa_path: str = ""      # Path to service account JSON key
+    gemini_project_id: str = ""   # GCP project ID
+    gemini_region: str = "us-central1"
+
     # Per-task model routing (optimize cost vs quality)
-    # Phase 1: Safe downgrades (classification + naming = low-risk)
+    # Default: Anthropic API direct — Haiku for cheap tasks, Sonnet for heavy tasks
+    # Gemini fields below are dormant (for future GCP production use)
     classification_model: str = "claude-haiku-4-5"
     scoring_model: str = "claude-haiku-4-5"
     theme_naming_model: str = "claude-haiku-4-5"
-    # Phase 2: Test before committing (keep Sonnet until validated)
+    # Heavy tasks: Sonnet 4.5 (generation, fact-check, editing, merging, extraction)
     event_verification_model: str = "claude-sonnet-4-5"
     event_extraction_model: str = "claude-sonnet-4-5"
     enrichment_extraction_model: str = "claude-sonnet-4-5"
@@ -115,6 +121,11 @@ def load_config() -> AppConfig:
         anthropic_api_key=os.environ.get("ANTHROPIC_API_KEY", ""),
         azure_ai_api_key=os.environ.get("AZURE_AI_API_KEY", ""),
         azure_ai_endpoint=os.environ.get("AZURE_AI_ENDPOINT", ""),
+        # Per-task model routing
+        # Gemini (Vertex AI)
+        gemini_sa_path=os.environ.get("GOOGLE_APPLICATION_CREDENTIALS", ""),
+        gemini_project_id=os.environ.get("GCP_PROJECT_ID", ""),
+        gemini_region=os.environ.get("GCP_REGION", "us-central1"),
         # Per-task model routing
         classification_model=os.environ.get("CLASSIFICATION_MODEL", "claude-haiku-4-5"),
         scoring_model=os.environ.get("SCORING_MODEL", "claude-haiku-4-5"),

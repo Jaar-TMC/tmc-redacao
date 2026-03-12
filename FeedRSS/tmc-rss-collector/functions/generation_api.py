@@ -1598,7 +1598,9 @@ def _extract_entity_tags(
         seen.add(tag_lower)
         entity_tags.append(tag)
 
-    return entity_tags[:8]
+    # Normalize all entity tags to correct Portuguese
+    from services.llm_service import _normalize_tag_portuguese
+    return [_normalize_tag_portuguese(t) for t in entity_tags[:8]]
 
 
 def _merge_tags(existing: list, entity_tags: list, max_tags: int = 12) -> list:

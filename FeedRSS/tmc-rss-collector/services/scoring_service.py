@@ -104,20 +104,14 @@ Avalia se a noticia vai gerar discussao nas redes sociais, com amigos, familia.
 
 ## FORMATO DE RESPOSTA
 
-Responda APENAS com JSON valido no seguinte formato:
-```json
-{
-  "sinal_inesperado": "yes|partial|no",
-  "sinal_impacto": "high|medium|low",
-  "sinal_busca_agora": "yes|maybe|no",
-  "sinal_conversa": "yes|maybe|no",
-  "justificativa": "Breve explicacao das classificacoes (max 200 caracteres)"
-}
-```
+Responda APENAS com JSON valido puro (sem markdown, sem backticks, sem explicacao).
+Formato exato:
+{"sinal_inesperado": "yes|partial|no", "sinal_impacto": "high|medium|low", "sinal_busca_agora": "yes|maybe|no", "sinal_conversa": "yes|maybe|no", "justificativa": "Breve explicacao (max 200 chars)"}
 
 IMPORTANTE:
 - Use APENAS os valores especificados para cada sinal
 - NAO inclua comentarios ou texto fora do JSON
+- NAO use blocos de codigo markdown. Retorne JSON puro diretamente
 - A justificativa deve ser concisa e em portugues
 - Considere o CONTEXTO BRASILEIRO e a relevancia para o publico geral"""
 
