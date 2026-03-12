@@ -166,12 +166,10 @@ const RedacaoPage = () => {
         setIsLoading(true);
         setError(null);
 
-        // Grace period: only show skeleton if fetch takes >200ms
-        skeletonTimerRef.current = setTimeout(() => {
-          if (!abortController.signal.aborted) {
-            setShowSkeleton(true);
-          }
-        }, 200);
+        // Show skeleton immediately — we only reach this code path when
+        // there is no cached data (cache hit returns early above), so
+        // there is no benefit to a 200ms grace period on a blank screen.
+        setShowSkeleton(true);
 
         try {
           const params = buildArticleParams(filters, effectivePage);

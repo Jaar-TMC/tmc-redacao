@@ -5,6 +5,7 @@ Health check e estatisticas da API.
 import azure.functions as func
 import json
 import logging
+import time
 from datetime import datetime
 
 from services.database import get_db
@@ -37,24 +38,30 @@ async def health_check_handler(req: func.HttpRequest) -> func.HttpResponse:
     if req.params.get('diag') == 'full' and db_ok:
         import traceback
         steps = {}
+        diag_start = time.time()
         try:
             # Step 1: DB query
+            t0 = time.time()
             articles, total, urgency = db.get_articles_with_urgency(page=1, limit=5)
-            steps["1_query"] = f"OK: {total} total, {len(articles)} fetched"
+            steps["1_query"] = f"OK: {total} total, {len(articles)} fetched ({(time.time()-t0)*1000:.0f}ms)"
 
             # Step 2: Model serialization
+            t0 = time.time()
             serialized = [a.to_frontend_format(list_mode=True) for a in articles]
-            steps["2_serialize"] = f"OK: {len(serialized)} serialized"
+            steps["2_serialize"] = f"OK: {len(serialized)} serialized ({(time.time()-t0)*1000:.0f}ms)"
 
             # Step 3: Facet - categories
+            t0 = time.time()
             cat_list = db.get_categories_filtered()
-            steps["3_categories"] = f"OK: {len(cat_list)} categories"
+            steps["3_categories"] = f"OK: {len(cat_list)} categories ({(time.time()-t0)*1000:.0f}ms)"
 
             # Step 4: Facet - tags
+            t0 = time.time()
             tag_list = db.get_all_tags(limit=100)
-            steps["4_tags"] = f"OK: {len(tag_list)} tags"
+            steps["4_tags"] = f"OK: {len(tag_list)} tags ({(time.time()-t0)*1000:.0f}ms)"
 
             # Step 5: JSON encode full response
+            t0 = time.time()
             full_response = {
                 "items": serialized,
                 "total": total,
@@ -64,9 +71,10 @@ async def health_check_handler(req: func.HttpRequest) -> func.HttpResponse:
                 "facets": {"categories": cat_list, "tags": tag_list}
             }
             encoded = json.dumps(full_response, default=str)
-            steps["5_json"] = f"OK: {len(encoded)} bytes"
+            steps["5_json"] = f"OK: {len(encoded)} bytes ({(time.time()-t0)*1000:.0f}ms)"
 
-            diag_result = {"ok": True, "steps": steps}
+            total_ms = (time.time() - diag_start) * 1000
+            diag_result = {"ok": True, "steps": steps, "total_ms": round(total_ms)}
         except Exception as e:
             tb = traceback.format_exc()
             diag_result = {"ok": False, "steps": steps, "error": str(e), "type": type(e).__name__, "trace": tb[-800:]}

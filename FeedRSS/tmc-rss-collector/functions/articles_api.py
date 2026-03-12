@@ -5,6 +5,7 @@ API REST para artigos coletados.
 import azure.functions as func
 import json
 import logging
+import time
 from math import ceil
 from uuid import UUID
 
@@ -12,6 +13,19 @@ from services.database import get_db
 from models import ArticleListResponse
 
 logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# In-memory facet cache (5-min TTL)
+# Categories and tags only change when new articles are collected (every 15 min).
+# Caching avoids expensive CROSS APPLY OPENJSON() on every /api/articles request.
+# ---------------------------------------------------------------------------
+_facet_cache = {
+    "categories": None,
+    "tags": None,
+    "timestamp": 0,
+    "filter_key": None,  # cache is keyed on active filters
+}
+FACET_CACHE_TTL = 300  # seconds
 
 
 async def list_articles_handler(req: func.HttpRequest) -> func.HttpResponse:
@@ -85,46 +99,72 @@ async def list_articles_handler(req: func.HttpRequest) -> func.HttpResponse:
             logger.info("[list_articles] Skipping facet computation (skip_facets=true)")
         else:
             try:
-                # Category counts (contextual: exclude category from own filters)
-                cat_kwargs = {}
-                if tag:
-                    cat_kwargs['tag'] = tag
-                if source:
-                    cat_kwargs['source_id'] = source
-                if period:
-                    cat_kwargs['period'] = period
-                if search:
-                    cat_kwargs['search'] = search
-                if classification:
-                    cat_kwargs['classification'] = classification
+                # Build a cache key from the active filter combination so that
+                # different filter sets don't return stale facets.
+                filter_key = (category, tag, source, period, search, classification)
+                now = time.time()
+                cache_age = now - _facet_cache["timestamp"]
+                cache_hit = (
+                    cache_age < FACET_CACHE_TTL
+                    and _facet_cache["filter_key"] == filter_key
+                    and _facet_cache["categories"] is not None
+                )
 
-                has_cat_filters = any(cat_kwargs.values())
-                # PERF: Always use get_categories_filtered (even with no filters)
-                # instead of get_collection_stats which runs 2 extra unnecessary queries
-                # just to extract category counts.
-                cat_list = db.get_categories_filtered(**cat_kwargs)
-                cat_list.sort(key=lambda x: x['count'], reverse=True)
-
-                # Tag counts (contextual: exclude tag from own filters)
-                tag_kwargs = {'limit': 100}
-                if category:
-                    tag_kwargs['category'] = category
-                if source:
-                    tag_kwargs['source_id'] = source
-                if period:
-                    tag_kwargs['period'] = period
-                if search:
-                    tag_kwargs['search'] = search
-                if classification:
-                    tag_kwargs['classification'] = classification
-
-                has_tag_filters = any(v for k, v in tag_kwargs.items() if k != 'limit')
-                if has_tag_filters:
-                    tag_list = db.get_all_tags_filtered(**tag_kwargs)
+                if cache_hit:
+                    cat_list = _facet_cache["categories"]
+                    tag_items = _facet_cache["tags"]
+                    logger.info(f"[list_articles] Facet cache HIT (age={cache_age:.0f}s)")
                 else:
-                    tag_list = db.get_all_tags(limit=100)
+                    t_facet = time.time()
 
-                tag_items = [{"id": i + 1, "tag": t['tag'], "theme": t['theme'], "count": t['count']} for i, t in enumerate(tag_list)]
+                    # Category counts (contextual: exclude category from own filters)
+                    cat_kwargs = {}
+                    if tag:
+                        cat_kwargs['tag'] = tag
+                    if source:
+                        cat_kwargs['source_id'] = source
+                    if period:
+                        cat_kwargs['period'] = period
+                    if search:
+                        cat_kwargs['search'] = search
+                    if classification:
+                        cat_kwargs['classification'] = classification
+
+                    # PERF: Always use get_categories_filtered (even with no filters)
+                    # instead of get_collection_stats which runs 2 extra unnecessary queries
+                    # just to extract category counts.
+                    cat_list = db.get_categories_filtered(**cat_kwargs)
+                    cat_list.sort(key=lambda x: x['count'], reverse=True)
+
+                    # Tag counts (contextual: exclude tag from own filters)
+                    tag_kwargs = {'limit': 100}
+                    if category:
+                        tag_kwargs['category'] = category
+                    if source:
+                        tag_kwargs['source_id'] = source
+                    if period:
+                        tag_kwargs['period'] = period
+                    if search:
+                        tag_kwargs['search'] = search
+                    if classification:
+                        tag_kwargs['classification'] = classification
+
+                    has_tag_filters = any(v for k, v in tag_kwargs.items() if k != 'limit')
+                    if has_tag_filters:
+                        tag_list = db.get_all_tags_filtered(**tag_kwargs)
+                    else:
+                        tag_list = db.get_all_tags(limit=100)
+
+                    tag_items = [{"id": i + 1, "tag": t['tag'], "theme": t['theme'], "count": t['count']} for i, t in enumerate(tag_list)]
+
+                    facet_ms = (time.time() - t_facet) * 1000
+                    logger.info(f"[list_articles] Facet cache MISS — computed in {facet_ms:.0f}ms (filters={filter_key})")
+
+                    # Store in cache
+                    _facet_cache["categories"] = cat_list
+                    _facet_cache["tags"] = tag_items
+                    _facet_cache["timestamp"] = now
+                    _facet_cache["filter_key"] = filter_key
 
                 facets = {
                     "categories": cat_list,
