@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState } from 'react';
 import PropTypes from 'prop-types';
 import {
   Shield,
@@ -35,7 +35,7 @@ const VERDICT_CONFIG = {
     Icon: AlertTriangle,
   },
   unverifiable: {
-    label: 'N\u00e3o verific\u00e1vel',
+    label: 'Não verificável',
     border: 'border-l-amber-500',
     bg: 'bg-amber-50',
     badgeBg: 'bg-amber-100',
@@ -43,7 +43,7 @@ const VERDICT_CONFIG = {
     Icon: HelpCircle,
   },
   opinion: {
-    label: 'Opini\u00e3o',
+    label: 'Opinião',
     border: 'border-l-blue-500',
     bg: 'bg-blue-50',
     badgeBg: 'bg-blue-100',
@@ -60,6 +60,17 @@ function getAsiColor(asi) {
   if (asi >= 80) return '#10B981';
   if (asi >= 50) return '#F59E0B';
   return '#EF4444';
+}
+
+const SAFETY_LABEL_DISPLAY = {
+  seguro: 'Seguro',
+  atencao: 'Atenção',
+  inseguro: 'Inseguro',
+  critico: 'Crítico',
+};
+
+function getSafetyLabelDisplay(label) {
+  return SAFETY_LABEL_DISPLAY[label] || label;
 }
 
 function getSafetyLabelStyle(label) {
@@ -86,7 +97,7 @@ function SeverityDots({ severity }) {
   switch (severity) {
     case 'critical':
       return (
-        <span className="flex items-center gap-0.5" title="Cr\u00edtico">
+        <span className="flex items-center gap-0.5" title="Crítico">
           <span className="h-1.5 w-1.5 rounded-full bg-red-500" />
           <span className="h-1.5 w-1.5 rounded-full bg-red-500" />
           <span className="h-1.5 w-1.5 rounded-full bg-red-500" />
@@ -101,7 +112,7 @@ function SeverityDots({ severity }) {
       );
     case 'medium':
       return (
-        <span className="flex items-center gap-0.5" title="M\u00e9dio">
+        <span className="flex items-center gap-0.5" title="Médio">
           <span className="h-1.5 w-1.5 rounded-full bg-amber-500" />
         </span>
       );
@@ -180,9 +191,9 @@ function AsiGauge({ value, label }) {
       </div>
       {label && (
         <span
-          className={`mt-1.5 text-sm font-semibold capitalize ${getSafetyLabelStyle(label)}`}
+          className={`mt-1.5 text-sm font-semibold ${getSafetyLabelStyle(label)}`}
         >
-          {label}
+          {getSafetyLabelDisplay(label)}
         </span>
       )}
     </div>
@@ -200,11 +211,11 @@ AsiGauge.propTypes = {
 
 function StatCard({ value, label, colorClass }) {
   return (
-    <div className="flex flex-col items-center rounded-lg bg-white/60 px-3 py-2 min-w-0 flex-1">
+    <div className="flex flex-col items-center rounded-lg bg-white px-3 py-2 min-w-0 flex-1 shadow-sm">
       <span className={`text-lg font-bold ${colorClass || 'text-dark-gray'}`}>
         {value ?? '--'}
       </span>
-      <span className="text-[11px] text-medium-gray text-center leading-tight mt-0.5">
+      <span className="text-[11px] text-dark-gray text-center leading-tight mt-0.5">
         {label}
       </span>
     </div>
@@ -293,17 +304,10 @@ ClaimCard.propTypes = {
 // ---------------------------------------------------------------------------
 
 export default function FactCheckModal({ isOpen, onClose, scanResult, onClaimClick }) {
-  const visible = isOpen;
-  const [animated, setAnimated] = useState(false);
-
-  // Animate entrance
-  useEffect(() => {
-    if (isOpen) {
-      const frame = requestAnimationFrame(() => setAnimated(true));
-      return () => cancelAnimationFrame(frame);
-    }
-    setAnimated(false);
-  }, [isOpen]);
+  // The modal animates via CSS — always show at full opacity/scale since
+  // the modal mounts/unmounts with isOpen. CSS transition on initial render
+  // is handled by the browser's layout-then-paint cycle.
+  const animated = isOpen;
 
   // Escape key closes
   useEffect(() => {
@@ -314,13 +318,6 @@ export default function FactCheckModal({ isOpen, onClose, scanResult, onClaimCli
     document.addEventListener('keydown', handleKey);
     return () => document.removeEventListener('keydown', handleKey);
   }, [isOpen, onClose]);
-
-  const handleClaimClick = useCallback(
-    (idx) => {
-      onClaimClick?.(idx);
-    },
-    [onClaimClick],
-  );
 
   if (!isOpen || !scanResult) return null;
 
@@ -334,12 +331,13 @@ export default function FactCheckModal({ isOpen, onClose, scanResult, onClaimCli
     unverifiable_claims = 0,
     scan_duration_ms,
     scan_id,
+    error: scanError,
   } = scanResult;
 
-  // Determine header gradient based on safety
-  let headerGradient = 'from-green-600 to-emerald-700';
-  if (safety_index < 80) headerGradient = 'from-amber-500 to-orange-600';
-  if (safety_index < 50) headerGradient = 'from-red-600 to-rose-700';
+  // Determine header gradient based on safety — use darker shades for legibility
+  let headerGradient = 'from-green-700 to-emerald-800';
+  if (safety_index < 80) headerGradient = 'from-amber-700 to-orange-800';
+  if (safety_index < 50) headerGradient = 'from-red-700 to-rose-800';
 
   // Pick the header shield icon
   let HeaderIcon = ShieldCheck;
@@ -414,7 +412,7 @@ export default function FactCheckModal({ isOpen, onClose, scanResult, onClaimCli
             />
             <StatCard
               value={unverifiable_claims}
-              label="N\u00e3o verific\u00e1veis"
+              label="Não verificáveis"
               colorClass="text-amber-600"
             />
           </div>
@@ -423,15 +421,25 @@ export default function FactCheckModal({ isOpen, onClose, scanResult, onClaimCli
         {/* ── CLAIMS LIST ───────────────────────────────────────── */}
         <div className="flex-1 overflow-y-auto px-6 py-4 bg-off-white">
           <h3 className="text-sm font-semibold text-dark-gray mb-3 flex items-center gap-1.5">
-            An\u00e1lise por Verifica\u00e7\u00e3o
+            Análise por Verificação
             <span className="inline-flex items-center justify-center rounded-full bg-gray-200 px-2 py-0.5 text-[11px] font-medium text-medium-gray">
               {claims.length}
             </span>
           </h3>
 
-          {claims.length === 0 ? (
+          {scanError ? (
+            <div className="flex flex-col items-center gap-2 py-8">
+              <AlertTriangle className="h-6 w-6 text-red-500" />
+              <p className="text-sm font-medium text-red-600 text-center">
+                Erro na verificação
+              </p>
+              <p className="text-xs text-medium-gray text-center max-w-md">
+                {scanError}
+              </p>
+            </div>
+          ) : claims.length === 0 ? (
             <p className="text-sm text-medium-gray text-center py-8">
-              Nenhuma afirma\u00e7\u00e3o encontrada para analisar.
+              Nenhuma afirmação encontrada para analisar.
             </p>
           ) : (
             <div className="flex flex-col gap-3">
@@ -440,7 +448,7 @@ export default function FactCheckModal({ isOpen, onClose, scanResult, onClaimCli
                   key={idx}
                   claim={claim}
                   index={idx}
-                  onClick={handleClaimClick}
+                  onClick={onClaimClick}
                 />
               ))}
             </div>
@@ -509,6 +517,7 @@ FactCheckModal.propTypes = {
     scan_id: PropTypes.string,
     scanned_at: PropTypes.string,
     cached: PropTypes.bool,
+    error: PropTypes.string,
   }),
   onClaimClick: PropTypes.func,
 };

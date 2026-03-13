@@ -91,10 +91,10 @@ async def fact_check_scan_handler(req: func.HttpRequest) -> func.HttpResponse:
             request_data.article_text.encode("utf-8")
         ).hexdigest()
 
-        # Check cache
+        # Check cache (skip cached results with 0 claims — likely failed extractions)
         from services.database import get_db
         cached = get_db().get_latest_scan(article_text_hash)
-        if cached and cached.get("scan_result"):
+        if cached and cached.get("scan_result") and cached.get("total_claims", 0) > 0:
             logger.info(f"Cache hit for scan hash {article_text_hash[:16]}")
             # Return cached scan_result directly
             result = cached["scan_result"]

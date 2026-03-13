@@ -113,6 +113,7 @@ class FactCheckScanResponse(BaseModel):
     scan_duration_ms: int = 0
     scan_id: str = ""
     scanned_at: str = ""
+    error: Optional[str] = None
 
 
 # ========================================
@@ -237,7 +238,7 @@ class ArticleSafetyService:
 
         # --- Phase 1: Claim Extraction ---
         logger.info(f"[{correlation_id}] Phase 1: Extracting claims from {len(clean_text)} chars")
-        raw_claims = await self._extract_claims(clean_text, article_title, max_claims, correlation_id)
+        raw_claims, extraction_error = await self._extract_claims(clean_text, article_title, max_claims, correlation_id)
 
         if not raw_claims:
             duration_ms = int((time.time() - start_time) * 1000)
@@ -247,6 +248,7 @@ class ArticleSafetyService:
                 scan_duration_ms=duration_ms,
                 scan_id=correlation_id,
                 scanned_at=datetime.now(timezone.utc).isoformat(),
+                error=extraction_error,
             )
 
         # --- Phase 2: Evidence Gathering (parallel) ---
@@ -319,8 +321,13 @@ class ArticleSafetyService:
 
     async def _extract_claims(
         self, text: str, title: str, max_claims: int, correlation_id: str
-    ) -> list[dict]:
-        """Extract verifiable claims from article text using Haiku."""
+    ) -> tuple[list[dict], Optional[str]]:
+        """
+        Extract verifiable claims from article text using Haiku.
+
+        Returns:
+            Tuple of (claims_list, error_message). error_message is None on success.
+        """
         from services.llm_service import get_llm_service, repair_json
         from services.config import get_config
 
@@ -359,11 +366,11 @@ class ArticleSafetyService:
 
             claims = parsed.get("claims", [])
             logger.info(f"[{correlation_id}] Extracted {len(claims)} claims")
-            return claims[:max_claims]
+            return claims[:max_claims], None
 
         except Exception as e:
             logger.error(f"[{correlation_id}] Claim extraction failed: {e}")
-            return []
+            return [], f"Falha na extração de claims: {e}"
 
     # ========================================
     # PHASE 2: EVIDENCE GATHERING
