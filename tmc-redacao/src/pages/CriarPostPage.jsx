@@ -1019,32 +1019,7 @@ const CriarPostPage = () => {
           </div>
         )}
 
-        {/* Quality Loop failed — simple, non-technical message */}
-        {resultado?.qualityLoop && !qualityLoopPassed && !publishBlocked && (
-          <div className="bg-amber-50 border-t border-amber-200 px-4 py-3">
-            <div className="flex items-start gap-3">
-              <AlertTriangle size={18} className="text-amber-500 mt-0.5 flex-shrink-0" />
-              <div className="flex-1">
-                <p className="text-sm font-medium text-amber-800">
-                  A matéria precisa de revisão manual
-                </p>
-                <p className="text-xs text-amber-600 mt-1">
-                  A IA não conseguiu resolver todos os pontos automaticamente. Revise o texto antes de publicar.
-                </p>
-                <div className="flex gap-2 mt-2">
-                  <button
-                    onClick={() => navigate('/criar/texto-base')}
-                    className="text-xs px-3 py-1.5 bg-white text-amber-700 border border-amber-300 rounded font-medium hover:bg-amber-50"
-                  >
-                    Adicionar mais fontes
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Security scan nudge — show when article has verification issues but scan hasn't been run */}
+        {/* Security scan nudge — show when scan hasn't been run */}
         {verificationData && !factCheckResult && !publishBlocked && (
           <div className="px-4 pt-3">
             <div className="flex items-center justify-between px-4 py-2.5 rounded-lg border bg-amber-50 border-amber-200">

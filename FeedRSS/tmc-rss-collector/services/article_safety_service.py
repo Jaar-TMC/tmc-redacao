@@ -776,12 +776,11 @@ class ArticleSafetyService:
         """
         Batch deep-verify unverifiable claims using Exa search + Haiku reclassification.
 
-        1. Filter only unverifiable claims
-        2. Build a smart Exa query combining person names + key phrases from all claims
-        3. Make ONE Exa search (top 10 results, with text content)
-        4. Make ONE Haiku call to match evidence snippets back to each claim
-        5. Return updated claims with new verdicts + evidence
+        Runs up to MAX_ROUNDS rounds so that claims not resolved in the first pass
+        (due to Exa non-determinism or timeouts) are retried automatically.
+        The user only needs a single click.
         """
+        MAX_ROUNDS = 3
         start_time = time.time()
 
         # Step 1: Filter unverifiable claims, keeping their original index
@@ -800,70 +799,105 @@ class ArticleSafetyService:
             }
 
         logger.info(
-            f"[{correlation_id}] Deep verify: {len(unverifiable)} unverifiable claims"
+            f"[{correlation_id}] Deep verify: {len(unverifiable)} unverifiable claims (max {MAX_ROUNDS} rounds)"
         )
 
-        # Step 2: Parallel per-claim Exa searches (avoid query dilution)
         title_prefix = (article_title[:80] + " ") if article_title else ""
         semaphore = asyncio.Semaphore(5)
 
-        async def _search_claim(claim):
-            async with semaphore:
-                query = f"{title_prefix}{claim.get('text', '')[:200]}".strip()
-                return await self._deep_verify_exa_search(query, correlation_id)
+        all_updated = {}  # index -> claim dict (accumulates across rounds)
+        total_sources = 0
+        still_unverifiable = list(unverifiable)
+        rounds_executed = 0
 
-        exa_tasks = [_search_claim(c) for c in unverifiable]
-        per_claim_results = await asyncio.gather(*exa_tasks, return_exceptions=True)
+        for round_num in range(1, MAX_ROUNDS + 1):
+            if not still_unverifiable:
+                break
 
-        # Merge all results, deduplicating by URL
-        seen_urls = set()
-        exa_results = []
-        per_claim_evidence = {}  # claim_index -> [results]
+            rounds_executed = round_num
+            logger.info(
+                f"[{correlation_id}] Deep verify round {round_num}/{MAX_ROUNDS}: "
+                f"{len(still_unverifiable)} claims to process"
+            )
 
-        for i, result in enumerate(per_claim_results):
-            claim_idx = unverifiable[i]["index"]
-            claim_evidence = []
-            if isinstance(result, Exception):
-                logger.warning(
-                    f"[{correlation_id}] Deep verify Exa failed for claim {claim_idx}: {result}"
-                )
-                per_claim_evidence[claim_idx] = []
-                continue
-            for item in (result or []):
-                url = item.get("url", "")
-                claim_evidence.append(item)
-                if url not in seen_urls:
-                    seen_urls.add(url)
-                    exa_results.append(item)
-            per_claim_evidence[claim_idx] = claim_evidence
+            # Parallel per-claim Exa searches (avoid query dilution)
+            async def _search_claim(claim):
+                async with semaphore:
+                    query = f"{title_prefix}{claim.get('text', '')[:200]}".strip()
+                    return await self._deep_verify_exa_search(query, correlation_id)
 
-        sources_searched = len(exa_results)
+            exa_tasks = [_search_claim(c) for c in still_unverifiable]
+            per_claim_results = await asyncio.gather(*exa_tasks, return_exceptions=True)
 
-        logger.info(
-            f"[{correlation_id}] Deep verify: {len(unverifiable)} per-claim searches, "
-            f"{sources_searched} unique sources found"
-        )
+            # Merge results, deduplicating by URL
+            seen_urls = set()
+            exa_results = []
+            per_claim_evidence = {}
 
-        # Step 3: ONE Haiku call to match evidence to claims
-        updated_claims = await self._deep_verify_classify(
-            unverifiable, exa_results, per_claim_evidence, language, correlation_id
-        )
+            for i, result in enumerate(per_claim_results):
+                claim_idx = still_unverifiable[i]["index"]
+                claim_evidence = []
+                if isinstance(result, Exception):
+                    logger.warning(
+                        f"[{correlation_id}] Deep verify Exa failed for claim {claim_idx} (round {round_num}): {result}"
+                    )
+                    per_claim_evidence[claim_idx] = []
+                    continue
+                for item in (result or []):
+                    url = item.get("url", "")
+                    claim_evidence.append(item)
+                    if url not in seen_urls:
+                        seen_urls.add(url)
+                        exa_results.append(item)
+                per_claim_evidence[claim_idx] = claim_evidence
 
-        # Step 5: Count resolved claims
-        claims_resolved = sum(
-            1 for c in updated_claims if c.get("verdict") == "grounded"
-        )
+            total_sources += len(exa_results)
 
+            # Haiku classification
+            round_updated = await self._deep_verify_classify(
+                still_unverifiable, exa_results, per_claim_evidence, language, correlation_id
+            )
+
+            # Accumulate resolved claims, track still-unverifiable for next round
+            next_unverifiable = []
+            for claim_result in round_updated:
+                idx = claim_result.get("index")
+                if claim_result.get("verdict") == "grounded":
+                    all_updated[idx] = claim_result
+                else:
+                    # Still unverifiable — keep latest evidence for next round
+                    all_updated[idx] = claim_result
+                    # Find original claim data for retry
+                    original = next((c for c in still_unverifiable if c["index"] == idx), None)
+                    if original:
+                        next_unverifiable.append(original)
+
+            resolved_this_round = sum(1 for c in round_updated if c.get("verdict") == "grounded")
+            logger.info(
+                f"[{correlation_id}] Deep verify round {round_num}: "
+                f"{resolved_this_round} resolved, {len(next_unverifiable)} still unverifiable"
+            )
+
+            still_unverifiable = next_unverifiable
+
+            # Stop early if no progress this round (avoid wasting API calls)
+            if resolved_this_round == 0 and round_num > 1:
+                logger.info(f"[{correlation_id}] Deep verify: no progress in round {round_num}, stopping")
+                break
+
+        # Final results
+        final_updated = list(all_updated.values())
+        claims_resolved = sum(1 for c in final_updated if c.get("verdict") == "grounded")
         duration_ms = int((time.time() - start_time) * 1000)
 
         logger.info(
             f"[{correlation_id}] Deep verify complete: "
-            f"{claims_resolved}/{len(unverifiable)} resolved, {duration_ms}ms"
+            f"{claims_resolved}/{len(unverifiable)} resolved in {rounds_executed} round(s), {duration_ms}ms"
         )
 
         return {
-            "updated_claims": updated_claims,
-            "sources_searched": sources_searched,
+            "updated_claims": final_updated,
+            "sources_searched": total_sources,
             "claims_resolved": claims_resolved,
             "deep_verify_duration_ms": duration_ms,
         }

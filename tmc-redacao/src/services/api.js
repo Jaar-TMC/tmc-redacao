@@ -856,7 +856,7 @@ export async function factCheckScan({
  */
 export async function factCheckDeepVerify({ claims, articleTitle = '' }) {
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 30000);
+  const timeoutId = setTimeout(() => controller.abort(), 90000);
 
   try {
     return await fetchApi('/fact-check-deep-verify', {
