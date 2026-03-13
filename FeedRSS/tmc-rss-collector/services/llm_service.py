@@ -1952,6 +1952,19 @@ class LLMService:
                     task_type=task_type,
                 )
 
+        # Route Haiku models to Anthropic API directly when on Azure AI
+        # (Azure AI proxy may not have Haiku deployed)
+        use_endpoint = self.endpoint
+        use_headers = None
+        if self.use_azure and "haiku" in effective_model and ANTHROPIC_API_KEY:
+            use_endpoint = ANTHROPIC_ENDPOINT
+            use_headers = {
+                "Content-Type": "application/json",
+                "x-api-key": ANTHROPIC_API_KEY,
+                "anthropic-version": "2023-06-01",
+            }
+            logger.info(f"{_cid}Routing {effective_model} to Anthropic API (not available on Azure AI)")
+
         # Circuit breaker check
         if self._llm_circuit_open:
             if _time.time() < self._llm_circuit_open_until:
@@ -1961,7 +1974,7 @@ class LLMService:
                 self._llm_circuit_open = False
                 logger.info(f"{_cid}LLM circuit breaker half-open - allowing probe request")
 
-        headers = self._get_headers()
+        headers = use_headers or self._get_headers()
 
         payload = {
             "model": effective_model,
@@ -1973,12 +1986,12 @@ class LLMService:
             ]
         }
 
-        logger.info(f"{_cid}Calling API: {self.endpoint} with model {effective_model} task={task_type or 'unspecified'}")
+        logger.info(f"{_cid}Calling API: {use_endpoint} with model {effective_model} task={task_type or 'unspecified'}")
         _start_time = _time.time()
 
         try:
             response = await self.http_client.post(
-                self.endpoint,
+                use_endpoint,
                 headers=headers,
                 json=payload
             )
