@@ -31,7 +31,6 @@ import {
 import { markdownToHtml } from '../utils/markdownRenderer';
 import Tooltip from '../components/ui/Tooltip';
 import { SEOAnalyzerPanel, calculateSEOScore, RichTextEditor, EditorToolbar, FactCheckButton, FactCheckModal, FactCheckTooltip, BaseTextModal } from '../components/editor';
-import VerificationBanner from '../components/ui/VerificationBanner';
 import ResumoEditor from '../components/editor/ResumoEditor';
 import { useCriar } from '../context';
 import { useVersionHistory, useChatEditor, useFactCheckScan } from '../hooks';
@@ -49,12 +48,9 @@ const CriarPostPage = () => {
   const blockReason = resultado?.blockReason || null;
   const verificationData = resultado?.verification || null;
   const _riskLevel = resultado?.riskLevel || null;
-  const humanReviewRequired = resultado?.humanReviewRequired || false;
   const reviewReasons = resultado?.reviewReasons || [];
   // v7: editorial gates
   const publicationStatus = resultado?.publicationStatus || null;
-  const readabilityData = resultado?.readability || null;
-  const enrichmentDegraded = resultado?.enrichmentDegraded || false;
   const hasBaseText = textoBase?.blocos?.length > 0 || textoBase?.textoCompleto?.length > 0 || fonte?.dados != null;
   const slugSugerido = resultado?.slugSugerido || null;
   const [showPublishConfirm, setShowPublishConfirm] = useState(false);
@@ -1048,44 +1044,34 @@ const CriarPostPage = () => {
           </div>
         )}
 
-        {/* v7: Verification Banner — ONLY show when quality loop did NOT pass */}
-        {verificationData && !qualityLoopPassed && (
+        {/* Security scan nudge — show when article has verification issues but scan hasn't been run */}
+        {verificationData && !factCheckResult && !publishBlocked && (
           <div className="px-4 pt-3">
-            <VerificationBanner
-              verification={verificationData}
-              publishBlocked={publishBlocked}
-              blockReason={blockReason}
-              humanReviewRequired={humanReviewRequired}
-              reviewReasons={reviewReasons}
-            />
-          </div>
-        )}
-
-        {/* v7: Readability display — ONLY show when quality loop did NOT pass */}
-        {readabilityData && !qualityLoopPassed && (
-          <div className="px-4 pb-1">
-            <div className={`text-xs flex items-center gap-3 px-3 py-2 rounded border ${
-              readabilityData.flesch_score >= 60 ? 'bg-green-50 border-green-200 text-green-700' :
-              readabilityData.flesch_score >= 50 ? 'bg-amber-50 border-amber-200 text-amber-700' :
-              'bg-red-50 border-red-200 text-red-700'
-            }`}>
-              <span className="font-medium">Legibilidade: Flesch {readabilityData.flesch_score}</span>
-              {readabilityData.avg_sentence_length && (
-                <span>Frase média: {readabilityData.avg_sentence_length} palavras</span>
-              )}
-              {readabilityData.long_sentence_pct != null && (
-                <span>Frases longas: {Math.round(readabilityData.long_sentence_pct)}%</span>
-              )}
-            </div>
-          </div>
-        )}
-
-        {/* v7: Enrichment degradation warning — ONLY show when quality loop did NOT pass */}
-        {enrichmentDegraded && !qualityLoopPassed && (
-          <div className="px-4 pb-1">
-            <div className="text-xs px-3 py-2 rounded border bg-amber-50 border-amber-200 text-amber-700 flex items-center gap-2">
-              <AlertTriangle size={14} />
-              <span>Verificação sem enriquecimento externo - confiança pode ser menor</span>
+            <div className="flex items-center justify-between px-4 py-2.5 rounded-lg border bg-amber-50 border-amber-200">
+              <div className="flex items-center gap-2">
+                <ShieldAlert size={16} className="text-amber-500" />
+                <span className="text-sm text-amber-800">
+                  Recomendamos verificar a segurança do texto antes de publicar
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  const editor = editorRef.current?.editor;
+                  const plainText = editorRef.current?.getText() || '';
+                  runFactCheckScan(editor, {
+                    articleText: plainText,
+                    articleTitle: title,
+                    sourceUrls: sourceUrls,
+                    userArticleId: articleId || '',
+                  });
+                }}
+                disabled={isFactChecking}
+                className="text-xs px-3 py-1.5 bg-amber-600 text-white rounded font-medium hover:bg-amber-700 transition-colors
+                  disabled:opacity-60 disabled:cursor-not-allowed"
+              >
+                {isFactChecking ? 'Verificando...' : 'Verificar Segurança'}
+              </button>
             </div>
           </div>
         )}

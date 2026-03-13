@@ -2,6 +2,7 @@
 
 import httpx
 import json
+import os
 import re
 import sys
 import time
@@ -9,7 +10,7 @@ import time
 # Force UTF-8 output on Windows
 sys.stdout.reconfigure(encoding="utf-8")
 
-API_KEY = "REDACTED_USE_ENV_VAR"
+API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 BASE_URL = "https://api.anthropic.com/v1/messages"
 
 HEADERS = {
