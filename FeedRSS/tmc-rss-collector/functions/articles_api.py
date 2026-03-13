@@ -10,6 +10,7 @@ from math import ceil
 from uuid import UUID
 
 from services.database import get_db
+from services.async_db import run_db
 from models import ArticleListResponse
 
 logger = logging.getLogger(__name__)
@@ -76,7 +77,8 @@ async def list_articles_handler(req: func.HttpRequest) -> func.HttpResponse:
 
         # Fetch articles + urgency counts in single DB connection
         db = get_db()
-        articles, total, urgency_counts = db.get_articles_with_urgency(
+        articles, total, urgency_counts = await run_db(
+            db.get_articles_with_urgency,
             page=page,
             limit=limit,
             category=category,
@@ -133,7 +135,7 @@ async def list_articles_handler(req: func.HttpRequest) -> func.HttpResponse:
                     # PERF: Always use get_categories_filtered (even with no filters)
                     # instead of get_collection_stats which runs 2 extra unnecessary queries
                     # just to extract category counts.
-                    cat_list = db.get_categories_filtered(**cat_kwargs)
+                    cat_list = await run_db(db.get_categories_filtered, **cat_kwargs)
                     cat_list.sort(key=lambda x: x['count'], reverse=True)
 
                     # Tag counts (contextual: exclude tag from own filters)
@@ -151,9 +153,9 @@ async def list_articles_handler(req: func.HttpRequest) -> func.HttpResponse:
 
                     has_tag_filters = any(v for k, v in tag_kwargs.items() if k != 'limit')
                     if has_tag_filters:
-                        tag_list = db.get_all_tags_filtered(**tag_kwargs)
+                        tag_list = await run_db(db.get_all_tags_filtered, **tag_kwargs)
                     else:
-                        tag_list = db.get_all_tags(limit=100)
+                        tag_list = await run_db(db.get_all_tags, limit=100)
 
                     tag_items = [{"id": i + 1, "tag": t['tag'], "theme": t['theme'], "count": t['count']} for i, t in enumerate(tag_list)]
 
@@ -225,7 +227,7 @@ async def get_article_handler(req: func.HttpRequest) -> func.HttpResponse:
             )
 
         db = get_db()
-        article = db.get_article_by_id(article_id)
+        article = await run_db(db.get_article_by_id, article_id)
 
         if not article:
             return func.HttpResponse(
@@ -282,7 +284,8 @@ async def get_categories_handler(req: func.HttpRequest) -> func.HttpResponse:
 
         # PERF: Always use get_categories_filtered (works with or without filters)
         # instead of get_collection_stats which runs extra queries for unused data
-        categories = db.get_categories_filtered(
+        categories = await run_db(
+            db.get_categories_filtered,
             search=search, tag=tag, source_id=source, period=period
         )
 
@@ -327,7 +330,7 @@ async def get_trending_tags_handler(req: func.HttpRequest) -> func.HttpResponse:
 
         # Get trending tags from database
         db = get_db()
-        tags = db.get_trending_tags(limit=limit, period_hours=period_hours)
+        tags = await run_db(db.get_trending_tags, limit=limit, period_hours=period_hours)
 
         # Format response with proper display names
         items = []
@@ -403,11 +406,12 @@ async def get_all_tags_handler(req: func.HttpRequest) -> func.HttpResponse:
         db = get_db()
 
         if has_filters:
-            tags = db.get_all_tags_filtered(
+            tags = await run_db(
+                db.get_all_tags_filtered,
                 category=category, source_id=source, period=period, limit=limit
             )
         else:
-            tags = db.get_all_tags(search=search, limit=limit)
+            tags = await run_db(db.get_all_tags, search=search, limit=limit)
 
         # Format response
         items = []

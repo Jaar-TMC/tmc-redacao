@@ -8,6 +8,7 @@ import logging
 from datetime import datetime
 
 from services.database import get_db
+from services.async_db import run_db
 from services.clustering_service import (
     get_clustering_service,
     is_clustering_enabled
@@ -53,7 +54,7 @@ async def clustering_engine_handler(timer: func.TimerRequest) -> None:
     db = get_db()
 
     # Verify database connection
-    if not db.test_connection():
+    if not await run_db(db.test_connection):
         logger.error(f"[{execution_id}] Database connection failed")
         return
 
@@ -62,7 +63,7 @@ async def clustering_engine_handler(timer: func.TimerRequest) -> None:
         clustering_service = get_clustering_service(db_service=db)
 
         # Get count of pending articles before processing
-        pending_articles = db.get_articles_pending_clustering(limit=MAX_ARTICLES_PER_RUN)
+        pending_articles = await run_db(db.get_articles_pending_clustering, limit=MAX_ARTICLES_PER_RUN)
         pending_count = len(pending_articles) if pending_articles else 0
 
         if pending_count == 0:
@@ -93,18 +94,8 @@ async def clustering_engine_handler(timer: func.TimerRequest) -> None:
         raise
 
 
-async def _get_theme_statistics(db) -> dict:
-    """
-    Get statistics about themes for logging.
-    Uses a single query with conditional aggregation instead of 3 separate queries.
-
-    Args:
-        db: DatabaseService instance
-
-    Returns:
-        Dict with theme statistics
-    """
-    # Combined single query replaces 3 separate queries
+def _get_theme_statistics_sync(db) -> dict:
+    """Sync helper: get theme statistics using a single aggregation query."""
     combined_query = """
         SELECT
             COUNT(*) as total,
@@ -114,13 +105,11 @@ async def _get_theme_statistics(db) -> dict:
         FROM themes
         WHERE status = 'active'
     """
-
     try:
         with db.get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute(combined_query)
             row = cursor.fetchone()
-
             return {
                 'total': row[0] or 0,
                 'new_today': row[1] or 0,
@@ -129,3 +118,8 @@ async def _get_theme_statistics(db) -> dict:
     except Exception as e:
         logger.warning(f"Error getting theme statistics: {e}")
         return {'total': 0, 'new_today': 0, 'updated_today': 0}
+
+
+async def _get_theme_statistics(db) -> dict:
+    """Get statistics about themes for logging."""
+    return await run_db(_get_theme_statistics_sync, db)

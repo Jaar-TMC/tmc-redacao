@@ -9,6 +9,7 @@ from uuid import UUID
 import asyncio
 
 from services.database import get_db
+from services.async_db import run_db
 from models import SourceCreate, SourceUpdate
 
 logger = logging.getLogger(__name__)
@@ -22,7 +23,7 @@ async def list_sources_handler(req: func.HttpRequest) -> func.HttpResponse:
     """
     try:
         db = get_db()
-        sources = db.get_all_sources()
+        sources = await run_db(db.get_all_sources)
 
         response = {
             "items": [source.to_api_response() for source in sources],
@@ -61,7 +62,7 @@ async def get_source_handler(req: func.HttpRequest) -> func.HttpResponse:
             )
 
         db = get_db()
-        source = db.get_source_by_id(source_id)
+        source = await run_db(db.get_source_by_id, source_id)
 
         if not source:
             return func.HttpResponse(
@@ -146,7 +147,7 @@ async def create_source_handler(req: func.HttpRequest) -> func.HttpResponse:
 
         # Inserir no banco
         db = get_db()
-        source = db.create_source(source_data)
+        source = await run_db(db.create_source, source_data)
 
         return func.HttpResponse(
             json.dumps(source.to_api_response(), default=str),
@@ -209,7 +210,7 @@ async def update_source_handler(req: func.HttpRequest) -> func.HttpResponse:
 
         # Atualizar no banco
         db = get_db()
-        source = db.update_source(source_id, update_data)
+        source = await run_db(db.update_source, source_id, update_data)
 
         if not source:
             return func.HttpResponse(
@@ -250,7 +251,7 @@ async def delete_source_handler(req: func.HttpRequest) -> func.HttpResponse:
             )
 
         db = get_db()
-        deleted = db.delete_source(source_id)
+        deleted = await run_db(db.delete_source, source_id)
 
         if not deleted:
             return func.HttpResponse(

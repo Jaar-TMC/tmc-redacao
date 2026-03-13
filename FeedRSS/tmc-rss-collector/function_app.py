@@ -341,7 +341,7 @@ async def sources_handler(req: func.HttpRequest) -> func.HttpResponse:
     POST: Cria uma nova fonte RSS (admin only).
     """
     from utils.auth import get_current_user
-    user = get_current_user(req)
+    user = await get_current_user(req)
     if not user:
         return func.HttpResponse(
             json.dumps({"error": "Authentication required"}),
@@ -380,7 +380,7 @@ async def source_by_id_handler(req: func.HttpRequest) -> func.HttpResponse:
     DELETE: Desativa uma fonte (admin only, soft delete).
     """
     from utils.auth import get_current_user
-    user = get_current_user(req)
+    user = await get_current_user(req)
     if not user:
         return func.HttpResponse(
             json.dumps({"error": "Authentication required"}),
@@ -1044,7 +1044,7 @@ async def auth_me(req: func.HttpRequest) -> func.HttpResponse:
     """GET/PATCH /api/auth/me - Get or update current user."""
     from utils.auth import get_current_user
     if req.method != "OPTIONS":
-        user = get_current_user(req)
+        user = await get_current_user(req)
         if not user:
             return func.HttpResponse(
                 json.dumps({"error": "Authentication required"}),
@@ -1066,7 +1066,7 @@ async def auth_logout(req: func.HttpRequest) -> func.HttpResponse:
     """POST /api/auth/logout - Logout and invalidate token."""
     from utils.auth import get_current_user
     if req.method != "OPTIONS":
-        user = get_current_user(req)
+        user = await get_current_user(req)
         if not user:
             return func.HttpResponse(
                 json.dumps({"error": "Authentication required"}),
@@ -1084,7 +1084,7 @@ async def auth_users(req: func.HttpRequest) -> func.HttpResponse:
     """/api/auth/users - Admin user management."""
     from utils.auth import get_current_user
     if req.method != "OPTIONS":
-        user = get_current_user(req)
+        user = await get_current_user(req)
         if not user:
             return func.HttpResponse(
                 json.dumps({"error": "Authentication required"}),
@@ -1112,7 +1112,7 @@ async def auth_user_by_id(req: func.HttpRequest) -> func.HttpResponse:
     """/api/auth/users/{id} - Admin manage specific user."""
     from utils.auth import get_current_user
     if req.method != "OPTIONS":
-        user = get_current_user(req)
+        user = await get_current_user(req)
         if not user:
             return func.HttpResponse(
                 json.dumps({"error": "Authentication required"}),
@@ -1140,7 +1140,7 @@ async def auth_reset_password(req: func.HttpRequest) -> func.HttpResponse:
     """POST /api/auth/users/{id}/reset-password - Admin reset user password."""
     from utils.auth import get_current_user
     if req.method != "OPTIONS":
-        user = get_current_user(req)
+        user = await get_current_user(req)
         if not user:
             return func.HttpResponse(
                 json.dumps({"error": "Authentication required"}),

@@ -20,6 +20,7 @@ import numpy as np
 
 from models.theme import Theme, ThemeCreate
 from services.config import get_config
+from services.async_db import run_db
 from services.llm_service import LLMService, is_llm_configured
 
 logger = logging.getLogger(__name__)
@@ -695,10 +696,10 @@ class ClusteringService:
             return 0
 
         # Load theme cache
-        self._load_theme_cache()
+        await run_db(self._load_theme_cache)
 
         # Get pending articles
-        pending = self.db.get_articles_pending_clustering(limit=limit)
+        pending = await run_db(self.db.get_articles_pending_clustering, limit=limit)
 
         if not pending:
             logger.info("No pending articles to cluster")
@@ -743,7 +744,8 @@ class ClusteringService:
 
                     if signature:
                         # Save signature to database
-                        self.db.save_event_signature(
+                        await run_db(
+                            self.db.save_event_signature,
                             article_id=UUID(str(article_id)),
                             people=signature.people,
                             organizations=signature.organizations,
@@ -773,7 +775,8 @@ class ClusteringService:
 
                 # STEP 3: Fallback to embedding-only matching
                 if match is None:
-                    match = self.find_best_theme(
+                    match = await run_db(
+                        self.find_best_theme,
                         embedding,
                         article_published_at=published_at
                     )
@@ -784,7 +787,8 @@ class ClusteringService:
                 if match is not None:
                     # Add to existing theme
                     theme_id, similarity = match
-                    success = self._add_article_to_theme_with_type(
+                    success = await run_db(
+                        self._add_article_to_theme_with_type,
                         article_id=UUID(str(article_id)),
                         theme_id=theme_id,
                         similarity=similarity,
@@ -795,21 +799,24 @@ class ClusteringService:
                     if success:
                         # Update event signature with theme_id
                         if signature:
-                            self.db.update_event_signature_theme(
+                            await run_db(
+                                self.db.update_event_signature_theme,
                                 UUID(str(article_id)), theme_id
                             )
                         affected_themes.add(theme_id)
                         processed += 1
                 else:
                     # Create new theme WITH event signature
-                    theme = self.create_theme_with_signature(
+                    theme = await run_db(
+                        self.create_theme_with_signature,
                         article,
                         embedding,
                         signature
                     )
 
                     # Add article to new theme (as seed article)
-                    success = self._add_article_to_theme_with_type(
+                    success = await run_db(
+                        self._add_article_to_theme_with_type,
                         article_id=UUID(str(article_id)),
                         theme_id=theme.id,
                         similarity=1.0,  # Perfect match with itself
@@ -820,7 +827,8 @@ class ClusteringService:
                     if success:
                         # Update event signature with theme_id
                         if signature:
-                            self.db.update_event_signature_theme(
+                            await run_db(
+                                self.db.update_event_signature_theme,
                                 UUID(str(article_id)), theme.id
                             )
                         new_themes.append(theme)
@@ -833,9 +841,9 @@ class ClusteringService:
 
         # Recalculate scores for affected themes
         for theme_id in affected_themes:
-            score = self.calculate_theme_score(theme_id)
+            score = await run_db(self.calculate_theme_score, theme_id)
             # Use update_theme method with score_avg parameter
-            self.db.update_theme(theme_id, score_avg=score)
+            await run_db(self.db.update_theme, theme_id, score_avg=score)
 
         # Check for theme merging opportunities
         if new_themes:
@@ -849,7 +857,7 @@ class ClusteringService:
 
         # Log clustering quality metrics after batch processing
         if processed > 0:
-            quality_metrics = self.evaluate_clustering_quality()
+            quality_metrics = await run_db(self.evaluate_clustering_quality)
             silhouette = quality_metrics.get('silhouette_score')
             silhouette_str = f"{silhouette:.4f}" if silhouette is not None else "N/A"
             logger.info(
@@ -1037,7 +1045,7 @@ class ClusteringService:
 
             # Find similar existing themes (excluding recently merged)
             exclude_ids = list(merged_ids) + [theme.id]
-            match = self.find_best_theme(theme.centroid, exclude_theme_ids=exclude_ids)
+            match = await run_db(self.find_best_theme, theme.centroid, exclude_theme_ids=exclude_ids)
 
             if match is not None:
                 other_id, similarity = match
@@ -1081,7 +1089,7 @@ class ClusteringService:
             # TODO: Implement article transfer when db methods are available
 
             # Deactivate source theme using update_theme
-            self.db.update_theme(source_theme_id, status='inactive')
+            await run_db(self.db.update_theme, source_theme_id, status='inactive')
 
             # Remove from cache
             source_key = str(source_theme_id)

@@ -9,6 +9,7 @@ from datetime import datetime
 from collections import Counter
 
 from services.database import get_db
+from services.async_db import run_db
 from services.scoring_service import get_scoring_service
 
 logger = logging.getLogger(__name__)
@@ -49,7 +50,7 @@ async def scoring_calculator_handler(timer: func.TimerRequest) -> None:
     db = get_db()
 
     # Verify database connection
-    if not db.test_connection():
+    if not await run_db(db.test_connection):
         logger.error(f"[{execution_id}] Database connection failed")
         return
 
@@ -89,14 +90,8 @@ async def scoring_calculator_handler(timer: func.TimerRequest) -> None:
         raise
 
 
-async def _update_affected_theme_scores(db) -> int:
-    """
-    Update scores for themes that have recently scored articles.
-    Uses batch SQL UPDATE for efficiency.
-
-    Returns:
-        Number of themes updated
-    """
+def _update_theme_scores_sync(db) -> int:
+    """Sync helper: batch update theme scores from article_scores."""
     update_query = """
         UPDATE t
         SET
@@ -122,7 +117,6 @@ async def _update_affected_theme_scores(db) -> int:
         ) scores ON t.id = scores.theme_id
         WHERE t.status = 'active'
     """
-
     try:
         with db.get_connection() as conn:
             cursor = conn.cursor()
@@ -135,31 +129,30 @@ async def _update_affected_theme_scores(db) -> int:
         return 0
 
 
-async def _get_recent_classification_distribution(db, hours: int = 1) -> dict:
-    """
-    Get classification distribution for recently scored articles.
+async def _update_affected_theme_scores(db) -> int:
+    """Update scores for themes that have recently scored articles."""
+    return await run_db(_update_theme_scores_sync, db)
 
-    Args:
-        db: DatabaseService instance
-        hours: Number of hours to look back
 
-    Returns:
-        Dict with counts per classification {'A': N, 'B': N, 'C': N}
-    """
+def _get_classification_distribution_sync(db, hours: int = 1) -> dict:
+    """Sync helper: get classification distribution for recently scored articles."""
     query = """
         SELECT classification, COUNT(*) as count
         FROM article_scores
         WHERE scored_at >= DATEADD(hour, -%s, GETUTCDATE())
         GROUP BY classification
     """
-
     try:
         with db.get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute(query, (hours,))
             rows = cursor.fetchall()
-
             return {row[0]: row[1] for row in rows if row[0]}
     except Exception as e:
         logger.warning(f"Error getting classification distribution: {e}")
         return {}
+
+
+async def _get_recent_classification_distribution(db, hours: int = 1) -> dict:
+    """Get classification distribution for recently scored articles."""
+    return await run_db(_get_classification_distribution_sync, db, hours)

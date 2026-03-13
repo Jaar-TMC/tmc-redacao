@@ -11,6 +11,7 @@ from typing import Dict, Any, List
 import os
 
 from services.database import get_db
+from services.async_db import run_db
 from services.rss_parser import RSSParser
 from services.deduplication import deduplicate_with_db
 from services.enrichment import enrich_article_image
@@ -40,17 +41,17 @@ async def rss_collector_handler(timer: func.TimerRequest) -> None:
     db = get_db()
 
     # Verificar conexao com banco
-    if not db.test_connection():
+    if not await run_db(db.test_connection):
         logger.error(f"[{execution_id}] Database connection failed")
         return
 
     # Extended to 72h to prevent articles vanishing mid-workflow
     try:
-        deleted_old = db.delete_old_articles(hours=72)
+        deleted_old = await run_db(db.delete_old_articles, hours=72)
         if deleted_old > 0:
             logger.info(f"[{execution_id}] Cleanup: deleted {deleted_old} articles older than 72h")
 
-        deleted_dupes = db.delete_duplicate_articles_by_title()
+        deleted_dupes = await run_db(db.delete_duplicate_articles_by_title)
         if deleted_dupes > 0:
             logger.info(f"[{execution_id}] Cleanup: deleted {deleted_dupes} duplicate articles")
     except Exception as e:
@@ -58,7 +59,7 @@ async def rss_collector_handler(timer: func.TimerRequest) -> None:
 
     # Buscar fontes que devem ser coletadas
     try:
-        sources = db.get_sources_to_fetch()
+        sources = await run_db(db.get_sources_to_fetch)
         logger.info(f"[{execution_id}] Found {len(sources)} sources to fetch")
     except Exception as e:
         logger.error(f"[{execution_id}] Error fetching sources: {e}")
@@ -143,8 +144,9 @@ async def process_single_source(source: Source, db, parser: RSSParser,
 
         if not articles:
             # Feed vazio ou sem novidades
-            db.update_source_last_fetch(source.id, 0)
-            db.log_collection(
+            await run_db(db.update_source_last_fetch, source.id, 0)
+            await run_db(
+                db.log_collection,
                 source_id=source.id,
                 status='success',
                 articles_found=0,
@@ -175,8 +177,9 @@ async def process_single_source(source: Source, db, parser: RSSParser,
             )
 
         if not unique_articles:
-            db.update_source_last_fetch(source.id, 0)
-            db.log_collection(
+            await run_db(db.update_source_last_fetch, source.id, 0)
+            await run_db(
+                db.log_collection,
                 source_id=source.id,
                 status='success',
                 articles_found=articles_found,
@@ -207,7 +210,7 @@ async def process_single_source(source: Source, db, parser: RSSParser,
             # Graceful degradation - continue with RSS metadata
 
         # 5. Inserir no banco (retornando IDs para scoring inline)
-        articles_new, inserted_articles = db.insert_articles_returning(unique_articles)
+        articles_new, inserted_articles = await run_db(db.insert_articles_returning, unique_articles)
 
         logger.info(f"[{execution_id}] {source_name}: Inserted {articles_new} new articles")
 
@@ -222,7 +225,7 @@ async def process_single_source(source: Source, db, parser: RSSParser,
             )
             if scores:
                 try:
-                    articles_scored = await scoring_service._save_scores(scores)
+                    articles_scored = await run_db(scoring_service._save_scores, scores)
                     logger.info(f"[{execution_id}] {source_name}: Scored {articles_scored}/{articles_new} articles inline")
                 except Exception as e:
                     logger.error(f"[{execution_id}] {source_name}: Failed to save scores to DB: {e}")
@@ -233,11 +236,12 @@ async def process_single_source(source: Source, db, parser: RSSParser,
                 )
 
         # 6. Atualizar fonte
-        db.update_source_last_fetch(source.id, articles_new)
+        await run_db(db.update_source_last_fetch, source.id, articles_new)
 
         # 7. Logar coleta
         duration_ms = _get_duration_ms(start_time)
-        db.log_collection(
+        await run_db(
+            db.log_collection,
             source_id=source.id,
             status='success',
             articles_found=articles_found,
@@ -258,10 +262,11 @@ async def process_single_source(source: Source, db, parser: RSSParser,
         logger.error(f"[{execution_id}] Error processing {source_name}: {e}")
 
         # Atualizar fonte com erro
-        db.update_source_last_fetch(source.id, 0, error=str(e))
+        await run_db(db.update_source_last_fetch, source.id, 0, error=str(e))
 
         # Logar erro
-        db.log_collection(
+        await run_db(
+            db.log_collection,
             source_id=source.id,
             status='error',
             articles_found=0,
@@ -291,7 +296,7 @@ async def collect_single_source_handler(source_id: str) -> Dict[str, Any]:
     db = get_db()
     parser = RSSParser(timeout=FETCH_TIMEOUT)
 
-    source = db.get_source_by_id(source_id)
+    source = await run_db(db.get_source_by_id, source_id)
     if not source:
         raise ValueError(f"Source not found: {source_id}")
 

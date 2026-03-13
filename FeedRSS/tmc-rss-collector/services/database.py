@@ -144,8 +144,24 @@ class DatabaseService:
             raise ValueError(
                 "Database not configured. Set SQL_SERVER and SQL_DATABASE environment variables."
             )
-        pool_size = int(os.environ.get('SQL_POOL_SIZE', '10'))
+        pool_size = int(os.environ.get('SQL_POOL_SIZE', '15'))
         self._pool = ConnectionPool(self._create_raw_connection, max_size=pool_size)
+
+        # Domain repositories (facade delegates to these)
+        from services.repos import (
+            SourceRepository, EmbeddingRepository, ScoringRepository,
+            AuthRepository, UserRepository, AuditRepository,
+            EventRepository, ThemeRepository, ArticleRepository,
+        )
+        self.sources = SourceRepository(self)
+        self.embeddings = EmbeddingRepository(self)
+        self.scoring = ScoringRepository(self)
+        self.auth = AuthRepository(self)
+        self.users = UserRepository(self)
+        self.audit = AuditRepository(self)
+        self.events = EventRepository(self)
+        self.themes = ThemeRepository(self)
+        self.articles = ArticleRepository(self)
 
     def _create_raw_connection(self) -> pymssql.Connection:
         """Create a new raw pymssql connection (used by pool internally)."""
@@ -3606,6 +3622,79 @@ class DatabaseService:
             deleted = cursor.rowcount
             conn.commit()
             return deleted
+
+    # --- Token rotation (refresh token family tracking) ---
+
+    def blacklist_token_rotated(self, jti: str, user_id, expires_at, token_family: str, replaced_by_jti: str) -> None:
+        """Blacklist a refresh token due to rotation (not revocation).
+
+        IMPORTANT: This method intentionally lets exceptions propagate.
+        The caller MUST NOT issue a new refresh token if blacklisting fails,
+        otherwise both old and new tokens would be valid simultaneously.
+        """
+        query = """
+            INSERT INTO token_blacklist (token_jti, user_id, expires_at, token_family, replaced_at, replaced_by_jti)
+            VALUES (%s, %s, %s, %s, GETUTCDATE(), %s)
+        """
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(query, (str(jti), str(user_id), expires_at, token_family, replaced_by_jti))
+            conn.commit()
+
+    def get_blacklisted_token_info(self, jti: str):
+        """Get blacklist entry details for reuse detection. Returns None if not blacklisted."""
+        query = """
+            SELECT token_jti, user_id, token_family, replaced_at, replaced_by_jti
+            FROM token_blacklist WHERE token_jti = %s
+        """
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(query, (str(jti),))
+                row = cursor.fetchone()
+                if not row:
+                    return None
+                return {
+                    "token_jti": row[0],
+                    "user_id": str(row[1]) if row[1] else None,
+                    "token_family": row[2],
+                    "replaced_at": row[3],
+                    "replaced_by_jti": row[4],
+                }
+        except Exception as e:
+            logger.error(f"Error getting blacklisted token info: {e}")
+            return None
+
+    def blacklist_token_family(self, token_family: str, user_id) -> int:
+        """Blacklist ALL tokens in a family (compromise detected)."""
+        sentinel_jti = f"FAMILY:{token_family}"
+        query = """
+            IF NOT EXISTS (SELECT 1 FROM token_blacklist WHERE token_jti = %s)
+            INSERT INTO token_blacklist (token_jti, user_id, expires_at, token_family)
+            VALUES (%s, %s, DATEADD(DAY, 30, GETUTCDATE()), %s)
+        """
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(query, (sentinel_jti, sentinel_jti, str(user_id), token_family))
+                conn.commit()
+                return cursor.rowcount
+        except Exception as e:
+            logger.error(f"Error blacklisting token family: {e}")
+            return 0
+
+    def is_family_revoked(self, token_family: str) -> bool:
+        """Check if an entire token family has been revoked."""
+        sentinel_jti = f"FAMILY:{token_family}"
+        query = "SELECT 1 FROM token_blacklist WHERE token_jti = %s"
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(query, (sentinel_jti,))
+                return cursor.fetchone() is not None
+        except Exception as e:
+            logger.error(f"Error checking family revocation: {e}")
+            return True  # Fail closed: treat DB errors as revoked
 
     # --- Auth audit log ---
 

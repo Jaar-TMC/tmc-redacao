@@ -5,7 +5,7 @@ Shared test fixtures for TMC pipeline tests.
 import sys
 import os
 import pytest
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 # Add project root to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
@@ -97,3 +97,59 @@ def sample_verification_data():
             "verification_rate": 0.5,
         },
     }
+
+
+# =============================================================================
+# Safety gate test fixtures and factories
+# =============================================================================
+
+@pytest.fixture
+def production_mode():
+    """Enable production safety mode for a test."""
+    with patch.dict(os.environ, {
+        "PRODUCTION_SAFETY_MODE": "true",
+        "JWT_SECRET_KEY": "a" * 32,
+    }):
+        import services.config as cfg_mod
+        cfg_mod._config = None
+        yield
+        cfg_mod._config = None
+
+
+@pytest.fixture
+def legacy_mode():
+    """Disable production safety mode."""
+    with patch.dict(os.environ, {
+        "PRODUCTION_SAFETY_MODE": "false",
+    }):
+        import services.config as cfg_mod
+        cfg_mod._config = None
+        yield
+        cfg_mod._config = None
+
+
+def make_verification_data(**overrides):
+    """Factory for verification data dicts with safe defaults.
+
+    Returns a dict representing a clean, passing verification result.
+    Override any field via keyword arguments.
+    """
+    base = {
+        "risk_level": "low",
+        "confidence_score": 0.80,
+        "fabricated_claims": 0,
+        "unverifiable_claims": 0,
+        "total_claims": 10,
+        "grounded_claims": 8,
+        "context_claims": 0,
+        "expansion_ratio": 2.0,
+        "is_verified": True,
+        "entity_comparison": {
+            "novel_entities": [],
+            "output_entities": ["E1", "E2", "E3"],
+            "source_entities": ["E1", "E2", "E3"],
+            "common_entities": ["E1", "E2", "E3"],
+        },
+    }
+    base.update(overrides)
+    return base

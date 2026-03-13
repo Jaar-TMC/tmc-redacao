@@ -62,6 +62,9 @@ class AppConfig:
     decontamination_enabled: bool = True
     production_safety_mode: bool = True
 
+    # Prompt caching (Anthropic only - reduces cost on repeated system prompts)
+    prompt_caching_enabled: bool = True
+
     # Safety thresholds
     min_source_chars: int = 300
     nota_only_threshold: int = 500
@@ -142,6 +145,8 @@ def load_config() -> AppConfig:
         exa_api_key=os.environ.get("EXA_API_KEY", ""),
         exa_max_results=_int_env("EXA_MAX_RESULTS", 5),
         exa_search_days=_int_env("EXA_SEARCH_DAYS", 7),
+        # Prompt caching
+        prompt_caching_enabled=_bool_env("PROMPT_CACHING_ENABLED", True),
         # Feature flags
         fact_check_enabled=_bool_env("FACT_CHECK_ENABLED", True),
         fact_check_enrichment_enabled=_bool_env("FACT_CHECK_ENRICHMENT_ENABLED", True),

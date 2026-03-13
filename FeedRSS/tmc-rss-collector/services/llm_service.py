@@ -1876,6 +1876,13 @@ Inclua a atribuição de créditos apropriadamente.""")
     return "\n".join(prompt_parts)
 
 
+class _RateLimitError(RuntimeError):
+    """Raised on 429 responses to trigger rate-limit-aware retry."""
+    def __init__(self, message: str, retry_after: float):
+        super().__init__(message)
+        self.retry_after = retry_after
+
+
 class LLMService:
     """Service class for LLM operations using direct HTTP calls."""
 
@@ -1944,7 +1951,7 @@ class LLMService:
         retry=retry_if_exception_type((httpx.ConnectError, httpx.ConnectTimeout, httpx.ReadTimeout)),
         reraise=True,
     )
-    async def _call_api(self, system: str, user_content: str, max_tokens: int = MAX_TOKENS, correlation_id: str = "", model: str = "", task_type: str = "") -> str:
+    async def _call_api(self, system: str, user_content: str, max_tokens: int = MAX_TOKENS, correlation_id: str = "", model: str = "", task_type: str = "", cache_system: bool = False) -> str:
         """Make API call and return response text. Retries on connection errors."""
         import time as _time
         _cid = f"[{correlation_id}] " if correlation_id else ""
@@ -1993,11 +2000,29 @@ class LLMService:
 
         headers = use_headers or self._get_headers()
 
+        # Prompt caching: wrap system prompt with cache_control for Anthropic API
+        # (reduces input token costs by 90% on cache hits for repeated system prompts)
+        system_payload = system
+        _is_direct_anthropic = (use_endpoint == ANTHROPIC_ENDPOINT)
+        _model_supports_caching = "haiku" not in effective_model  # Haiku requires 2048+ token minimum
+        if cache_system and _is_direct_anthropic and _model_supports_caching:
+            from services.config import get_config as _get_cfg
+            if _get_cfg().prompt_caching_enabled:
+                if isinstance(system, str):
+                    system_payload = [
+                        {
+                            "type": "text",
+                            "text": system,
+                            "cache_control": {"type": "ephemeral"}
+                        }
+                    ]
+                # If already a list (structured system), leave as-is
+
         payload = {
             "model": effective_model,
             "max_tokens": max_tokens,
             "temperature": 0.0,
-            "system": system,
+            "system": system_payload,
             "messages": [
                 {"role": "user", "content": user_content}
             ]
@@ -2039,7 +2064,14 @@ class LLMService:
         if response.status_code != 200:
             error_text = response.text
             _elapsed_ms = int((_time.time() - _start_time) * 1000)
-            logger.error(f"API error {response.status_code}: {error_text}")
+            logger.error(f"{_cid}API error {response.status_code}: {error_text}")
+
+            # Rate limit: raise a specific error so the wrapper can retry
+            if response.status_code == 429:
+                retry_after = response.headers.get("retry-after")
+                wait_secs = min(float(retry_after) if retry_after else 15.0, 60.0)
+                raise _RateLimitError(error_text, wait_secs)
+
             self._llm_failures += 1
             if self._llm_failures >= 5:
                 self._llm_circuit_open = True
@@ -2074,6 +2106,8 @@ class LLMService:
         input_tokens = usage.get("input_tokens", 0)
         output_tokens = usage.get("output_tokens", 0)
         stop_reason = result.get("stop_reason", "")
+        cache_creation_input_tokens = usage.get("cache_creation_input_tokens", 0)
+        cache_read_input_tokens = usage.get("cache_read_input_tokens", 0)
 
         # Cost calculation (USD per token)
         _cost_map = {
@@ -2085,11 +2119,20 @@ class LLMService:
         input_rate, output_rate = _cost_map.get(effective_model, (3.00 / 1_000_000, 15.00 / 1_000_000))
         input_cost = input_tokens * input_rate
         output_cost = output_tokens * output_rate
+        # Adjust cost for prompt caching (read=10% of input, write=125% of input)
+        # Note: Anthropic's input_tokens already EXCLUDES cache tokens, so we ADD cache costs
+        if cache_read_input_tokens or cache_creation_input_tokens:
+            cache_read_cost = cache_read_input_tokens * (input_rate * 0.1)
+            cache_creation_cost = cache_creation_input_tokens * (input_rate * 1.25)
+            input_cost = input_tokens * input_rate + cache_read_cost + cache_creation_cost
 
+        cache_info = ""
+        if cache_read_input_tokens or cache_creation_input_tokens:
+            cache_info = f" cache_read={cache_read_input_tokens} cache_write={cache_creation_input_tokens}"
         logger.info(
             f"{_cid}LLM usage: model={effective_model} task={task_type or 'unspecified'} "
             f"tokens={input_tokens}+{output_tokens}={input_tokens + output_tokens} "
-            f"cost=${input_cost + output_cost:.4f} latency={_elapsed_ms}ms stop={stop_reason}"
+            f"cost=${input_cost + output_cost:.4f} latency={_elapsed_ms}ms stop={stop_reason}{cache_info}"
         )
 
         # Non-blocking DB logging via thread pool (matches asyncio.to_thread pattern)
@@ -2117,8 +2160,17 @@ class LLMService:
         return response_text
 
     async def call_api(self, system: str, user_content: str, max_tokens: int = MAX_TOKENS, correlation_id: str = "", model: str = "", task_type: str = "") -> str:
-        """Public interface for LLM API calls."""
-        return await self._call_api(system, user_content, max_tokens, correlation_id=correlation_id, model=model, task_type=task_type)
+        """Public interface for LLM API calls. Retries up to 2 times on rate limits."""
+        max_rate_limit_retries = 2
+        for attempt in range(max_rate_limit_retries + 1):
+            try:
+                return await self._call_api(system, user_content, max_tokens, correlation_id=correlation_id, model=model, task_type=task_type)
+            except _RateLimitError as e:
+                if attempt >= max_rate_limit_retries:
+                    logger.error(f"Rate limit retries exhausted after {max_rate_limit_retries} attempts for {task_type}")
+                    raise RuntimeError(f"AI service error: {e}") from e
+                logger.warning(f"Rate limited (attempt {attempt + 1}/{max_rate_limit_retries}), waiting {e.retry_after}s before retry")
+                await asyncio.sleep(e.retry_after)
 
     async def generate_article(
         self,
@@ -2195,7 +2247,7 @@ class LLMService:
         )
 
         try:
-            response_text = await self._call_api(system_prompt, user_prompt, MAX_TOKENS, correlation_id=correlation_id, task_type='article_generation')
+            response_text = await self._call_api(system_prompt, user_prompt, MAX_TOKENS, correlation_id=correlation_id, task_type='article_generation', cache_system=True)
             logger.debug(f"Raw LLM response: {response_text[:500]}...")
 
             # Try to extract JSON from response
@@ -2460,7 +2512,7 @@ Responda em JSON:
 
         try:
             # Use 8192 tokens for merge_topics - complex output needs more space
-            response_text = await self._call_api(MERGE_TOPICS_SYSTEM, prompt, 8192, task_type='story_fusion')
+            response_text = await self._call_api(MERGE_TOPICS_SYSTEM, prompt, 8192, task_type='story_fusion', cache_system=True)
             logger.debug(f"Merge topics response: {response_text[:500]}...")
 
             # Extract JSON from response
@@ -2580,7 +2632,7 @@ Responda em JSON:
         user_prompt = get_edit_article_prompt(current_article, instruction, edit_scope)
 
         try:
-            response_text = await self._call_api(system_prompt, user_prompt, MAX_TOKENS, task_type='article_edit')
+            response_text = await self._call_api(system_prompt, user_prompt, MAX_TOKENS, task_type='article_edit', cache_system=True)
             logger.debug(f"Edit article response: {response_text[:500]}...")
 
             # Extract JSON from response

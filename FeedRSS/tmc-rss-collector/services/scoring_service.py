@@ -33,6 +33,7 @@ from datetime import datetime
 from models import (
     ArticleScore, ArticleScoreCreate, Article
 )
+from services.async_db import run_db
 from services.config import get_config
 
 logger = logging.getLogger(__name__)
@@ -599,7 +600,7 @@ class ScoringService:
             # Get pending articles from database
             # Note: This assumes database has get_articles_pending_score method
             # If not available, we query collected_articles where has_score = 0
-            pending = await self._get_pending_articles(limit)
+            pending = await run_db(self._get_pending_articles, limit)
 
             if not pending:
                 logger.info("No pending articles to score")
@@ -615,7 +616,7 @@ class ScoringService:
             )
 
             # Save scores to database
-            saved = await self._save_scores(scores)
+            saved = await run_db(self._save_scores, scores)
 
             logger.info(f"Processed {saved} articles for scoring")
             return saved
@@ -624,7 +625,7 @@ class ScoringService:
             logger.error(f"Error processing pending articles: {e}")
             return 0
 
-    async def _get_pending_articles(self, limit: int) -> List[Dict[str, Any]]:
+    def _get_pending_articles(self, limit: int) -> List[Dict[str, Any]]:
         """
         Get articles that haven't been scored yet.
 
@@ -659,7 +660,7 @@ class ScoringService:
                 for row in rows
             ]
 
-    async def _save_scores(self, scores: List[ArticleScore]) -> int:
+    def _save_scores(self, scores: List[ArticleScore]) -> int:
         """
         Save article scores to database.
 

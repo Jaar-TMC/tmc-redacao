@@ -17,6 +17,7 @@ from uuid import UUID
 import numpy as np
 
 from services.database import get_db, DatabaseService
+from services.async_db import run_db
 from services.clustering_service import (
     get_clustering_service,
     is_clustering_enabled,
@@ -110,7 +111,7 @@ async def merge_similar_themes(
     logger.info("Starting merge_similar_themes...")
 
     # Carregar todos os temas ativos com centroids
-    themes = db.get_all_themes(status='active')
+    themes = await run_db(db.get_all_themes, status='active')
     themes_with_centroid = [t for t in themes if t.get('centroid') is not None]
 
     if len(themes_with_centroid) < 2:
@@ -207,24 +208,13 @@ async def merge_similar_themes(
     return merged_count
 
 
-async def _merge_theme_into(
+def _merge_theme_into_sync(
     db: DatabaseService,
     source_theme: Dict,
     target_theme: Dict,
     similarity: float
 ) -> bool:
-    """
-    Move todos os artigos de source_theme para target_theme e desativa source_theme.
-
-    Args:
-        db: DatabaseService instance
-        source_theme: Tema a ser desativado (menor)
-        target_theme: Tema que recebera os artigos (maior)
-        similarity: Similaridade entre os temas
-
-    Returns:
-        True se sucesso
-    """
+    """Sync helper: move articles from source to target theme and deactivate source."""
     source_id = source_theme['id']
     target_id = target_theme['id']
 
@@ -232,8 +222,6 @@ async def _merge_theme_into(
         with db.get_connection() as conn:
             cursor = conn.cursor()
 
-            # 1. Mover artigos do source para target
-            # Atualizar a tabela article_themes
             move_query = """
                 UPDATE article_themes
                 SET theme_id = %s,
@@ -250,20 +238,18 @@ async def _merge_theme_into(
             cursor.execute(move_query, (
                 str(target_id),
                 similarity,
-                similarity,  # Ajustar score pela similaridade do merge
+                similarity,
                 str(source_id),
-                str(target_id)  # Evitar duplicatas
+                str(target_id)
             ))
             moved_count = cursor.rowcount
 
-            # 2. Remover relacoes duplicadas (artigos que ja estavam em ambos os temas)
             delete_dups_query = """
                 DELETE FROM article_themes
                 WHERE theme_id = %s
             """
             cursor.execute(delete_dups_query, (str(source_id),))
 
-            # 3. Atualizar contagem de artigos do target
             update_target_query = """
                 UPDATE themes
                 SET article_count = (
@@ -274,7 +260,6 @@ async def _merge_theme_into(
             """
             cursor.execute(update_target_query, (str(target_id), str(target_id)))
 
-            # 4. Desativar o source theme
             deactivate_query = """
                 UPDATE themes
                 SET status = 'merged',
@@ -294,23 +279,18 @@ async def _merge_theme_into(
         raise
 
 
-async def cleanup_orphan_themes(
+async def _merge_theme_into(
     db: DatabaseService,
-    report: MaintenanceReport
-) -> int:
-    """
-    Encontra e desativa temas sem artigos (orfaos).
+    source_theme: Dict,
+    target_theme: Dict,
+    similarity: float
+) -> bool:
+    """Move all articles from source_theme to target_theme and deactivate source."""
+    return await run_db(_merge_theme_into_sync, db, source_theme, target_theme, similarity)
 
-    Args:
-        db: DatabaseService instance
-        report: MaintenanceReport para registrar resultados
 
-    Returns:
-        Numero de temas desativados
-    """
-    logger.info("Starting cleanup_orphan_themes...")
-
-    # Query para encontrar temas ativos sem artigos
+def _cleanup_orphan_themes_sync(db: DatabaseService) -> Tuple[int, List[Dict]]:
+    """Sync helper: find and deactivate orphan themes. Returns (count, deactivated_list)."""
     query_orphans = """
         SELECT t.id, t.name, t.article_count
         FROM themes t
@@ -322,49 +302,56 @@ async def cleanup_orphan_themes(
             )
         )
     """
+    with db.get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute(query_orphans)
+        orphans = cursor.fetchall()
 
+        if not orphans:
+            return 0, []
+
+        orphan_ids = []
+        deactivated = []
+        for orphan in orphans:
+            theme_id = orphan[0]
+            theme_name = orphan[1]
+            orphan_ids.append(str(theme_id))
+            deactivated.append({
+                'id': str(theme_id),
+                'name': theme_name,
+                'reason': 'orphan'
+            })
+            logger.info(f"Deactivated orphan theme: {theme_name} (ID: {theme_id})")
+
+        if orphan_ids:
+            placeholders = ','.join(['%s'] * len(orphan_ids))
+            batch_deactivate = f"""
+                UPDATE themes
+                SET status = 'inactive',
+                    article_count = 0,
+                    last_updated_at = GETUTCDATE()
+                WHERE id IN ({placeholders})
+            """
+            cursor.execute(batch_deactivate, tuple(orphan_ids))
+
+        conn.commit()
+        return len(orphan_ids), deactivated
+
+
+async def cleanup_orphan_themes(
+    db: DatabaseService,
+    report: MaintenanceReport
+) -> int:
+    """Find and deactivate orphan themes (no articles)."""
+    logger.info("Starting cleanup_orphan_themes...")
     try:
-        with db.get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute(query_orphans)
-            orphans = cursor.fetchall()
-
-            if not orphans:
-                logger.info("No orphan themes found")
-                return 0
-
-            logger.info(f"Found {len(orphans)} orphan themes to deactivate")
-
-            # Collect orphan IDs for batch deactivation
-            orphan_ids = []
-            for orphan in orphans:
-                theme_id = orphan[0]
-                theme_name = orphan[1]
-                orphan_ids.append(str(theme_id))
-
-                report.themes_deactivated.append({
-                    'id': str(theme_id),
-                    'name': theme_name,
-                    'reason': 'orphan'
-                })
-
-                logger.info(f"Deactivated orphan theme: {theme_name} (ID: {theme_id})")
-
-            # Batch deactivate all orphan themes in one query
-            if orphan_ids:
-                placeholders = ','.join(['%s'] * len(orphan_ids))
-                batch_deactivate = f"""
-                    UPDATE themes
-                    SET status = 'inactive',
-                        article_count = 0,
-                        last_updated_at = GETUTCDATE()
-                    WHERE id IN ({placeholders})
-                """
-                cursor.execute(batch_deactivate, tuple(orphan_ids))
-
-            conn.commit()
-            return len(orphan_ids)
-
+        count, deactivated = await run_db(_cleanup_orphan_themes_sync, db)
+        report.themes_deactivated.extend(deactivated)
+        if count == 0:
+            logger.info("No orphan themes found")
+        else:
+            logger.info(f"Found {count} orphan themes to deactivate")
+        return count
     except Exception as e:
         logger.error(f"Error in cleanup_orphan_themes: {e}")
         report.errors.append(f"Cleanup error: {str(e)}")
@@ -390,7 +377,7 @@ async def recalculate_all_scores(
     logger.info("Starting recalculate_all_scores...")
 
     try:
-        scores_updated = clustering_service.recalculate_all_theme_scores()
+        scores_updated = await run_db(clustering_service.recalculate_all_theme_scores)
         report.themes_scores_updated = len(scores_updated)
 
         logger.info(f"Recalculated scores for {len(scores_updated)} themes")
@@ -402,116 +389,105 @@ async def recalculate_all_scores(
         return 0
 
 
+def _generate_quality_metrics_sync(db: DatabaseService) -> Dict[str, Any]:
+    """Sync helper: generate clustering quality metrics from DB."""
+    with db.get_connection() as conn:
+        cursor = conn.cursor()
+
+        cursor.execute("SELECT COUNT(*) FROM themes WHERE status = 'active'")
+        total_active = cursor.fetchone()[0]
+
+        cursor.execute("SELECT COUNT(*) FROM themes WHERE status != 'active'")
+        total_inactive = cursor.fetchone()[0]
+
+        cursor.execute("""
+            SELECT COUNT(*) FROM themes
+            WHERE first_seen_at >= DATEADD(hour, -24, GETUTCDATE())
+        """)
+        created_24h = cursor.fetchone()[0]
+
+        cursor.execute("""
+            SELECT
+                AVG(CAST(article_count AS FLOAT)) as avg_articles,
+                MIN(article_count) as min_articles,
+                MAX(article_count) as max_articles,
+                STDEV(CAST(article_count AS FLOAT)) as std_articles
+            FROM themes
+            WHERE status = 'active' AND article_count > 0
+        """)
+        row = cursor.fetchone()
+
+        cursor.execute("""
+            SELECT
+                AVG(avg_score) as avg_theme_score,
+                MIN(avg_score) as min_theme_score,
+                MAX(avg_score) as max_theme_score
+            FROM themes
+            WHERE status = 'active' AND avg_score IS NOT NULL
+        """)
+        score_row = cursor.fetchone()
+
+        cursor.execute("""
+            SELECT
+                CASE
+                    WHEN avg_score >= 75 THEN 'A'
+                    WHEN avg_score >= 35 THEN 'B'
+                    ELSE 'C'
+                END as classification,
+                COUNT(*) as count
+            FROM themes
+            WHERE status = 'active' AND avg_score IS NOT NULL
+            GROUP BY
+                CASE
+                    WHEN avg_score >= 75 THEN 'A'
+                    WHEN avg_score >= 35 THEN 'B'
+                    ELSE 'C'
+                END
+        """)
+        classification_counts = {r[0]: r[1] for r in cursor.fetchall()}
+
+        cursor.execute("""
+            SELECT COUNT(*)
+            FROM collected_articles a
+            JOIN article_embeddings e ON a.id = e.article_id
+            LEFT JOIN article_themes at ON a.id = at.article_id
+            WHERE at.article_id IS NULL
+        """)
+        pending_clustering = cursor.fetchone()[0]
+
+        return {
+            'total_active': total_active,
+            'total_inactive': total_inactive,
+            'created_24h': created_24h,
+            'articles_distribution': {
+                'avg': round(row[0], 2) if row[0] else 0,
+                'min': row[1] or 0,
+                'max': row[2] or 0,
+                'std': round(row[3], 2) if row[3] else 0
+            },
+            'score_distribution': {
+                'avg': round(score_row[0], 2) if score_row[0] else 0,
+                'min': round(score_row[1], 2) if score_row[1] else 0,
+                'max': round(score_row[2], 2) if score_row[2] else 0
+            },
+            'classification_counts': classification_counts,
+            'pending_clustering': pending_clustering,
+        }
+
+
 async def generate_quality_metrics(
     db: DatabaseService,
     report: MaintenanceReport
 ) -> Dict[str, Any]:
-    """
-    Gera metricas de qualidade do clustering.
-
-    Args:
-        db: DatabaseService instance
-        report: MaintenanceReport para registrar resultados
-
-    Returns:
-        Dict com metricas de qualidade
-    """
+    """Generate clustering quality metrics."""
     logger.info("Generating quality metrics...")
-
     try:
-        with db.get_connection() as conn:
-            cursor = conn.cursor()
-
-            # Total de temas ativos
-            cursor.execute("SELECT COUNT(*) FROM themes WHERE status = 'active'")
-            report.total_active_themes = cursor.fetchone()[0]
-
-            # Total de temas inativos
-            cursor.execute("SELECT COUNT(*) FROM themes WHERE status != 'active'")
-            report.total_inactive_themes = cursor.fetchone()[0]
-
-            # Temas criados nas ultimas 24h
-            cursor.execute("""
-                SELECT COUNT(*) FROM themes
-                WHERE first_seen_at >= DATEADD(hour, -24, GETUTCDATE())
-            """)
-            report.themes_created_24h = cursor.fetchone()[0]
-
-            # Distribuicao de artigos por tema
-            cursor.execute("""
-                SELECT
-                    AVG(CAST(article_count AS FLOAT)) as avg_articles,
-                    MIN(article_count) as min_articles,
-                    MAX(article_count) as max_articles,
-                    STDEV(CAST(article_count AS FLOAT)) as std_articles
-                FROM themes
-                WHERE status = 'active' AND article_count > 0
-            """)
-            row = cursor.fetchone()
-
-            # Distribuicao de scores
-            cursor.execute("""
-                SELECT
-                    AVG(avg_score) as avg_theme_score,
-                    MIN(avg_score) as min_theme_score,
-                    MAX(avg_score) as max_theme_score
-                FROM themes
-                WHERE status = 'active' AND avg_score IS NOT NULL
-            """)
-            score_row = cursor.fetchone()
-
-            # Temas por classificacao (se houver)
-            cursor.execute("""
-                SELECT
-                    CASE
-                        WHEN avg_score >= 75 THEN 'A'
-                        WHEN avg_score >= 35 THEN 'B'
-                        ELSE 'C'
-                    END as classification,
-                    COUNT(*) as count
-                FROM themes
-                WHERE status = 'active' AND avg_score IS NOT NULL
-                GROUP BY
-                    CASE
-                        WHEN avg_score >= 75 THEN 'A'
-                        WHEN avg_score >= 35 THEN 'B'
-                        ELSE 'C'
-                    END
-            """)
-            classification_counts = {r[0]: r[1] for r in cursor.fetchall()}
-
-            # Artigos sem tema (pendentes de clustering)
-            cursor.execute("""
-                SELECT COUNT(*)
-                FROM collected_articles a
-                JOIN article_embeddings e ON a.id = e.article_id
-                LEFT JOIN article_themes at ON a.id = at.article_id
-                WHERE at.article_id IS NULL
-            """)
-            pending_clustering = cursor.fetchone()[0]
-
-            metrics = {
-                'articles_distribution': {
-                    'avg': round(row[0], 2) if row[0] else 0,
-                    'min': row[1] or 0,
-                    'max': row[2] or 0,
-                    'std': round(row[3], 2) if row[3] else 0
-                },
-                'score_distribution': {
-                    'avg': round(score_row[0], 2) if score_row[0] else 0,
-                    'min': round(score_row[1], 2) if score_row[1] else 0,
-                    'max': round(score_row[2], 2) if score_row[2] else 0
-                },
-                'classification_counts': classification_counts,
-                'pending_clustering': pending_clustering,
-                'total_active': report.total_active_themes,
-                'total_inactive': report.total_inactive_themes,
-                'created_24h': report.themes_created_24h
-            }
-
-            report.quality_metrics = metrics
-            return metrics
-
+        metrics = await run_db(_generate_quality_metrics_sync, db)
+        report.total_active_themes = metrics['total_active']
+        report.total_inactive_themes = metrics['total_inactive']
+        report.themes_created_24h = metrics['created_24h']
+        report.quality_metrics = metrics
+        return metrics
     except Exception as e:
         logger.error(f"Error generating quality metrics: {e}")
         report.errors.append(f"Metrics error: {str(e)}")
@@ -534,7 +510,7 @@ async def run_maintenance(db: DatabaseService = None) -> MaintenanceReport:
         db = get_db()
 
     # Verificar conexao
-    if not db.test_connection():
+    if not await run_db(db.test_connection):
         report.errors.append("Database connection failed")
         report.finish()
         return report
@@ -585,7 +561,7 @@ async def clustering_maintenance_handler(timer: func.TimerRequest) -> None:
     db = get_db()
 
     # Verificar conexao
-    if not db.test_connection():
+    if not await run_db(db.test_connection):
         logger.error(f"[{execution_id}] Database connection failed")
         return
 
@@ -640,7 +616,7 @@ async def clustering_maintenance_manual_handler(req: func.HttpRequest) -> func.H
         logger.info(f"[{execution_id}] Running in dry-run mode")
         db = get_db()
 
-        if not db.test_connection():
+        if not await run_db(db.test_connection):
             return func.HttpResponse(
                 json.dumps({'error': 'Database connection failed'}),
                 status_code=500,

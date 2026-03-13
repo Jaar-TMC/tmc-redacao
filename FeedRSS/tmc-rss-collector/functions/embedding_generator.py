@@ -8,6 +8,7 @@ import logging
 from datetime import datetime
 
 from services.database import get_db
+from services.async_db import run_db
 from services.embedding_service import (
     get_embedding_service,
     is_embedding_configured
@@ -44,13 +45,13 @@ async def embedding_generator_handler(timer: func.TimerRequest) -> None:
     db = get_db()
 
     # Verify database connection
-    if not db.test_connection():
+    if not await run_db(db.test_connection):
         logger.error(f"[{execution_id}] Database connection failed")
         return
 
     try:
         # Get articles without embeddings
-        articles = db.get_articles_without_embedding(limit=MAX_ARTICLES_PER_RUN)
+        articles = await run_db(db.get_articles_without_embedding, limit=MAX_ARTICLES_PER_RUN)
 
         if not articles:
             logger.info(f"[{execution_id}] No articles pending embedding generation")
@@ -90,7 +91,8 @@ async def embedding_generator_handler(timer: func.TimerRequest) -> None:
         # Save embeddings to database in batch (single connection + transaction)
         saved_count = 0
         try:
-            saved_count = db.save_article_embeddings_batch(
+            saved_count = await run_db(
+                db.save_article_embeddings_batch,
                 article_ids=article_ids,
                 embeddings=embeddings,
                 model_version='text-embedding-3-small'
@@ -100,13 +102,14 @@ async def embedding_generator_handler(timer: func.TimerRequest) -> None:
             # Fallback to individual saves
             for article_id, embedding in zip(article_ids, embeddings):
                 try:
-                    success = db.save_article_embedding(
+                    success = await run_db(
+                        db.save_article_embedding,
                         article_id=article_id,
                         embedding=embedding,
                         model_version='text-embedding-3-small'
                     )
                     if success:
-                        db.mark_article_has_embedding(article_id)
+                        await run_db(db.mark_article_has_embedding, article_id)
                         saved_count += 1
                 except Exception as inner_e:
                     logger.error(f"[{execution_id}] Error saving embedding for article {article_id}: {inner_e}")

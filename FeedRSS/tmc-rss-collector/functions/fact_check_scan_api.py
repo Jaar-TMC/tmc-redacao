@@ -80,9 +80,10 @@ async def fact_check_scan_handler(req: func.HttpRequest) -> func.HttpResponse:
 
         # Check cache (1 hour TTL; skip cached results with 0 claims)
         from services.database import get_db
+        from services.async_db import run_db
         force_rescan = body.get("force_rescan", False)
         cache_ttl = 3600  # 1 hour
-        cached = None if force_rescan else get_db().get_latest_scan(article_text_hash, max_age_seconds=cache_ttl)
+        cached = None if force_rescan else await run_db(get_db().get_latest_scan, article_text_hash, max_age_seconds=cache_ttl)
         if cached and cached.get("scan_result") and cached.get("total_claims", 0) > 0:
             logger.info(f"Cache hit for scan hash {article_text_hash[:16]}")
             # Return cached scan_result directly
@@ -125,7 +126,7 @@ async def fact_check_scan_handler(req: func.HttpRequest) -> func.HttpResponse:
         # Fire-and-forget: insert scan record
         try:
             user_id = getattr(req, 'user', {}).get('id') if hasattr(req, 'user') else None
-            get_db().insert_fact_check_scan({
+            await run_db(get_db().insert_fact_check_scan, {
                 "scan_id": correlation_id,
                 "user_id": user_id,
                 "user_article_id": int(request_data.user_article_id) if request_data.user_article_id else None,
@@ -153,6 +154,12 @@ async def fact_check_scan_handler(req: func.HttpRequest) -> func.HttpResponse:
         return create_success_response(result_dict)
 
     except Exception as e:
+        error_msg = str(e)
+        if "rate_limit" in error_msg.lower() or "rate limit" in error_msg.lower():
+            logger.warning(f"Rate limit hit during fact-check scan: {e}")
+            return create_error_response(
+                "Limite de requisições da IA atingido. Aguarde alguns segundos e tente novamente.", 429
+            )
         logger.exception(f"Unexpected error in fact_check_scan: {e}")
         return create_error_response("Internal server error", 500)
 

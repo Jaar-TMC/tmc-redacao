@@ -8,6 +8,7 @@ from math import ceil
 from datetime import datetime, timedelta, timezone
 
 from services.database import get_db
+from services.async_db import run_db
 from services.auth_service import (
     hash_password, verify_password,
     create_access_token, create_refresh_token,
@@ -72,7 +73,7 @@ async def login_handler(req: func.HttpRequest) -> func.HttpResponse:
         db = get_db()
 
         # Look up user by email
-        user = db.get_user_by_email(email)
+        user = await run_db(db.get_user_by_email, email)
         if not user:
             return func.HttpResponse(
                 json.dumps({"error": "Email ou senha incorretos"}),
@@ -93,9 +94,9 @@ async def login_handler(req: func.HttpRequest) -> func.HttpResponse:
 
         # Verify password
         if not verify_password(password, user.password_hash):
-            db.record_failed_login(str(user.id))
+            await run_db(db.record_failed_login, str(user.id))
             try:
-                db.log_auth_event(str(user.id), user.email, "login_failed", req.headers.get("X-Forwarded-For", "unknown"))
+                await run_db(db.log_auth_event, str(user.id), user.email, "login_failed", req.headers.get("X-Forwarded-For", "unknown"))
             except Exception as audit_err:
                 logger.warning(f"Non-fatal: failed to log auth event: {audit_err}")
             return func.HttpResponse(
@@ -105,9 +106,9 @@ async def login_handler(req: func.HttpRequest) -> func.HttpResponse:
             )
 
         # Successful login
-        db.record_successful_login(str(user.id))
+        await run_db(db.record_successful_login, str(user.id))
         try:
-            db.log_auth_event(str(user.id), user.email, "login_success", req.headers.get("X-Forwarded-For", "unknown"))
+            await run_db(db.log_auth_event, str(user.id), user.email, "login_success", req.headers.get("X-Forwarded-For", "unknown"))
         except Exception as audit_err:
             logger.warning(f"Non-fatal: failed to log auth event: {audit_err}")
 
@@ -157,23 +158,33 @@ async def login_handler(req: func.HttpRequest) -> func.HttpResponse:
 
 async def refresh_handler(req: func.HttpRequest) -> func.HttpResponse:
     """
-    POST /api/auth/refresh - Refresh access token using refresh_token cookie.
+    POST /api/auth/refresh - Rotate refresh token and issue new access token.
+
+    Implements refresh token rotation with reuse detection:
+    - Each refresh token can only be used once (single-use).
+    - On use, old token is blacklisted and a new one is issued (same family).
+    - If a blacklisted token is reused beyond the grace period, the entire
+      token family is revoked (indicates token theft).
+    - Grace period (30s) handles benign race conditions from concurrent tabs.
     """
+    GRACE_PERIOD_SECONDS = 30
+    clear_cookie = "refresh_token=; HttpOnly; SameSite=None; Secure; Path=/api/auth; Max-Age=0"
+
     try:
-        # Read refresh_token from Cookie header
+        # 1. Parse refresh token from Cookie header
         cookie_header = req.headers.get("Cookie", "")
         cookies = _parse_cookies(cookie_header)
-        refresh_token = cookies.get("refresh_token")
+        refresh_token_str = cookies.get("refresh_token")
 
-        if not refresh_token:
+        if not refresh_token_str:
             return func.HttpResponse(
                 json.dumps({"error": "Refresh token not found"}),
                 status_code=401,
                 mimetype="application/json"
             )
 
-        # Decode and validate
-        payload = decode_token(refresh_token)
+        # 2. Decode and validate JWT
+        payload = decode_token(refresh_token_str)
         if not payload:
             return func.HttpResponse(
                 json.dumps({"error": "Invalid or expired refresh token"}),
@@ -188,19 +199,99 @@ async def refresh_handler(req: func.HttpRequest) -> func.HttpResponse:
                 mimetype="application/json"
             )
 
-        # Check blacklist
-        db = get_db()
+        # 3. Extract jti and token family
         jti = payload.get("jti")
-        if jti and db.is_token_blacklisted(jti):
+        token_family = payload.get("family")
+        user_id = payload.get("sub")
+
+        if not jti or not token_family or not user_id:
             return func.HttpResponse(
-                json.dumps({"error": "Token has been revoked"}),
+                json.dumps({"error": "Malformed refresh token"}),
                 status_code=401,
                 mimetype="application/json"
             )
 
-        # Get user
-        user_id = payload.get("sub")
-        user = db.get_user_by_id(user_id)
+        db = get_db()
+
+        # 4. REUSE DETECTION: check if this token was already used (blacklisted)
+        if await run_db(db.is_token_blacklisted, jti):
+            blacklist_info = await run_db(db.get_blacklisted_token_info, jti)
+
+            if blacklist_info and blacklist_info.get("replaced_at"):
+                # Token was rotated (not logout-revoked). Check grace period.
+                replaced_at = blacklist_info["replaced_at"]
+                if replaced_at.tzinfo is None:
+                    replaced_at = replaced_at.replace(tzinfo=timezone.utc)
+                elapsed = (datetime.now(timezone.utc) - replaced_at).total_seconds()
+
+                if elapsed <= GRACE_PERIOD_SECONDS:
+                    # Benign race condition (e.g. concurrent tabs).
+                    # Return the token that replaced this one (already issued).
+                    logger.info(f"Refresh token reuse within grace period ({elapsed:.1f}s) for user {user_id}")
+                    # We cannot re-issue the same replacement token, so just
+                    # issue a fresh access token. The client already has the
+                    # new refresh token from the first request.
+                    user = await run_db(db.get_user_by_id, user_id)
+                    if not user or not user.is_active:
+                        return func.HttpResponse(
+                            json.dumps({"error": "User not found or inactive"}),
+                            status_code=401,
+                            mimetype="application/json"
+                        )
+                    access_token = create_access_token(
+                        user_id=str(user.id),
+                        email=user.email,
+                        role=user.role,
+                        name=user.name,
+                    )
+                    return func.HttpResponse(
+                        json.dumps({"access_token": access_token}, default=str),
+                        status_code=200,
+                        mimetype="application/json"
+                    )
+                else:
+                    # COMPROMISE DETECTED: token reused after grace period.
+                    # Revoke the entire token family.
+                    logger.warning(
+                        f"SECURITY: Refresh token reuse detected after {elapsed:.1f}s "
+                        f"for user {user_id}, family {token_family}. Revoking family."
+                    )
+                    await run_db(db.blacklist_token_family, token_family, user_id)
+                    try:
+                        await run_db(
+                            db.log_auth_event, user_id, "",
+                            "token_family_revoked",
+                            req.headers.get("X-Forwarded-For", "unknown"),
+                        )
+                    except Exception:
+                        pass  # Non-fatal audit log failure
+                    return func.HttpResponse(
+                        json.dumps({"error": "Token has been revoked"}),
+                        status_code=401,
+                        headers={"Set-Cookie": clear_cookie},
+                        mimetype="application/json"
+                    )
+            else:
+                # Token was revoked by logout (no replaced_at), not rotated.
+                return func.HttpResponse(
+                    json.dumps({"error": "Token has been revoked"}),
+                    status_code=401,
+                    headers={"Set-Cookie": clear_cookie},
+                    mimetype="application/json"
+                )
+
+        # 5. FAMILY CHECK: entire family may have been revoked
+        if await run_db(db.is_family_revoked, token_family):
+            logger.warning(f"Refresh attempt on revoked family {token_family} for user {user_id}")
+            return func.HttpResponse(
+                json.dumps({"error": "Token has been revoked"}),
+                status_code=401,
+                headers={"Set-Cookie": clear_cookie},
+                mimetype="application/json"
+            )
+
+        # 6. Get user and verify active
+        user = await run_db(db.get_user_by_id, user_id)
         if not user or not user.is_active:
             return func.HttpResponse(
                 json.dumps({"error": "User not found or inactive"}),
@@ -208,7 +299,7 @@ async def refresh_handler(req: func.HttpRequest) -> func.HttpResponse:
                 mimetype="application/json"
             )
 
-        # Create new access token
+        # 7. Create new access token
         access_token = create_access_token(
             user_id=str(user.id),
             email=user.email,
@@ -216,9 +307,48 @@ async def refresh_handler(req: func.HttpRequest) -> func.HttpResponse:
             name=user.name,
         )
 
+        # 8. Determine remember_me from old token's lifetime
+        iat = payload.get("iat", 0)
+        exp = payload.get("exp", 0)
+        token_lifetime_days = (exp - iat) / 86400 if exp and iat else 7
+        remember_me = token_lifetime_days > 14  # 28-day tokens are remember_me
+
+        # 9. Create new refresh token (same family)
+        new_refresh_token = create_refresh_token(
+            user_id=str(user.id),
+            remember_me=remember_me,
+            token_family=token_family,
+        )
+
+        # 10. Get new token's jti
+        new_payload = decode_token(new_refresh_token)
+        new_jti = new_payload.get("jti") if new_payload else None
+
+        # 11. Blacklist old token (rotation, not revocation)
+        old_exp_ts = payload.get("exp")
+        if old_exp_ts:
+            old_expires_at = datetime.fromtimestamp(old_exp_ts, tz=timezone.utc)
+        else:
+            old_expires_at = datetime.now(timezone.utc) + timedelta(days=7)
+
+        await run_db(
+            db.blacklist_token_rotated,
+            jti, user_id, old_expires_at, token_family, new_jti
+        )
+
+        # 12. Set new refresh token cookie
+        max_age = 30 * 24 * 3600 if remember_me else 7 * 24 * 3600
+        cookie = (
+            f"refresh_token={new_refresh_token}; "
+            f"HttpOnly; SameSite=None; Secure; "
+            f"Path=/api/auth; Max-Age={max_age}"
+        )
+
+        # 13. Return new access token with rotated refresh cookie
         return func.HttpResponse(
             json.dumps({"access_token": access_token}, default=str),
             status_code=200,
+            headers={"Set-Cookie": cookie},
             mimetype="application/json"
         )
 
@@ -238,7 +368,7 @@ async def me_handler(req: func.HttpRequest) -> func.HttpResponse:
     """
     try:
         db = get_db()
-        user = db.get_user_by_id(req.user["id"])
+        user = await run_db(db.get_user_by_id, req.user["id"])
 
         if not user:
             return func.HttpResponse(
@@ -281,10 +411,10 @@ async def update_me_handler(req: func.HttpRequest) -> func.HttpResponse:
 
         # Handle is_new_user toggle (onboarding complete)
         if body.get("is_new_user") is False:
-            db.set_user_not_new(req.user["id"])
+            await run_db(db.set_user_not_new, req.user["id"])
 
         # Return updated user
-        user = db.get_user_by_id(req.user["id"])
+        user = await run_db(db.get_user_by_id, req.user["id"])
         if not user:
             return func.HttpResponse(
                 json.dumps({"error": "User not found"}),
@@ -327,7 +457,7 @@ async def logout_handler(req: func.HttpRequest) -> func.HttpResponse:
             else:
                 # Fallback: 1 hour from now (default access token lifetime)
                 exp = datetime.now(timezone.utc) + timedelta(hours=1)
-            db.blacklist_token(jti, req.user["id"], exp)
+            await run_db(db.blacklist_token, jti, req.user["id"], exp)
 
         # Also blacklist refresh token if present
         cookie_header = req.headers.get("Cookie", "")
@@ -341,10 +471,18 @@ async def logout_handler(req: func.HttpRequest) -> func.HttpResponse:
                     exp = datetime.fromtimestamp(exp_ts, tz=timezone.utc)
                 else:
                     exp = datetime.now(timezone.utc).replace(hour=23, minute=59, second=59)
-                db.blacklist_token(payload["jti"], req.user["id"], exp)
+                await run_db(db.blacklist_token, payload["jti"], req.user["id"], exp)
+
+                # Revoke entire token family to invalidate any rotated tokens
+                token_family = payload.get("family")
+                if token_family:
+                    try:
+                        await run_db(db.blacklist_token_family, token_family, req.user["id"])
+                    except Exception as e:
+                        logger.warning(f"Failed to revoke token family on logout: {e}")
 
         # Log audit event
-        db.log_auth_event(req.user["id"], req.user["email"], "logout", req.headers.get("X-Forwarded-For", "unknown"))
+        await run_db(db.log_auth_event, req.user["id"], req.user["email"], "logout", req.headers.get("X-Forwarded-For", "unknown"))
 
         # Clear refresh_token cookie
         clear_cookie = "refresh_token=; HttpOnly; SameSite=None; Secure; Path=/api/auth; Max-Age=0"
@@ -379,7 +517,7 @@ async def list_users_handler(req: func.HttpRequest) -> func.HttpResponse:
             page = 1
 
         db = get_db()
-        users, total = db.get_users(page=page, limit=limit, search=search, role=role)
+        users, total = await run_db(db.get_users, page=page, limit=limit, search=search, role=role)
 
         pages = ceil(total / limit) if total > 0 else 1
 
@@ -445,7 +583,7 @@ async def create_user_handler(req: func.HttpRequest) -> func.HttpResponse:
         db = get_db()
 
         # Check email uniqueness
-        existing = db.get_user_by_email(user_data.email.lower())
+        existing = await run_db(db.get_user_by_email, user_data.email.lower())
         if existing:
             return func.HttpResponse(
                 json.dumps({"error": "Email ja esta em uso"}),
@@ -455,10 +593,11 @@ async def create_user_handler(req: func.HttpRequest) -> func.HttpResponse:
 
         # Hash password and create
         password_hash = hash_password(user_data.password)
-        user = db.create_user(user_data, password_hash)
+        user = await run_db(db.create_user, user_data, password_hash)
 
         # Log audit
-        db.log_auth_event(
+        await run_db(
+            db.log_auth_event,
             req.user["id"], req.user["email"], "password_change",
             req.headers.get("X-Forwarded-For", "unknown"),
             metadata={"detail": f"Created user {user.email} (role={user.role})"}
@@ -520,7 +659,7 @@ async def update_user_handler(req: func.HttpRequest) -> func.HttpResponse:
             )
 
         db = get_db()
-        user = db.update_user(user_id, update_data)
+        user = await run_db(db.update_user, user_id, update_data)
 
         if not user:
             return func.HttpResponse(
@@ -558,7 +697,7 @@ async def delete_user_handler(req: func.HttpRequest) -> func.HttpResponse:
             )
 
         db = get_db()
-        success = db.deactivate_user(user_id)
+        success = await run_db(db.deactivate_user, user_id)
 
         if not success:
             return func.HttpResponse(
@@ -568,7 +707,8 @@ async def delete_user_handler(req: func.HttpRequest) -> func.HttpResponse:
             )
 
         # Log audit
-        db.log_auth_event(
+        await run_db(
+            db.log_auth_event,
             req.user["id"], req.user["email"], "account_locked",
             req.headers.get("X-Forwarded-For", "unknown"),
             metadata={"detail": f"Deactivated user {user_id}"}
@@ -623,7 +763,7 @@ async def reset_password_handler(req: func.HttpRequest) -> func.HttpResponse:
 
         db = get_db()
         password_hash = hash_password(new_password)
-        success = db.reset_user_password(user_id, password_hash)
+        success = await run_db(db.reset_user_password, user_id, password_hash)
 
         if not success:
             return func.HttpResponse(
@@ -633,7 +773,8 @@ async def reset_password_handler(req: func.HttpRequest) -> func.HttpResponse:
             )
 
         # Log audit
-        db.log_auth_event(
+        await run_db(
+            db.log_auth_event,
             req.user["id"], req.user["email"], "password_reset",
             req.headers.get("X-Forwarded-For", "unknown"),
             metadata={"detail": f"Password reset for user {user_id}"}

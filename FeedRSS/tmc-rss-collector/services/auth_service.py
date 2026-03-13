@@ -58,10 +58,12 @@ def create_access_token(user_id: str, email: str, role: str, name: str) -> str:
     return jwt.encode(payload, config.jwt_secret_key, algorithm="HS256")
 
 
-def create_refresh_token(user_id: str, remember_me: bool = False) -> str:
+def create_refresh_token(user_id: str, remember_me: bool = False, token_family: str = None) -> str:
     """Create JWT refresh token.
 
     Expiry: config jwt_refresh_token_days (7 default, 30 if remember_me)
+    token_family: Links tokens in a rotation chain. Auto-generated on login,
+                  preserved across rotations for reuse detection.
     """
     config = get_config()
     now = datetime.now(timezone.utc)
@@ -71,7 +73,8 @@ def create_refresh_token(user_id: str, remember_me: bool = False) -> str:
         "jti": str(uuid.uuid4()),
         "iat": now,
         "exp": now + timedelta(days=days),
-        "type": "refresh"
+        "type": "refresh",
+        "family": token_family or str(uuid.uuid4()),
     }
     return jwt.encode(payload, config.jwt_secret_key, algorithm="HS256")
 

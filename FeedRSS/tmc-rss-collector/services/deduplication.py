@@ -7,6 +7,7 @@ import hashlib
 import logging
 from typing import List, Set
 from models import ArticleCreate
+from services.async_db import run_db
 
 logger = logging.getLogger(__name__)
 
@@ -144,7 +145,7 @@ async def deduplicate_with_db(articles: List[ArticleCreate],
     hashes = [article.hash for article in articles]
 
     # 3. Verificar quais já existem no banco
-    existing_hashes = db_service.check_existing_hashes(hashes)
+    existing_hashes = await run_db(db_service.check_existing_hashes, hashes)
     logger.info(f"Found {len(existing_hashes)} existing hashes in DB")
 
     # 4. Filtrar artigos únicos por hash
@@ -177,7 +178,7 @@ async def deduplicate_by_title_similarity(articles: List[ArticleCreate],
         return []
 
     # Buscar títulos recentes do banco (últimas 24h)
-    existing_titles = db_service.get_recent_titles(hours=24)
+    existing_titles = await run_db(db_service.get_recent_titles, hours=24)
 
     if not existing_titles:
         return articles

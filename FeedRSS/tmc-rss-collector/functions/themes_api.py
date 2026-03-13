@@ -11,9 +11,123 @@ from uuid import UUID
 from typing import Optional
 
 from services.database import get_db
+from services.async_db import run_db
 from services.clustering_service import get_clustering_service
 
 logger = logging.getLogger(__name__)
+
+
+def _fetch_themes_list(db, query, stats_query, params, offset, limit):
+    """Sync helper: fetch themes list with stats, recent counts, and tags."""
+    with db.get_connection() as conn:
+        cursor = conn.cursor()
+
+        # Get classification stats
+        cursor.execute(stats_query)
+        stats_rows = cursor.fetchall()
+        stats = {"totalA": 0, "totalB": 0, "totalC": 0}
+        for row in stats_rows:
+            if row[0] == 'A':
+                stats["totalA"] = row[1]
+            elif row[0] == 'B':
+                stats["totalB"] = row[1]
+            elif row[0] == 'C':
+                stats["totalC"] = row[1]
+
+        # Get themes (total_count is last column via COUNT(*) OVER())
+        cursor.execute(query, params + [offset, limit])
+        rows = cursor.fetchall()
+
+        # Extract total from window function (last column of first row)
+        total = rows[0][-1] if rows else 0
+
+        if not rows:
+            return stats, [], total
+
+        # Collect all theme IDs for batch queries (eliminates N+1)
+        theme_ids = [row[0] for row in rows]
+        theme_id_strs = [str(tid) for tid in theme_ids]
+
+        # Batch: recent article counts for all themes in one query
+        placeholders = ','.join(['%s'] * len(theme_id_strs))
+        recent_counts_query = f"""
+            SELECT theme_id, COUNT(*)
+            FROM article_themes
+            WHERE theme_id IN ({placeholders})
+            AND assigned_at >= DATEADD(hour, -24, GETUTCDATE())
+            GROUP BY theme_id
+        """
+        cursor.execute(recent_counts_query, tuple(theme_id_strs))
+        recent_counts_map = {str(r[0]): r[1] for r in cursor.fetchall()}
+
+        # Batch: representative tags for all themes in one query
+        # Uses ROW_NUMBER to limit tags per theme without N separate queries
+        tags_query = f"""
+            WITH ThemeTags AS (
+                SELECT
+                    r.theme_id,
+                    LOWER(LTRIM(RTRIM(t.value))) as tag,
+                    COUNT(*) as cnt,
+                    ROW_NUMBER() OVER (PARTITION BY r.theme_id ORDER BY COUNT(*) DESC) as rn
+                FROM article_themes r
+                JOIN collected_articles a ON r.article_id = a.id
+                CROSS APPLY OPENJSON(a.tags) t
+                WHERE r.theme_id IN ({placeholders})
+                AND t.value IS NOT NULL
+                AND LEN(t.value) > 2
+                GROUP BY r.theme_id, LOWER(LTRIM(RTRIM(t.value)))
+            )
+            SELECT theme_id, tag
+            FROM ThemeTags
+            WHERE rn <= 5
+            ORDER BY theme_id, rn
+        """
+        cursor.execute(tags_query, tuple(theme_id_strs))
+        tags_map = {}
+        for tag_row in cursor.fetchall():
+            tid = str(tag_row[0])
+            if tid not in tags_map:
+                tags_map[tid] = []
+            tags_map[tid].append(tag_row[1])
+
+        items = []
+        for row in rows:
+            theme_id = row[0]
+            tid_str = str(theme_id)
+
+            recent_count = recent_counts_map.get(tid_str, 0)
+            tags = tags_map.get(tid_str, [])
+
+            # Calculate trend based on recent activity
+            trend = _calculate_trend(row[5], recent_count)
+
+            # Determine if emergent (new theme with rapid growth)
+            is_emergent = _is_theme_emergent(row[8], row[5], recent_count)
+
+            items.append({
+                "id": tid_str,
+                "name": row[1],
+                "slug": row[2],
+                "classification": row[3],
+                "score": round(row[4], 2) if row[4] else 0,
+                "articleCount": row[5],
+                "recentArticleCount": recent_count,
+                "trend": trend,
+                "isEmergent": is_emergent,
+                "representativeTags": tags
+            })
+
+        return stats, items, total
+
+
+def _fetch_theme_detail_stats(db, theme_id):
+    """Sync helper: fetch recent count, tags, and score breakdown for a theme."""
+    with db.get_connection() as conn:
+        cursor = conn.cursor()
+        recent_count = _get_recent_article_count(cursor, theme_id)
+        tags = _get_representative_tags(cursor, theme_id, limit=10)
+        score_breakdown = _get_score_breakdown(cursor, theme_id)
+    return recent_count, tags, score_breakdown
 
 
 async def list_themes_handler(req: func.HttpRequest) -> func.HttpResponse:
@@ -111,103 +225,9 @@ async def list_themes_handler(req: func.HttpRequest) -> func.HttpResponse:
             GROUP BY classification
         """
 
-        with db.get_connection() as conn:
-            cursor = conn.cursor()
-
-            # Get classification stats
-            cursor.execute(stats_query)
-            stats_rows = cursor.fetchall()
-            stats = {"totalA": 0, "totalB": 0, "totalC": 0}
-            for row in stats_rows:
-                if row[0] == 'A':
-                    stats["totalA"] = row[1]
-                elif row[0] == 'B':
-                    stats["totalB"] = row[1]
-                elif row[0] == 'C':
-                    stats["totalC"] = row[1]
-
-            # Get themes (total_count is last column via COUNT(*) OVER())
-            cursor.execute(query, params + [offset, limit])
-            rows = cursor.fetchall()
-
-            # Extract total from window function (last column of first row)
-            total = rows[0][-1] if rows else 0
-
-            if not rows:
-                items = []
-            else:
-                # Collect all theme IDs for batch queries (eliminates N+1)
-                theme_ids = [row[0] for row in rows]
-                theme_id_strs = [str(tid) for tid in theme_ids]
-
-                # Batch: recent article counts for all themes in one query
-                placeholders = ','.join(['%s'] * len(theme_id_strs))
-                recent_counts_query = f"""
-                    SELECT theme_id, COUNT(*)
-                    FROM article_themes
-                    WHERE theme_id IN ({placeholders})
-                    AND assigned_at >= DATEADD(hour, -24, GETUTCDATE())
-                    GROUP BY theme_id
-                """
-                cursor.execute(recent_counts_query, tuple(theme_id_strs))
-                recent_counts_map = {str(r[0]): r[1] for r in cursor.fetchall()}
-
-                # Batch: representative tags for all themes in one query
-                # Uses ROW_NUMBER to limit tags per theme without N separate queries
-                tags_query = f"""
-                    WITH ThemeTags AS (
-                        SELECT
-                            r.theme_id,
-                            LOWER(LTRIM(RTRIM(t.value))) as tag,
-                            COUNT(*) as cnt,
-                            ROW_NUMBER() OVER (PARTITION BY r.theme_id ORDER BY COUNT(*) DESC) as rn
-                        FROM article_themes r
-                        JOIN collected_articles a ON r.article_id = a.id
-                        CROSS APPLY OPENJSON(a.tags) t
-                        WHERE r.theme_id IN ({placeholders})
-                        AND t.value IS NOT NULL
-                        AND LEN(t.value) > 2
-                        GROUP BY r.theme_id, LOWER(LTRIM(RTRIM(t.value)))
-                    )
-                    SELECT theme_id, tag
-                    FROM ThemeTags
-                    WHERE rn <= 5
-                    ORDER BY theme_id, rn
-                """
-                cursor.execute(tags_query, tuple(theme_id_strs))
-                tags_map = {}
-                for tag_row in cursor.fetchall():
-                    tid = str(tag_row[0])
-                    if tid not in tags_map:
-                        tags_map[tid] = []
-                    tags_map[tid].append(tag_row[1])
-
-                items = []
-                for row in rows:
-                    theme_id = row[0]
-                    tid_str = str(theme_id)
-
-                    recent_count = recent_counts_map.get(tid_str, 0)
-                    tags = tags_map.get(tid_str, [])
-
-                    # Calculate trend based on recent activity
-                    trend = _calculate_trend(row[5], recent_count)
-
-                    # Determine if emergent (new theme with rapid growth)
-                    is_emergent = _is_theme_emergent(row[8], row[5], recent_count)
-
-                    items.append({
-                        "id": tid_str,
-                        "name": row[1],
-                        "slug": row[2],
-                        "classification": row[3],
-                        "score": round(row[4], 2) if row[4] else 0,
-                        "articleCount": row[5],
-                        "recentArticleCount": recent_count,
-                        "trend": trend,
-                        "isEmergent": is_emergent,
-                        "representativeTags": tags
-                    })
+        stats, items, total = await run_db(
+            _fetch_themes_list, db, query, stats_query, params, offset, limit
+        )
 
         pages = ceil(total / limit) if total > 0 else 1
 
@@ -300,7 +320,7 @@ async def get_theme_handler(req: func.HttpRequest) -> func.HttpResponse:
         articles_offset = (articles_page - 1) * articles_limit
 
         db = get_db()
-        theme = db.get_theme(UUID(theme_id))
+        theme = await run_db(db.get_theme, UUID(theme_id))
 
         if not theme:
             return func.HttpResponse(
@@ -310,24 +330,17 @@ async def get_theme_handler(req: func.HttpRequest) -> func.HttpResponse:
             )
 
         # Get articles for this theme
-        articles, articles_total = db.get_articles_by_theme(
+        articles, articles_total = await run_db(
+            db.get_articles_by_theme,
             theme_id=UUID(theme_id),
             limit=articles_limit,
             offset=articles_offset
         )
 
-        # Get additional statistics
-        with db.get_connection() as conn:
-            cursor = conn.cursor()
-
-            # Recent article count
-            recent_count = _get_recent_article_count(cursor, theme_id)
-
-            # Representative tags
-            tags = _get_representative_tags(cursor, theme_id, limit=10)
-
-            # Score breakdown (average of each signal)
-            score_breakdown = _get_score_breakdown(cursor, theme_id)
+        # Get additional statistics (raw SQL block offloaded to thread)
+        recent_count, tags, score_breakdown = await run_db(
+            _fetch_theme_detail_stats, db, theme_id
+        )
 
         # Calculate trend and emergent status
         trend = _calculate_trend(theme.get('article_count', 0), recent_count)
@@ -549,7 +562,7 @@ async def get_clustering_stats_handler(req: func.HttpRequest) -> func.HttpRespon
         clustering_service = get_clustering_service(db_service=db)
 
         # Get clustering quality metrics
-        metrics = clustering_service.evaluate_clustering_quality()
+        metrics = await run_db(clustering_service.evaluate_clustering_quality)
 
         if 'error' in metrics:
             return func.HttpResponse(
