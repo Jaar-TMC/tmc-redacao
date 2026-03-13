@@ -23,7 +23,7 @@ import { useState, useCallback, useMemo } from 'react';
  * @returns {string} UUID-like identifier
  */
 function generateId() {
-  return `v-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+  return `v-${Date.now()}-${Math.random().toString(36).substring(2, 11)}`;
 }
 
 /**

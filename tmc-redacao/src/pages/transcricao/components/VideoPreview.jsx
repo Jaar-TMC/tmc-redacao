@@ -22,6 +22,8 @@ function VideoPreview({ video }) {
             src={video.thumbnail}
             alt={`Thumbnail de ${video.title}`}
             className="w-full h-full object-cover"
+            loading="lazy"
+            decoding="async"
             onError={(e) => {
               e.target.src = `https://img.youtube.com/vi/${video.videoId}/hqdefault.jpg`;
             }}

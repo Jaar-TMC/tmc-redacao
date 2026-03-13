@@ -87,10 +87,8 @@ def with_cors(handler):
         try:
             response = await handler(req)
         except Exception as e:
-            import traceback
-            tb = traceback.format_exc()
             logger.exception(f"Unhandled error in {handler.__name__}: {e}")
-            error_body = json.dumps({"error": "Internal server error", "debug": str(e), "type": type(e).__name__, "trace": tb[-500:]})
+            error_body = json.dumps({"error": "Internal server error"})
             response = func.HttpResponse(error_body, status_code=500, mimetype="application/json")
 
         try:
@@ -101,6 +99,20 @@ def with_cors(handler):
             return response
 
     return wrapper
+
+
+def check_rate_limit(endpoint_name: str):
+    """Returns a (429 HttpResponse, None) if rate limited, or (None, retry_after) if allowed."""
+    from services.rate_limiter import RateLimiter
+    retry_after = RateLimiter.get().check(endpoint_name)
+    if retry_after is not None:
+        return func.HttpResponse(
+            json.dumps({"error": "Rate limit exceeded", "retry_after_seconds": round(retry_after, 1)}),
+            status_code=429,
+            headers={"Retry-After": str(int(retry_after) + 1)},
+            mimetype="application/json",
+        )
+    return None
 
 
 # ========================================
@@ -454,17 +466,9 @@ async def generate_article(req: func.HttpRequest) -> func.HttpResponse:
             "tags_sugeridas": ["tag1", "tag2", "tag3"]
         }
     """
-    # Phase 4.8: Rate limiting
-    from services.rate_limiter import RateLimiter
-    retry_after = RateLimiter.get().check("generate")
-    if retry_after is not None:
-        import json as _json
-        return func.HttpResponse(
-            _json.dumps({"error": "Rate limit exceeded", "retry_after_seconds": round(retry_after, 1)}),
-            status_code=429,
-            headers={"Retry-After": str(int(retry_after) + 1)},
-            mimetype="application/json",
-        )
+    rate_limit_response = check_rate_limit("generate")
+    if rate_limit_response:
+        return rate_limit_response
     from functions.generation_api import generate_article_handler
     return await generate_article_handler(req)
 
@@ -482,16 +486,9 @@ async def extract_topics(req: func.HttpRequest) -> func.HttpResponse:
     Returns:
         {"topics": [{"type": "fato", "content": "..."}, ...]}
     """
-    from services.rate_limiter import RateLimiter
-    retry_after = RateLimiter.get().check("extract-topics")
-    if retry_after is not None:
-        import json as _json
-        return func.HttpResponse(
-            _json.dumps({"error": "Rate limit exceeded", "retry_after_seconds": round(retry_after, 1)}),
-            status_code=429,
-            headers={"Retry-After": str(int(retry_after) + 1)},
-            mimetype="application/json",
-        )
+    rate_limit_response = check_rate_limit("extract-topics")
+    if rate_limit_response:
+        return rate_limit_response
     from functions.generation_api import extract_topics_handler
     return await extract_topics_handler(req)
 
@@ -509,16 +506,9 @@ async def generate_tags(req: func.HttpRequest) -> func.HttpResponse:
     Returns:
         {"tags": ["tag1", "tag2", "tag3", ...]}
     """
-    from services.rate_limiter import RateLimiter
-    retry_after = RateLimiter.get().check("generate-tags")
-    if retry_after is not None:
-        import json as _json
-        return func.HttpResponse(
-            _json.dumps({"error": "Rate limit exceeded", "retry_after_seconds": round(retry_after, 1)}),
-            status_code=429,
-            headers={"Retry-After": str(int(retry_after) + 1)},
-            mimetype="application/json",
-        )
+    rate_limit_response = check_rate_limit("generate-tags")
+    if rate_limit_response:
+        return rate_limit_response
     from functions.generation_api import generate_tags_handler
     return await generate_tags_handler(req)
 
@@ -569,16 +559,9 @@ async def merge_topics(req: func.HttpRequest) -> func.HttpResponse:
             "summary": {"mainTopic": "...", "totalElements": 5}
         }
     """
-    from services.rate_limiter import RateLimiter
-    retry_after = RateLimiter.get().check("merge-topics")
-    if retry_after is not None:
-        import json as _json
-        return func.HttpResponse(
-            _json.dumps({"error": "Rate limit exceeded", "retry_after_seconds": round(retry_after, 1)}),
-            status_code=429,
-            headers={"Retry-After": str(int(retry_after) + 1)},
-            mimetype="application/json",
-        )
+    rate_limit_response = check_rate_limit("merge-topics")
+    if rate_limit_response:
+        return rate_limit_response
     from functions.generation_api import merge_topics_handler
     return await merge_topics_handler(req)
 
@@ -616,16 +599,9 @@ async def edit_article(req: func.HttpRequest) -> func.HttpResponse:
             "changes_summary": "Descrição das alterações feitas"
         }
     """
-    from services.rate_limiter import RateLimiter
-    retry_after = RateLimiter.get().check("edit-article")
-    if retry_after is not None:
-        import json as _json
-        return func.HttpResponse(
-            _json.dumps({"error": "Rate limit exceeded", "retry_after_seconds": round(retry_after, 1)}),
-            status_code=429,
-            headers={"Retry-After": str(int(retry_after) + 1)},
-            mimetype="application/json",
-        )
+    rate_limit_response = check_rate_limit("edit-article")
+    if rate_limit_response:
+        return rate_limit_response
     from functions.edit_api import edit_article_handler
     return await edit_article_handler(req)
 
@@ -639,16 +615,9 @@ async def edit_article(req: func.HttpRequest) -> func.HttpResponse:
 @require_auth
 async def fact_check_scan(req: func.HttpRequest) -> func.HttpResponse:
     """POST /api/fact-check-scan - On-demand article safety verification."""
-    from services.rate_limiter import RateLimiter
-    retry_after = RateLimiter.get().check("fact-check-scan")
-    if retry_after is not None:
-        import json as _json
-        return func.HttpResponse(
-            _json.dumps({"error": "Rate limit exceeded", "retry_after_seconds": round(retry_after, 1)}),
-            status_code=429,
-            headers={"Retry-After": str(int(retry_after) + 1)},
-            mimetype="application/json",
-        )
+    rate_limit_response = check_rate_limit("fact-check-scan")
+    if rate_limit_response:
+        return rate_limit_response
     from functions.fact_check_scan_api import fact_check_scan_handler
     return await fact_check_scan_handler(req)
 
@@ -658,16 +627,9 @@ async def fact_check_scan(req: func.HttpRequest) -> func.HttpResponse:
 @require_auth
 async def fact_check_deep_verify(req: func.HttpRequest) -> func.HttpResponse:
     """POST /api/fact-check-deep-verify - Deep verify unverifiable claims."""
-    from services.rate_limiter import RateLimiter
-    retry_after = RateLimiter.get().check("fact-check-scan")
-    if retry_after is not None:
-        import json as _json
-        return func.HttpResponse(
-            _json.dumps({"error": "Rate limit exceeded", "retry_after_seconds": round(retry_after, 1)}),
-            status_code=429,
-            headers={"Retry-After": str(int(retry_after) + 1)},
-            mimetype="application/json",
-        )
+    rate_limit_response = check_rate_limit("fact-check-scan")
+    if rate_limit_response:
+        return rate_limit_response
     from functions.fact_check_scan_api import deep_verify_handler
     return await deep_verify_handler(req)
 
@@ -700,16 +662,9 @@ async def research(req: func.HttpRequest) -> func.HttpResponse:
             "search_duration_ms": 3200
         }
     """
-    from services.rate_limiter import RateLimiter
-    retry_after = RateLimiter.get().check("research")
-    if retry_after is not None:
-        import json as _json
-        return func.HttpResponse(
-            _json.dumps({"error": "Rate limit exceeded", "retry_after_seconds": round(retry_after, 1)}),
-            status_code=429,
-            headers={"Retry-After": str(int(retry_after) + 1)},
-            mimetype="application/json",
-        )
+    rate_limit_response = check_rate_limit("research")
+    if rate_limit_response:
+        return rate_limit_response
     from functions.research_api import research_topic_handler
     return await research_topic_handler(req)
 
@@ -757,8 +712,8 @@ async def transcribe_diag(req: func.HttpRequest) -> func.HttpResponse:
         checks["caption_fetch"] = f"OK: {len(caps['segments'])} segments, lang={caps['language']}, type={caps['caption_type']}"
     except Exception as e:
         import traceback
-        checks["caption_fetch"] = f"FAIL: {type(e).__name__}: {e}"
-        checks["caption_traceback"] = traceback.format_exc()[-1000:]
+        logger.error(f"transcribe-diag caption_fetch failed: {traceback.format_exc()}")
+        checks["caption_fetch"] = "FAIL"
 
     # Direct InnerTube test
     try:
@@ -772,8 +727,8 @@ async def transcribe_diag(req: func.HttpRequest) -> func.HttpResponse:
             checks["innertube_test"] = "RETURNED_NONE"
     except Exception as e:
         import traceback
-        checks["innertube_test"] = f"FAIL: {type(e).__name__}: {e}"
-        checks["innertube_traceback"] = traceback.format_exc()[-500:]
+        logger.error(f"transcribe-diag innertube_test failed: {traceback.format_exc()}")
+        checks["innertube_test"] = "FAIL"
 
     # Test alternative timedtext domains
     try:
@@ -858,8 +813,8 @@ async def transcribe_diag(req: func.HttpRequest) -> func.HttpResponse:
             checks["handler_body"] = handler_response.get_body().decode("utf-8")[:1000]
     except Exception as e:
         import traceback
-        checks["handler_test"] = f"FAIL: {type(e).__name__}: {e}"
-        checks["handler_traceback"] = traceback.format_exc()[-1000:]
+        logger.error(f"transcribe-diag handler_test failed: {traceback.format_exc()}")
+        checks["handler_test"] = "FAIL"
 
     return func.HttpResponse(json.dumps(checks, indent=2, ensure_ascii=False), mimetype="application/json")
 
@@ -889,26 +844,11 @@ async def transcribe_video(req: func.HttpRequest) -> func.HttpResponse:
             "metadata": { language, total_segments, total_duration_seconds, caption_type }
         }
     """
-    try:
-        from services.rate_limiter import RateLimiter
-        retry_after = RateLimiter.get().check("transcribe")
-        if retry_after is not None:
-            import json as _json
-            return func.HttpResponse(
-                _json.dumps({"error": "Rate limit exceeded", "retry_after_seconds": round(retry_after, 1)}),
-                status_code=429,
-                headers={"Retry-After": str(int(retry_after) + 1)},
-                mimetype="application/json",
-            )
-        from functions.transcription_api import transcribe_handler
-        return await transcribe_handler(req)
-    except Exception as e:
-        logger.exception(f"Unhandled error in transcribe_video wrapper: {e}")
-        return func.HttpResponse(
-            json.dumps({"error": "Internal server error"}),
-            status_code=500,
-            mimetype="application/json",
-        )
+    rate_limit_response = check_rate_limit("transcribe")
+    if rate_limit_response:
+        return rate_limit_response
+    from functions.transcription_api import transcribe_handler
+    return await transcribe_handler(req)
 
 
 # ========================================

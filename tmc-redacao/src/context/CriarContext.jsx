@@ -478,10 +478,20 @@ export const CriarProvider = ({ children }) => {
   }, [state.selectedTags]);
 
   // Valor do contexto memoizado
+  // List individual state fields as dependencies instead of the entire `state` object
+  // so the memoized value only changes when a specific field actually changes.
   const value = useMemo(
     () => ({
       // Estado
-      ...state,
+      fonte: state.fonte,
+      textoBase: state.textoBase,
+      storyFusion: state.storyFusion,
+      selectedTags: state.selectedTags,
+      configuracoes: state.configuracoes,
+      materiaisComplementares: state.materiaisComplementares,
+      resultado: state.resultado,
+      etapaAtual: state.etapaAtual,
+      etapasCompletas: state.etapasCompletas,
 
       // Ações Fonte
       setFonte,
@@ -535,7 +545,15 @@ export const CriarProvider = ({ children }) => {
       getSelectedTagsArray,
     }),
     [
-      state,
+      state.fonte,
+      state.textoBase,
+      state.storyFusion,
+      state.selectedTags,
+      state.configuracoes,
+      state.materiaisComplementares,
+      state.resultado,
+      state.etapaAtual,
+      state.etapasCompletas,
       setFonte,
       clearFonte,
       setBlocos,

@@ -6,6 +6,7 @@ Thread-safe frozen dataclass singleton.
 """
 
 import os
+import secrets
 import threading
 from dataclasses import dataclass, field
 from typing import Optional
@@ -214,6 +215,16 @@ def load_config() -> AppConfig:
         if len(config.jwt_secret_key) < 32:
             raise RuntimeError(
                 "JWT_SECRET_KEY must be at least 32 characters in production mode."
+            )
+    else:
+        # Dev mode: generate a random secret so an empty string can never be
+        # used as a valid signing key (prevents trivially forged JWTs).
+        if not config.jwt_secret_key:
+            fallback = secrets.token_hex(32)
+            object.__setattr__(config, 'jwt_secret_key', fallback)
+            log.warning(
+                "JWT_SECRET_KEY not set — generated random dev secret. "
+                "JWTs will be invalidated on restart."
             )
 
     # Force fact-checking in production mode - never allow it to be disabled

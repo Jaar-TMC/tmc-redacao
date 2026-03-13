@@ -8,6 +8,7 @@ import pymssql
 import logging
 import queue
 import threading
+import time
 from typing import Any, Dict, List, Optional, Set, Tuple
 from datetime import datetime, timedelta
 from uuid import UUID
@@ -30,7 +31,14 @@ logger = logging.getLogger(__name__)
 
 
 class ConnectionPool:
-    """Simple connection pool for pymssql with health checks on every retrieval."""
+    """Simple connection pool for pymssql with idle-aware health checks.
+
+    Skips the SELECT 1 probe if a connection was used within the last
+    ``health_check_skip_seconds`` seconds (default 60).  Azure SQL silently
+    kills *idle* connections, so recently-active ones are safe to reuse.
+    """
+
+    _HEALTH_CHECK_SKIP_SECONDS = 60
 
     def __init__(self, create_conn_func, max_size=10):
         self._create_conn = create_conn_func
@@ -38,34 +46,49 @@ class ConnectionPool:
         self._max_size = max_size
         self._current_size = 0
         self._lock = threading.Lock()
+        # Track last-used timestamp per connection id
+        self._last_used: dict = {}
 
     def get_connection(self):
         try:
             conn = self._pool.get_nowait()
-            # Always health-check pooled connections — Azure SQL silently kills
-            # idle connections and there is no reliable way to know if a connection
-            # is still alive without probing it.
+            # Skip the health-check if the connection was used recently
+            last_used = self._last_used.get(id(conn), 0)
+            if (time.monotonic() - last_used) < self._HEALTH_CHECK_SKIP_SECONDS:
+                self._last_used[id(conn)] = time.monotonic()
+                return conn
+            # Connection has been idle too long — probe it
             try:
                 cursor = conn.cursor()
                 cursor.execute("SELECT 1")
                 cursor.fetchone()
+                self._last_used[id(conn)] = time.monotonic()
                 return conn
             except Exception:
                 # Connection is dead, create a new one
+                self._last_used.pop(id(conn), None)
                 self.close_bad_connection(conn)
-                return self._create_conn()
+                new_conn = self._create_conn()
+                self._last_used[id(new_conn)] = time.monotonic()
+                return new_conn
         except queue.Empty:
             with self._lock:
                 if self._current_size < self._max_size:
                     self._current_size += 1
-                    return self._create_conn()
+                    new_conn = self._create_conn()
+                    self._last_used[id(new_conn)] = time.monotonic()
+                    return new_conn
             # Pool is full, wait for a connection
-            return self._pool.get(timeout=30)
+            conn = self._pool.get(timeout=30)
+            self._last_used[id(conn)] = time.monotonic()
+            return conn
 
     def return_connection(self, conn):
+        self._last_used[id(conn)] = time.monotonic()
         try:
             self._pool.put_nowait(conn)
         except queue.Full:
+            self._last_used.pop(id(conn), None)
             try:
                 conn.close()
             except Exception:
@@ -74,6 +97,7 @@ class ConnectionPool:
                 self._current_size -= 1
 
     def close_bad_connection(self, conn):
+        self._last_used.pop(id(conn), None)
         try:
             conn.close()
         except Exception:
@@ -91,6 +115,7 @@ class ConnectionPool:
         while True:
             try:
                 conn = self._pool.get_nowait()
+                self._last_used.pop(id(conn), None)
                 try:
                     conn.close()
                 except Exception:
@@ -107,11 +132,13 @@ class DatabaseService:
     """Servico de acesso ao banco de dados."""
 
     def __init__(self):
-        """Inicializa o servico com configuracoes do ambiente."""
-        self.server = os.environ.get('SQL_SERVER', '')
-        self.database = os.environ.get('SQL_DATABASE', '')
-        self.username = os.environ.get('SQL_USERNAME', '')
-        self.password = os.environ.get('SQL_PASSWORD', '')
+        """Inicializa o servico com configuracoes centralizadas via get_config()."""
+        from .config import get_config
+        cfg = get_config()
+        self.server = cfg.sql_server
+        self.database = cfg.sql_database
+        self.username = cfg.sql_username
+        self.password = cfg.sql_password
         # Phase 4.2: Fail explicitly if required DB config is missing
         if not self.server or not self.database:
             raise ValueError(

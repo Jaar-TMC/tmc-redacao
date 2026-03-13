@@ -803,33 +803,50 @@ class ArticleSafetyService:
             f"[{correlation_id}] Deep verify: {len(unverifiable)} unverifiable claims"
         )
 
-        # Step 2: Extract key entities and build a single Exa query
-        query_parts = []
-        if article_title:
-            query_parts.append(article_title[:80])
+        # Step 2: Parallel per-claim Exa searches (avoid query dilution)
+        title_prefix = (article_title[:80] + " ") if article_title else ""
+        semaphore = asyncio.Semaphore(5)
 
-        for claim in unverifiable:
-            text = claim.get("text", "")
-            # Extract meaningful phrases (take first ~60 chars of each claim)
-            if text:
-                query_parts.append(text[:60])
+        async def _search_claim(claim):
+            async with semaphore:
+                query = f"{title_prefix}{claim.get('text', '')[:200]}".strip()
+                return await self._deep_verify_exa_search(query, correlation_id)
 
-        # Combine into a single concise query (Exa works best under ~500 chars)
-        combined_query = " ".join(query_parts)[:500]
+        exa_tasks = [_search_claim(c) for c in unverifiable]
+        per_claim_results = await asyncio.gather(*exa_tasks, return_exceptions=True)
 
-        # Step 3: ONE Exa search
-        exa_results = await self._deep_verify_exa_search(
-            combined_query, correlation_id
-        )
+        # Merge all results, deduplicating by URL
+        seen_urls = set()
+        exa_results = []
+        per_claim_evidence = {}  # claim_index -> [results]
+
+        for i, result in enumerate(per_claim_results):
+            claim_idx = unverifiable[i]["index"]
+            claim_evidence = []
+            if isinstance(result, Exception):
+                logger.warning(
+                    f"[{correlation_id}] Deep verify Exa failed for claim {claim_idx}: {result}"
+                )
+                per_claim_evidence[claim_idx] = []
+                continue
+            for item in (result or []):
+                url = item.get("url", "")
+                claim_evidence.append(item)
+                if url not in seen_urls:
+                    seen_urls.add(url)
+                    exa_results.append(item)
+            per_claim_evidence[claim_idx] = claim_evidence
+
         sources_searched = len(exa_results)
 
         logger.info(
-            f"[{correlation_id}] Deep verify: Exa returned {sources_searched} results"
+            f"[{correlation_id}] Deep verify: {len(unverifiable)} per-claim searches, "
+            f"{sources_searched} unique sources found"
         )
 
-        # Step 4: ONE Haiku call to match evidence to claims
+        # Step 3: ONE Haiku call to match evidence to claims
         updated_claims = await self._deep_verify_classify(
-            unverifiable, exa_results, language, correlation_id
+            unverifiable, exa_results, per_claim_evidence, language, correlation_id
         )
 
         # Step 5: Count resolved claims
@@ -872,7 +889,7 @@ class ArticleSafetyService:
             "query": query,
             "type": "neural",
             "useAutoprompt": True,
-            "numResults": 10,
+            "numResults": 5,
             "category": "news",
             "contents": {
                 "text": {"maxCharacters": 2000},
@@ -924,12 +941,13 @@ class ArticleSafetyService:
         self,
         unverifiable_claims: list[dict],
         exa_results: list[dict],
+        per_claim_evidence: dict,
         language: str,
         correlation_id: str,
     ) -> list[dict]:
         """
         Single Haiku call to match Exa evidence to each unverifiable claim
-        and reclassify them.
+        and reclassify them. Evidence is grouped per claim for better matching.
         """
         from services.llm_service import get_llm_service, repair_json
         from services.config import get_config
@@ -937,21 +955,37 @@ class ArticleSafetyService:
         config = get_config()
         llm = get_llm_service()
 
-        # Build evidence context from Exa results
+        # Build evidence context grouped by claim for better Haiku matching
         evidence_block = ""
         if exa_results:
-            evidence_parts = []
-            for i, src in enumerate(exa_results, 1):
-                title = src.get("title", "")
-                url = src.get("url", "")
-                highlights = src.get("highlights", [])
-                text_snippet = (
-                    " ".join(highlights[:3]) if highlights else src.get("text", "")[:500]
-                )
-                evidence_parts.append(
-                    f"[{i}] {title}\n    URL: {url}\n    Trecho: {text_snippet}"
-                )
-            evidence_block = "\n\n".join(evidence_parts)
+            parts = []
+            for claim in unverifiable_claims:
+                idx = claim["index"]
+                claim_ev = per_claim_evidence.get(idx, [])
+                if claim_ev:
+                    ev_lines = []
+                    for j, src in enumerate(claim_ev, 1):
+                        title = src.get("title", "")
+                        url = src.get("url", "")
+                        highlights = src.get("highlights", [])
+                        snippet = (
+                            " ".join(highlights[:3])
+                            if highlights
+                            else src.get("text", "")[:500]
+                        )
+                        ev_lines.append(
+                            f"  [{j}] {title}\n      URL: {url}\n      Trecho: {snippet}"
+                        )
+                    parts.append(
+                        f"--- Evidencias para claim index={idx} ---\n"
+                        + "\n\n".join(ev_lines)
+                    )
+                else:
+                    parts.append(
+                        f"--- Evidencias para claim index={idx} ---\n"
+                        "  (Nenhuma evidencia encontrada)"
+                    )
+            evidence_block = "\n\n".join(parts)
         else:
             evidence_block = "(Nenhuma evidencia encontrada)"
 

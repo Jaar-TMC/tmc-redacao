@@ -32,20 +32,38 @@ logger = logging.getLogger(__name__)
 # Configuration
 # =============================================================================
 
-FACT_CHECK_ENABLED = os.environ.get("FACT_CHECK_ENABLED", "true").lower() == "true"
-ENRICHMENT_ENABLED = os.environ.get("FACT_CHECK_ENRICHMENT_ENABLED", "true").lower() == "true"
-VERIFICATION_ENABLED = os.environ.get("FACT_CHECK_VERIFICATION_ENABLED", "true").lower() == "true"
+# Lazy accessors — read from centralized get_config() where attributes exist.
+# Values not in config.py remain as direct os.environ reads.
+
+def _get_fact_check_enabled():
+    return get_config().fact_check_enabled
+
+def _get_enrichment_enabled():
+    return get_config().fact_check_enrichment_enabled
+
+def _get_verification_enabled():
+    return get_config().fact_check_verification_enabled
+
 MAX_CLAIMS = int(os.environ.get("FACT_CHECK_MAX_CLAIMS", "10"))
 
 # CoVe (Chain-of-Verification) configuration
-COVE_ENABLED = os.environ.get("COVE_ENABLED", "true").lower() == "true"
+def _get_cove_enabled():
+    return get_config().cove_enabled
+
 COVE_MAX_CLAIMS = int(os.environ.get("COVE_MAX_CLAIMS", "5"))
 COVE_QUESTIONS_PER_CLAIM = int(os.environ.get("COVE_QUESTIONS_PER_CLAIM", "3"))
 
-EXA_API_KEY = os.environ.get("EXA_API_KEY", "")
+def _get_exa_api_key():
+    return get_config().exa_api_key
+
 EXA_ENDPOINT = os.environ.get("EXA_API_ENDPOINT", "https://api.exa.ai/search")
-EXA_MAX_RESULTS = int(os.environ.get("EXA_MAX_RESULTS", "5"))
-EXA_SEARCH_DAYS = int(os.environ.get("EXA_SEARCH_DAYS", "7"))
+
+def _get_exa_max_results():
+    return get_config().exa_max_results
+
+def _get_exa_search_days():
+    return get_config().exa_search_days
+
 EXA_TIMEOUT = int(os.environ.get("EXA_TIMEOUT_SECONDS", "15"))
 
 # Confidence scoring weights (calibrated for journalism safety)
@@ -503,7 +521,7 @@ class FactCheckService:
         result = EnrichmentContext()
         source_len = len(texto_base.strip())
 
-        if not ENRICHMENT_ENABLED:
+        if not _get_enrichment_enabled():
             logger.info("Enrichment disabled via config")
             return result
 

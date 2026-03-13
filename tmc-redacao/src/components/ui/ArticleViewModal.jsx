@@ -77,7 +77,10 @@ const ArticleViewModal = ({ article, isOpen, onClose, onEdit }) => {
   const renderContent = () => {
     if (!article.content) return null;
     const html = markdownToHtml(article.content);
-    return { __html: DOMPurify.sanitize(html) };
+    return { __html: DOMPurify.sanitize(html, {
+      ALLOWED_TAGS: ['p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'a', 'strong', 'em', 'b', 'i', 'u', 'ul', 'ol', 'li', 'blockquote', 'br', 'img', 'hr', 'span', 'div', 'sup', 'sub'],
+      ALLOWED_ATTR: ['href', 'target', 'rel', 'src', 'alt', 'class', 'id']
+    }) };
   };
 
   return (

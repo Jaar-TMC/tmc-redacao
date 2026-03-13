@@ -5,3 +5,4 @@ export { default as ResumoEditor } from './ResumoEditor';
 export { default as FactCheckButton } from './FactCheckButton';
 export { default as FactCheckModal } from './FactCheckModal';
 export { default as FactCheckTooltip } from './FactCheckTooltip';
+export { default as BaseTextModal } from './BaseTextModal';

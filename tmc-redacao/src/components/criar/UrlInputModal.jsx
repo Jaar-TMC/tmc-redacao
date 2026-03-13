@@ -207,6 +207,8 @@ const UrlInputModal = ({
                     src={preview.thumbnail}
                     alt=""
                     className="w-40 h-24 object-cover rounded"
+                    loading="lazy"
+                    decoding="async"
                   />
                   <div className="flex-1">
                     <h3 className="font-semibold text-dark-gray mb-1">

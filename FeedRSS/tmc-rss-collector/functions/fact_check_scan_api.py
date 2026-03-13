@@ -15,6 +15,7 @@ import time
 from pydantic import BaseModel, Field
 
 import azure.functions as func
+from utils.responses import create_error_response, create_success_response
 
 logger = logging.getLogger(__name__)
 
@@ -29,22 +30,7 @@ class FactCheckScanRequest(BaseModel):
     language: str = Field(default="pt")
 
 
-def create_error_response(message: str, status_code: int = 400) -> func.HttpResponse:
-    """Create a standardized error response."""
-    return func.HttpResponse(
-        json.dumps({"error": message}),
-        status_code=status_code,
-        mimetype="application/json"
-    )
-
-
-def create_success_response(data: dict, status_code: int = 200) -> func.HttpResponse:
-    """Create a standardized success response."""
-    return func.HttpResponse(
-        json.dumps(data, ensure_ascii=False),
-        status_code=status_code,
-        mimetype="application/json"
-    )
+# create_error_response and create_success_response imported from utils.responses
 
 
 async def fact_check_scan_handler(req: func.HttpRequest) -> func.HttpResponse:

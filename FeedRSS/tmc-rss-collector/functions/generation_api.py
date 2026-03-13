@@ -23,6 +23,7 @@ from datetime import datetime, timezone
 import azure.functions as func
 from pydantic import BaseModel, Field, field_validator
 from cachetools import TTLCache
+from utils.responses import create_error_response, create_success_response
 
 logger = logging.getLogger(__name__)
 
@@ -208,22 +209,7 @@ class MergeTopicsRequest(BaseModel):
     articles: list = Field(..., min_length=1, max_length=3, description="Articles to merge (max 3)")
 
 
-def create_error_response(message: str, status_code: int = 400) -> func.HttpResponse:
-    """Create a standardized error response."""
-    return func.HttpResponse(
-        json.dumps({"error": message}),
-        status_code=status_code,
-        mimetype="application/json"
-    )
-
-
-def create_success_response(data: dict, status_code: int = 200) -> func.HttpResponse:
-    """Create a standardized success response."""
-    return func.HttpResponse(
-        json.dumps(data, ensure_ascii=False),
-        status_code=status_code,
-        mimetype="application/json"
-    )
+# create_error_response and create_success_response imported from utils.responses
 
 
 # Safety Gate Models

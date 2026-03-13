@@ -361,6 +361,8 @@ const EditorToolbar = ({
                     src={imageUrl}
                     alt="Preview"
                     className="max-h-32 mx-auto rounded"
+                    loading="lazy"
+                    decoding="async"
                     onError={(e) => {
                       e.target.style.display = 'none';
                     }}

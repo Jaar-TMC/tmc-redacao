@@ -116,16 +116,28 @@ def repair_json(json_str: str) -> str:
 
     return json_str
 
-# Configuration - Azure AI Services (Anthropic endpoint)
-AZURE_AI_API_KEY = os.environ.get("AZURE_AI_API_KEY")
-AZURE_AI_ENDPOINT = os.environ.get("AZURE_AI_ENDPOINT", "https://modelos-chave-jaar-resource.services.ai.azure.com/anthropic/v1/messages")
+# Lazy config access — reads from centralized get_config() singleton
+# instead of module-level os.environ.get() calls.
+from services.config import get_config as _get_config
 
-# Fallback to direct Anthropic API
-ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY")
 ANTHROPIC_ENDPOINT = "https://api.anthropic.com/v1/messages"
+_DEFAULT_AZURE_ENDPOINT = "https://modelos-chave-jaar-resource.services.ai.azure.com/anthropic/v1/messages"
 
-# Model configuration
-ANTHROPIC_MODEL = os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-4-5")
+
+def _get_azure_ai_api_key():
+    return _get_config().azure_ai_api_key or None
+
+
+def _get_azure_ai_endpoint():
+    return _get_config().azure_ai_endpoint or _DEFAULT_AZURE_ENDPOINT
+
+
+def _get_anthropic_api_key():
+    return _get_config().anthropic_api_key or None
+
+
+def _get_generation_model():
+    return _get_config().generation_model
 MAX_TOKENS = 8192
 MIN_ARTICLE_LENGTH = 2000  # TMC standard for columnists
 
@@ -1872,24 +1884,26 @@ class LLMService:
         Supports Azure AI Services (Anthropic endpoint) or direct Anthropic API.
 
         Args:
-            api_key: API key (defaults to AZURE_AI_API_KEY or ANTHROPIC_API_KEY)
+            api_key: API key (defaults to config azure_ai_api_key or anthropic_api_key)
             endpoint: API endpoint URL
         """
         # Prioritize Azure AI Services configuration
-        if AZURE_AI_API_KEY:
-            self.api_key = api_key or AZURE_AI_API_KEY
-            self.endpoint = endpoint or AZURE_AI_ENDPOINT
+        azure_key = _get_azure_ai_api_key()
+        anthropic_key = _get_anthropic_api_key()
+        if azure_key:
+            self.api_key = api_key or azure_key
+            self.endpoint = endpoint or _get_azure_ai_endpoint()
             self.use_azure = True
             logger.info(f"Using Azure AI Services endpoint: {self.endpoint}")
-        elif ANTHROPIC_API_KEY:
-            self.api_key = api_key or ANTHROPIC_API_KEY
+        elif anthropic_key:
+            self.api_key = api_key or anthropic_key
             self.endpoint = ANTHROPIC_ENDPOINT
             self.use_azure = False
             logger.info("Using direct Anthropic API")
         else:
             raise ValueError("Neither AZURE_AI_API_KEY nor ANTHROPIC_API_KEY configured")
 
-        self.model = ANTHROPIC_MODEL
+        self.model = _get_generation_model()
         self.http_client = httpx.AsyncClient(timeout=120.0)
         # Circuit breaker state for LLM API
         self._llm_failures = 0
@@ -1956,11 +1970,12 @@ class LLMService:
         # (Azure AI proxy may not have Haiku deployed)
         use_endpoint = self.endpoint
         use_headers = None
-        if self.use_azure and "haiku" in effective_model and ANTHROPIC_API_KEY:
+        _anthropic_key = _get_anthropic_api_key()
+        if self.use_azure and "haiku" in effective_model and _anthropic_key:
             use_endpoint = ANTHROPIC_ENDPOINT
             use_headers = {
                 "Content-Type": "application/json",
-                "x-api-key": ANTHROPIC_API_KEY,
+                "x-api-key": _anthropic_key,
                 "anthropic-version": "2023-06-01",
             }
             logger.info(f"{_cid}Routing {effective_model} to Anthropic API (not available on Azure AI)")
@@ -2622,7 +2637,7 @@ def get_llm_service() -> LLMService:
         LLMService instance
 
     Raises:
-        ValueError: If neither AZURE_AI_API_KEY nor ANTHROPIC_API_KEY is configured
+        ValueError: If neither azure_ai_api_key nor anthropic_api_key is configured
     """
     global _llm_service
     if _llm_service is None:
@@ -2650,7 +2665,7 @@ def _cleanup_llm_service():
 
 def is_llm_configured() -> bool:
     """Check if LLM service is properly configured."""
-    return bool(AZURE_AI_API_KEY or ANTHROPIC_API_KEY)
+    return bool(_get_azure_ai_api_key() or _get_anthropic_api_key())
 
 
 # Merge Topics Prompts

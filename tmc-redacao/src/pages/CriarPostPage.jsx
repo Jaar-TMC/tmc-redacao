@@ -30,7 +30,7 @@ import {
 } from 'lucide-react';
 import { markdownToHtml } from '../utils/markdownRenderer';
 import Tooltip from '../components/ui/Tooltip';
-import { SEOAnalyzerPanel, calculateSEOScore, RichTextEditor, EditorToolbar, FactCheckButton, FactCheckModal, FactCheckTooltip } from '../components/editor';
+import { SEOAnalyzerPanel, calculateSEOScore, RichTextEditor, EditorToolbar, FactCheckButton, FactCheckModal, FactCheckTooltip, BaseTextModal } from '../components/editor';
 import VerificationBanner from '../components/ui/VerificationBanner';
 import ResumoEditor from '../components/editor/ResumoEditor';
 import { useCriar } from '../context';
@@ -42,7 +42,7 @@ const CriarPostPage = () => {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const { articleId: editArticleId } = useParams(); // For editing existing articles
-  const { resultado } = useCriar();
+  const { resultado, textoBase, fonte } = useCriar();
 
   // Anti-hallucination: publish blocking + human review
   const publishBlocked = resultado?.publishBlocked || false;
@@ -55,6 +55,7 @@ const CriarPostPage = () => {
   const publicationStatus = resultado?.publicationStatus || null;
   const readabilityData = resultado?.readability || null;
   const enrichmentDegraded = resultado?.enrichmentDegraded || false;
+  const hasBaseText = textoBase?.blocos?.length > 0 || textoBase?.textoCompleto?.length > 0 || fonte?.dados != null;
   const slugSugerido = resultado?.slugSugerido || null;
   const [showPublishConfirm, setShowPublishConfirm] = useState(false);
   const [publishOverridden, setPublishOverridden] = useState(false);
@@ -264,6 +265,7 @@ const CriarPostPage = () => {
     toggleHighlights,
     markContentChanged: markFactCheckContentChanged,
   } = useFactCheckScan();
+  const [showBaseTextModal, setShowBaseTextModal] = useState(false);
   const editorContainerRef = useRef(null);
 
   // Mensagem inicial baseada no contexto do tema
