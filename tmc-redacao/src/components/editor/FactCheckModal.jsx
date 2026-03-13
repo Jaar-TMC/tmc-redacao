@@ -13,6 +13,8 @@ import {
   Eye,
   Search,
   Loader2,
+  Wand2,
+  RefreshCw,
 } from 'lucide-react';
 
 // ---------------------------------------------------------------------------
@@ -234,7 +236,7 @@ StatCard.propTypes = {
 // Claim Card
 // ---------------------------------------------------------------------------
 
-function ClaimCard({ claim, index, onClick }) {
+function ClaimCard({ claim, index, onClick, onFixClaim, isFixDisabled }) {
   const cfg = getVerdictConfig(claim.verdict);
   const VerdictIcon = cfg.Icon;
 
@@ -268,7 +270,7 @@ function ClaimCard({ claim, index, onClick }) {
         </p>
       )}
 
-      {/* Bottom row: category + locate action */}
+      {/* Bottom row: category + actions */}
       <div className="mt-3 flex items-center justify-between">
         {claim.category ? (
           <span className="inline-block rounded-md bg-gray-100 px-2 py-0.5 text-[11px] text-medium-gray font-medium">
@@ -277,10 +279,29 @@ function ClaimCard({ claim, index, onClick }) {
         ) : (
           <span />
         )}
-        <span className="flex items-center gap-0.5 text-xs text-tmc-orange opacity-0 group-hover:opacity-100 transition-opacity">
-          Localizar
-          <ChevronRight className="h-3 w-3" />
-        </span>
+        <div className="flex items-center gap-3">
+          {(claim.verdict === 'fabricated' || claim.verdict === 'unverifiable') && onFixClaim && (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onFixClaim(claim);
+              }}
+              disabled={isFixDisabled}
+              className={`flex items-center gap-1 text-xs font-medium
+                ${claim.verdict === 'fabricated' ? 'text-red-600 hover:text-red-700' : 'text-amber-600 hover:text-amber-700'}
+                disabled:opacity-50 disabled:cursor-not-allowed transition-colors`}
+              title={claim.verdict === 'fabricated' ? 'Sugerir correção via Assistente' : 'Sugerir atribuição via Assistente'}
+            >
+              <Wand2 className="h-3 w-3" />
+              Corrigir
+            </button>
+          )}
+          <span className="flex items-center gap-0.5 text-xs text-tmc-orange opacity-0 group-hover:opacity-100 transition-opacity">
+            Localizar
+            <ChevronRight className="h-3 w-3" />
+          </span>
+        </div>
       </div>
     </button>
   );
@@ -299,13 +320,15 @@ ClaimCard.propTypes = {
   }).isRequired,
   index: PropTypes.number.isRequired,
   onClick: PropTypes.func.isRequired,
+  onFixClaim: PropTypes.func,
+  isFixDisabled: PropTypes.bool,
 };
 
 // ---------------------------------------------------------------------------
 // FactCheckModal
 // ---------------------------------------------------------------------------
 
-export default function FactCheckModal({ isOpen, onClose, scanResult, onClaimClick, onDeepVerify, isDeepVerifying }) {
+export default function FactCheckModal({ isOpen, onClose, scanResult, onClaimClick, onDeepVerify, isDeepVerifying, onFixClaim, isFixDisabled, onRescan }) {
   // The modal animates via CSS — always show at full opacity/scale since
   // the modal mounts/unmounts with isOpen. CSS transition on initial render
   // is handled by the browser's layout-then-paint cycle.
@@ -333,6 +356,7 @@ export default function FactCheckModal({ isOpen, onClose, scanResult, onClaimCli
     unverifiable_claims = 0,
     scan_duration_ms,
     scan_id,
+    cached: isCached,
     error: scanError,
   } = scanResult;
 
@@ -418,6 +442,26 @@ export default function FactCheckModal({ isOpen, onClose, scanResult, onClaimCli
               colorClass="text-amber-600"
             />
           </div>
+
+          {/* Cached indicator + re-scan */}
+          {isCached && (
+            <div className="mt-3 flex items-center justify-between text-xs text-white/70">
+              <span className="flex items-center gap-1">
+                <Clock className="h-3 w-3" />
+                Resultado em cache
+              </span>
+              {onRescan && (
+                <button
+                  type="button"
+                  onClick={onRescan}
+                  className="flex items-center gap-1 text-white/80 hover:text-white transition-colors"
+                >
+                  <RefreshCw className="h-3 w-3" />
+                  Nova verificação
+                </button>
+              )}
+            </div>
+          )}
         </div>
 
         {/* ── CLAIMS LIST ───────────────────────────────────────── */}
@@ -486,6 +530,8 @@ export default function FactCheckModal({ isOpen, onClose, scanResult, onClaimCli
                   claim={claim}
                   index={idx}
                   onClick={onClaimClick}
+                  onFixClaim={onFixClaim}
+                  isFixDisabled={isFixDisabled}
                 />
               ))}
             </div>
@@ -559,4 +605,7 @@ FactCheckModal.propTypes = {
   onClaimClick: PropTypes.func,
   onDeepVerify: PropTypes.func,
   isDeepVerifying: PropTypes.bool,
+  onFixClaim: PropTypes.func,
+  isFixDisabled: PropTypes.bool,
+  onRescan: PropTypes.func,
 };

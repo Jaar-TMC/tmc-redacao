@@ -821,6 +821,7 @@ export async function factCheckScan({
   sourceText = '',
   userArticleId = '',
   language = 'pt',
+  forceRescan = false,
 }) {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 60000);
@@ -835,6 +836,7 @@ export async function factCheckScan({
         source_text: sourceText,
         user_article_id: userArticleId,
         language,
+        force_rescan: forceRescan,
       }),
       signal: controller.signal,
     });

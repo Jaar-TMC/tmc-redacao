@@ -77,7 +77,7 @@ export function useFactCheckScan() {
   const [contentChangedSinceScan, setContentChangedSinceScan] = useState(false);
   const lastScannedContentRef = useRef(null);
 
-  const runScan = useCallback(async (editor, { articleText, articleTitle, sourceUrls, userArticleId }) => {
+  const runScan = useCallback(async (editor, { articleText, articleTitle, sourceUrls, userArticleId, forceRescan = false }) => {
     if (!articleText || articleText.length < 100) {
       setError('O texto precisa ter pelo menos 100 caracteres para verificação.');
       return null;
@@ -90,6 +90,7 @@ export function useFactCheckScan() {
       const result = await factCheckScan({
         articleText,
         articleTitle,
+        forceRescan,
         sourceUrls,
         userArticleId,
       });

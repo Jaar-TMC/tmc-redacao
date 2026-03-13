@@ -382,6 +382,32 @@ const CriarPostPage = () => {
     await sendEditMessage(instruction);
   };
 
+  const handleFixClaim = useCallback((claim) => {
+    setShowFactCheckModal(false);
+    setActiveSidebarTab('assistente');
+
+    const evidence = claim.evidence
+      ? `\n\nEvidência: ${claim.evidence}`
+      : '';
+    const sources = claim.sources?.length
+      ? `\nFontes: ${claim.sources.map(s => s.title || s.url).filter(Boolean).join('; ')}`
+      : '';
+
+    const isFabricated = claim.verdict === 'fabricated';
+    const instruction = isFabricated
+      ? `Corrija a seguinte afirmação fabricada no texto, substituindo por informação factualmente correta. ` +
+        `Altere APENAS o trecho relacionado, mantendo o restante intacto.\n\n` +
+        `Afirmação fabricada: "${claim.text}"${evidence}${sources}\n\n` +
+        `Reescreva o trecho corrigido de forma natural e integrada ao contexto.`
+      : `A seguinte afirmação não pôde ser verificada. Reescreva o trecho adicionando atribuição clara à fonte ` +
+        `ou suavizando a linguagem (ex: "segundo...", "de acordo com..."). ` +
+        `Altere APENAS o trecho relacionado, mantendo o restante intacto.\n\n` +
+        `Afirmação não verificável: "${claim.text}"${evidence}${sources}\n\n` +
+        `Reescreva de forma natural, integrada ao contexto, com atribuição adequada.`;
+
+    sendEditMessage(instruction, 'content');
+  }, [sendEditMessage, setShowFactCheckModal, setActiveSidebarTab]);
+
   const handleQuickSuggestion = (suggestion) => {
     setChatInput(suggestion);
   };
@@ -1789,6 +1815,19 @@ const CriarPostPage = () => {
         scanResult={factCheckResult}
         onDeepVerify={() => runDeepVerify(factCheckResult, title)}
         isDeepVerifying={isDeepVerifying}
+        onRescan={() => {
+          const editor = editorRef.current?.editor;
+          const plainText = editorRef.current?.getText() || '';
+          runFactCheckScan(editor, {
+            articleText: plainText,
+            articleTitle: title,
+            sourceUrls: sourceUrls,
+            userArticleId: articleId || '',
+            forceRescan: true,
+          });
+        }}
+        onFixClaim={handleFixClaim}
+        isFixDisabled={isChatProcessing}
         onClaimClick={(claimIndex) => {
           setShowFactCheckModal(false);
           // Scroll to the highlighted claim in the editor
