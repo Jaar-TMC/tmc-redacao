@@ -11,6 +11,62 @@ import { factCheckScan, factCheckDeepVerify } from '../services/api';
  *   // Deep verify unverifiable claims:
  *   runDeepVerify(scanResult, articleTitle);
  */
+const SEVERITY_WEIGHTS = { critical: 25, high: 15, medium: 8, low: 3 };
+
+/**
+ * Recalculate ASI after deep verify, mirroring backend calculate_asi().
+ * Claim-dependent components (grounding 35%, severity 20%) are recalculated.
+ * Other components (credibility 15%, corroboration 15%, factcheck 10%, opinion 5%)
+ * are derived from the original ASI to keep them unchanged.
+ */
+function recalculateASI(claims, originalResult) {
+  const factual = claims.filter(c => c.verdict !== 'opinion');
+  if (!factual.length) return 85;
+
+  // Component 1: Grounding (35%)
+  const grounded = factual.filter(c => c.verdict === 'grounded').length;
+  const groundingScore = (grounded / factual.length) * 100;
+
+  // Component 2: Severity penalty (20%)
+  let penalty = 0;
+  for (const c of factual) {
+    if (c.verdict === 'fabricated' || c.verdict === 'unverifiable') {
+      penalty += SEVERITY_WEIGHTS[c.severity] || 5;
+    }
+  }
+  const severityScore = Math.max(0, 100 - penalty);
+
+  // Components 3-6: Extract from original ASI (45% total)
+  // Original ASI = grounding*0.35 + severity*0.20 + other*0.45
+  // We back-calculate the "other" portion from the original values
+  const origClaims = originalResult.claims || [];
+  const origFactual = origClaims.filter(c => c.verdict !== 'opinion');
+  let origGrounding = 50, origSeverity = 50;
+  if (origFactual.length) {
+    const origGrounded = origFactual.filter(c => c.verdict === 'grounded').length;
+    origGrounding = (origGrounded / origFactual.length) * 100;
+    let origPenalty = 0;
+    for (const c of origFactual) {
+      if (c.verdict === 'fabricated' || c.verdict === 'unverifiable') {
+        origPenalty += SEVERITY_WEIGHTS[c.severity] || 5;
+      }
+    }
+    origSeverity = Math.max(0, 100 - origPenalty);
+  }
+  const origAsi = originalResult.safety_index || 50;
+  const otherComponent = origAsi - origGrounding * 0.35 - origSeverity * 0.20;
+
+  const asi = groundingScore * 0.35 + severityScore * 0.20 + otherComponent;
+  return Math.max(0, Math.min(100, Math.round(asi)));
+}
+
+function getASILabel(asi) {
+  if (asi >= 80) return 'seguro';
+  if (asi >= 60) return 'atencao';
+  if (asi >= 40) return 'risco';
+  return 'critico';
+}
+
 export function useFactCheckScan() {
   const [scanResult, setScanResult] = useState(null);
   const [isScanning, setIsScanning] = useState(false);
@@ -69,10 +125,16 @@ export function useFactCheckScan() {
   }, []);
 
   const runDeepVerify = useCallback(async (currentScanResult, articleTitle) => {
-    if (!currentScanResult?.claims?.length) return null;
+    if (!currentScanResult?.claims?.length) {
+      setError('Nenhuma afirmação encontrada para verificar.');
+      return null;
+    }
 
     const unverifiableCount = currentScanResult.claims.filter(c => c.verdict === 'unverifiable').length;
-    if (unverifiableCount === 0) return null;
+    if (unverifiableCount === 0) {
+      setError('Não há afirmações não-verificáveis para verificar.');
+      return null;
+    }
 
     setIsDeepVerifying(true);
     setError(null);
@@ -104,12 +166,17 @@ export function useFactCheckScan() {
         const fabricated = updatedClaims.filter(c => c.verdict === 'fabricated').length;
         const unverifiable = updatedClaims.filter(c => c.verdict === 'unverifiable').length;
 
+        // Recalculate ASI using same formula as backend
+        const newAsi = recalculateASI(updatedClaims, currentScanResult);
+
         const updatedScanResult = {
           ...currentScanResult,
           claims: updatedClaims,
           grounded_claims: grounded,
           fabricated_claims: fabricated,
           unverifiable_claims: unverifiable,
+          safety_index: newAsi,
+          safety_label: getASILabel(newAsi),
           _deep_verify: {
             claims_resolved: result.claims_resolved,
             sources_searched: result.sources_searched,
