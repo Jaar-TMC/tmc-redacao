@@ -3142,6 +3142,137 @@ class DatabaseService:
             return False
 
     # ========================================
+    # FACT-CHECK SCANS
+    # ========================================
+
+    def insert_fact_check_scan(self, scan_data: dict) -> bool:
+        """
+        Insert a fact-check scan record.
+
+        Non-blocking: errors are logged but never propagated.
+
+        Args:
+            scan_data: Dict with scan fields (see migration 014)
+
+        Returns:
+            True if inserted successfully, False otherwise
+        """
+        try:
+            def _trunc(val, max_len):
+                if val and isinstance(val, str) and len(val) > max_len:
+                    return val[:max_len]
+                return val
+
+            def _json_trunc(val, max_len):
+                if val is None:
+                    return None
+                s = json.dumps(val, ensure_ascii=False) if not isinstance(val, str) else val
+                return _trunc(s, max_len)
+
+            query = """
+                INSERT INTO fact_check_scans
+                (scan_id, user_id, user_article_id, article_text_hash,
+                 article_char_count, safety_index, safety_label,
+                 total_claims, grounded_claims, fabricated_claims,
+                 unverifiable_claims, corroboration_score,
+                 external_factcheck_matches, scan_result, scan_duration_ms)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            """
+
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(query, (
+                    _trunc(scan_data.get('scan_id'), 64),
+                    scan_data.get('user_id'),
+                    scan_data.get('user_article_id'),
+                    _trunc(scan_data.get('article_text_hash'), 64),
+                    scan_data.get('article_char_count'),
+                    scan_data.get('safety_index'),
+                    _trunc(scan_data.get('safety_label'), 20),
+                    scan_data.get('total_claims', 0),
+                    scan_data.get('grounded_claims', 0),
+                    scan_data.get('fabricated_claims', 0),
+                    scan_data.get('unverifiable_claims', 0),
+                    scan_data.get('corroboration_score'),
+                    scan_data.get('external_factcheck_matches', 0),
+                    _json_trunc(scan_data.get('scan_result'), 10000),
+                    scan_data.get('scan_duration_ms'),
+                ))
+                conn.commit()
+
+            logger.debug("Fact-check scan record inserted successfully")
+            return True
+
+        except Exception as e:
+            logger.warning(f"Failed to insert fact-check scan (non-blocking): {e}")
+            return False
+
+    def get_latest_scan(self, article_text_hash: str, max_age_seconds: int = 300) -> Optional[dict]:
+        """
+        Look up the most recent scan for a given article text hash.
+
+        Used for caching: if an identical article was scanned recently,
+        return the cached result instead of re-scanning.
+
+        Args:
+            article_text_hash: SHA-256 hash of the article text
+            max_age_seconds: Maximum age of cached result (default 5 minutes)
+
+        Returns:
+            dict with scan fields or None if no recent scan found
+        """
+        try:
+            query = """
+                SELECT TOP 1
+                    scan_id, safety_index, safety_label,
+                    total_claims, grounded_claims, fabricated_claims,
+                    unverifiable_claims, corroboration_score,
+                    external_factcheck_matches, scan_result,
+                    scan_duration_ms, created_at
+                FROM fact_check_scans
+                WHERE article_text_hash = %s
+                  AND created_at >= DATEADD(second, -%s, GETUTCDATE())
+                ORDER BY created_at DESC
+            """
+
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(query, (article_text_hash, max_age_seconds))
+                row = cursor.fetchone()
+
+            if not row:
+                return None
+
+            result = {
+                "scan_id": row[0],
+                "safety_index": row[1],
+                "safety_label": row[2],
+                "total_claims": row[3],
+                "grounded_claims": row[4],
+                "fabricated_claims": row[5],
+                "unverifiable_claims": row[6],
+                "corroboration_score": row[7],
+                "external_factcheck_matches": row[8],
+                "scan_result": row[9],
+                "scan_duration_ms": row[10],
+                "created_at": row[11].isoformat() if row[11] else None,
+            }
+
+            # Parse scan_result JSON if present
+            if result["scan_result"]:
+                try:
+                    result["scan_result"] = json.loads(result["scan_result"])
+                except (json.JSONDecodeError, TypeError):
+                    pass
+
+            logger.debug(f"Cache hit for scan hash {article_text_hash[:16]}...")
+            return result
+
+        except Exception as e:
+            logger.warning(f"Failed to get latest scan (non-blocking): {e}")
+            return None
+
+    # ========================================
     # USERS & AUTH
     # ========================================
 

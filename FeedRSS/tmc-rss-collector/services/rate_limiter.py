@@ -56,6 +56,7 @@ class RateLimiter:
         "transcribe": {"rate": 0.167, "burst": 10},
         "auth-login": {"rate": 0.2, "burst": 5},
         "auth-forgot-password": {"rate": 0.1, "burst": 3},
+        "fact-check-scan": {"rate": 0.25, "burst": 2},
     }
 
     def __init__(self):

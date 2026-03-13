@@ -786,6 +786,69 @@ export function invalidateCache(dataType) {
 }
 
 // ============================================
+// Fact-Check Scan API
+// ============================================
+
+/**
+ * Run an on-demand fact-check safety scan on article text.
+ * Returns ASI score (0-100), claim-by-claim analysis, and source credibility.
+ *
+ * @param {Object} params - Scan parameters
+ * @param {string} params.articleText - Article text to scan (100-15000 chars)
+ * @param {string} [params.articleTitle] - Article title for context
+ * @param {string[]} [params.sourceUrls] - Source URLs used in article
+ * @param {string} [params.sourceText] - Original source text
+ * @param {string} [params.userArticleId] - User article UUID (for audit trail)
+ * @param {string} [params.language] - Language code (default: "pt")
+ * @returns {Promise<{
+ *   safety_index: number,
+ *   safety_label: string,
+ *   claims: Array<{text: string, verdict: string, severity: string, category: string, evidence: string, position_hint: string}>,
+ *   total_claims: number,
+ *   grounded_claims: number,
+ *   fabricated_claims: number,
+ *   unverifiable_claims: number,
+ *   corroboration_score: number,
+ *   fact_check_matches: number,
+ *   scan_duration_ms: number,
+ *   scan_id: string
+ * }>}
+ */
+export async function factCheckScan({
+  articleText,
+  articleTitle = '',
+  sourceUrls = [],
+  sourceText = '',
+  userArticleId = '',
+  language = 'pt',
+}) {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 60000);
+
+  try {
+    return await fetchApi('/fact-check-scan', {
+      method: 'POST',
+      body: JSON.stringify({
+        article_text: articleText,
+        article_title: articleTitle,
+        source_urls: sourceUrls,
+        source_text: sourceText,
+        user_article_id: userArticleId,
+        language,
+      }),
+      signal: controller.signal,
+    });
+  } catch (error) {
+    if (error.name === 'AbortError') {
+      throw new Error('A verificação excedeu o tempo limite de 1 minuto. Tente novamente.');
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
+// ============================================
 // Utility Functions
 // ============================================
 
@@ -842,6 +905,7 @@ export default {
   createUserArticle,
   updateUserArticle,
   deleteUserArticle,
+  factCheckScan,
   isApiAvailable,
   getApiBaseUrl,
   registerAuthHandlers,
