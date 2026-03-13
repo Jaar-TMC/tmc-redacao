@@ -1,8 +1,9 @@
 """
 Fact-Check Scan API — on-demand article safety verification.
 
-Endpoint:
+Endpoints:
 - POST /api/fact-check-scan - Scan article text for factual accuracy
+- POST /api/fact-check-deep-verify - Deep verify unverifiable claims from a scan
 """
 
 import hashlib
@@ -165,4 +166,73 @@ async def fact_check_scan_handler(req: func.HttpRequest) -> func.HttpResponse:
 
     except Exception as e:
         logger.exception(f"Unexpected error in fact_check_scan: {e}")
+        return create_error_response("Internal server error", 500)
+
+
+async def deep_verify_handler(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    Deep verify unverifiable claims from a fact-check scan.
+
+    POST /api/fact-check-deep-verify
+    Body: {
+        claims: [...],          (required - array of claim objects from scan result)
+        article_title: "...",   (optional)
+        language: "pt"          (optional)
+    }
+    Returns: { updated_claims, sources_searched, claims_resolved, deep_verify_duration_ms }
+    """
+    logger.info("Deep verify request received")
+
+    try:
+        # Parse request body
+        try:
+            body = req.get_json()
+        except ValueError:
+            return create_error_response("Invalid JSON body", 400)
+
+        # Validate claims array
+        claims = body.get("claims")
+        if not claims or not isinstance(claims, list):
+            return create_error_response(
+                "Erro de validacao: 'claims' deve ser uma lista nao vazia de afirmacoes",
+                400,
+            )
+
+        article_title = body.get("article_title", "")
+        language = body.get("language", "pt")
+
+        # Check feature flag
+        if os.environ.get("FACT_CHECK_SCAN_ENABLED", "true").lower() != "true":
+            return create_error_response(
+                "Verificacao de seguranca temporariamente desabilitada", 503
+            )
+
+        correlation_id = str(uuid.uuid4())[:8]
+
+        from services.article_safety_service import get_article_safety_service
+
+        try:
+            service = get_article_safety_service()
+        except Exception as e:
+            logger.error(f"Article safety service not available: {e}")
+            return create_error_response(
+                "Servico de verificacao nao configurado", 503
+            )
+
+        result = await service.deep_verify(
+            claims=claims,
+            article_title=article_title,
+            language=language,
+            correlation_id=correlation_id,
+        )
+
+        logger.info(
+            f"Deep verify {correlation_id} complete: "
+            f"{result['claims_resolved']} resolved, {result['deep_verify_duration_ms']}ms"
+        )
+
+        return create_success_response(result)
+
+    except Exception as e:
+        logger.exception(f"Unexpected error in deep_verify: {e}")
         return create_error_response("Internal server error", 500)

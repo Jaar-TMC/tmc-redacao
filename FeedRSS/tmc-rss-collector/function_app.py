@@ -653,6 +653,25 @@ async def fact_check_scan(req: func.HttpRequest) -> func.HttpResponse:
     return await fact_check_scan_handler(req)
 
 
+@app.route(route="fact-check-deep-verify", methods=["POST", "OPTIONS"])
+@with_cors
+@require_auth
+async def fact_check_deep_verify(req: func.HttpRequest) -> func.HttpResponse:
+    """POST /api/fact-check-deep-verify - Deep verify unverifiable claims."""
+    from services.rate_limiter import RateLimiter
+    retry_after = RateLimiter.get().check("fact-check-scan")
+    if retry_after is not None:
+        import json as _json
+        return func.HttpResponse(
+            _json.dumps({"error": "Rate limit exceeded", "retry_after_seconds": round(retry_after, 1)}),
+            status_code=429,
+            headers={"Retry-After": str(int(retry_after) + 1)},
+            mimetype="application/json",
+        )
+    from functions.fact_check_scan_api import deep_verify_handler
+    return await deep_verify_handler(req)
+
+
 # ========================================
 # HTTP TRIGGERS - RESEARCH (Criar por Prompt)
 # ========================================

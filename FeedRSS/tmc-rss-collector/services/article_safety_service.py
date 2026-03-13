@@ -762,6 +762,293 @@ class ArticleSafetyService:
             unknown_sources=unknown_sources[:5],
         )
 
+    # ========================================
+    # DEEP VERIFY (batch re-verify unverifiable claims)
+    # ========================================
+
+    async def deep_verify(
+        self,
+        claims: list[dict],
+        article_title: str = "",
+        language: str = "pt",
+        correlation_id: str = "",
+    ) -> dict:
+        """
+        Batch deep-verify unverifiable claims using Exa search + Haiku reclassification.
+
+        1. Filter only unverifiable claims
+        2. Build a smart Exa query combining person names + key phrases from all claims
+        3. Make ONE Exa search (top 10 results, with text content)
+        4. Make ONE Haiku call to match evidence snippets back to each claim
+        5. Return updated claims with new verdicts + evidence
+        """
+        start_time = time.time()
+
+        # Step 1: Filter unverifiable claims, keeping their original index
+        unverifiable = []
+        for i, claim in enumerate(claims):
+            verdict = claim.get("verdict", "")
+            if verdict == "unverifiable":
+                unverifiable.append({"index": i, **claim})
+
+        if not unverifiable:
+            return {
+                "updated_claims": [],
+                "sources_searched": 0,
+                "claims_resolved": 0,
+                "deep_verify_duration_ms": 0,
+            }
+
+        logger.info(
+            f"[{correlation_id}] Deep verify: {len(unverifiable)} unverifiable claims"
+        )
+
+        # Step 2: Extract key entities and build a single Exa query
+        query_parts = []
+        if article_title:
+            query_parts.append(article_title[:80])
+
+        for claim in unverifiable:
+            text = claim.get("text", "")
+            # Extract meaningful phrases (take first ~60 chars of each claim)
+            if text:
+                query_parts.append(text[:60])
+
+        # Combine into a single concise query (Exa works best under ~500 chars)
+        combined_query = " ".join(query_parts)[:500]
+
+        # Step 3: ONE Exa search
+        exa_results = await self._deep_verify_exa_search(
+            combined_query, correlation_id
+        )
+        sources_searched = len(exa_results)
+
+        logger.info(
+            f"[{correlation_id}] Deep verify: Exa returned {sources_searched} results"
+        )
+
+        # Step 4: ONE Haiku call to match evidence to claims
+        updated_claims = await self._deep_verify_classify(
+            unverifiable, exa_results, language, correlation_id
+        )
+
+        # Step 5: Count resolved claims
+        claims_resolved = sum(
+            1 for c in updated_claims if c.get("verdict") == "grounded"
+        )
+
+        duration_ms = int((time.time() - start_time) * 1000)
+
+        logger.info(
+            f"[{correlation_id}] Deep verify complete: "
+            f"{claims_resolved}/{len(unverifiable)} resolved, {duration_ms}ms"
+        )
+
+        return {
+            "updated_claims": updated_claims,
+            "sources_searched": sources_searched,
+            "claims_resolved": claims_resolved,
+            "deep_verify_duration_ms": duration_ms,
+        }
+
+    async def _deep_verify_exa_search(
+        self, query: str, correlation_id: str
+    ) -> list[dict]:
+        """Single Exa search for deep verification evidence."""
+        exa_api_key = os.environ.get("EXA_API_KEY", "")
+        if not exa_api_key:
+            logger.warning(f"[{correlation_id}] Deep verify: EXA_API_KEY not set")
+            return []
+
+        # Respect circuit breaker
+        if self._exa_circuit_open:
+            if time.time() < self._exa_circuit_open_until:
+                logger.warning(f"[{correlation_id}] Deep verify: Exa circuit open")
+                return []
+            self._exa_circuit_open = False
+            self._exa_failures = 0
+
+        payload = {
+            "query": query,
+            "type": "neural",
+            "useAutoprompt": True,
+            "numResults": 10,
+            "category": "news",
+            "contents": {
+                "text": {"maxCharacters": 2000},
+                "highlights": {"numSentences": 3},
+            },
+        }
+
+        headers = {
+            "Content-Type": "application/json",
+            "x-api-key": exa_api_key,
+        }
+
+        try:
+            response = await self.http_client.post(
+                EXA_ENDPOINT, headers=headers, json=payload
+            )
+        except (httpx.ConnectError, httpx.ConnectTimeout) as e:
+            self._exa_failures += 1
+            if self._exa_failures >= 3:
+                self._exa_circuit_open = True
+                self._exa_circuit_open_until = time.time() + 60
+                logger.warning(f"[{correlation_id}] Exa circuit breaker OPENED")
+            logger.warning(f"[{correlation_id}] Deep verify Exa connection error: {e}")
+            return []
+
+        if response.status_code != 200:
+            self._exa_failures += 1
+            if self._exa_failures >= 3:
+                self._exa_circuit_open = True
+                self._exa_circuit_open_until = time.time() + 60
+            logger.warning(
+                f"[{correlation_id}] Deep verify Exa returned {response.status_code}"
+            )
+            return []
+
+        self._exa_failures = 0
+        data = response.json()
+        results = []
+        for item in data.get("results", []):
+            results.append({
+                "title": item.get("title", ""),
+                "url": item.get("url", ""),
+                "text": item.get("text", ""),
+                "highlights": item.get("highlights", []),
+            })
+        return results
+
+    async def _deep_verify_classify(
+        self,
+        unverifiable_claims: list[dict],
+        exa_results: list[dict],
+        language: str,
+        correlation_id: str,
+    ) -> list[dict]:
+        """
+        Single Haiku call to match Exa evidence to each unverifiable claim
+        and reclassify them.
+        """
+        from services.llm_service import get_llm_service, repair_json
+        from services.config import get_config
+
+        config = get_config()
+        llm = get_llm_service()
+
+        # Build evidence context from Exa results
+        evidence_block = ""
+        if exa_results:
+            evidence_parts = []
+            for i, src in enumerate(exa_results, 1):
+                title = src.get("title", "")
+                url = src.get("url", "")
+                highlights = src.get("highlights", [])
+                text_snippet = (
+                    " ".join(highlights[:3]) if highlights else src.get("text", "")[:500]
+                )
+                evidence_parts.append(
+                    f"[{i}] {title}\n    URL: {url}\n    Trecho: {text_snippet}"
+                )
+            evidence_block = "\n\n".join(evidence_parts)
+        else:
+            evidence_block = "(Nenhuma evidencia encontrada)"
+
+        # Build claims list
+        claims_list = []
+        for c in unverifiable_claims:
+            claims_list.append({
+                "index": c["index"],
+                "text": c.get("text", ""),
+                "severity": c.get("severity", "low"),
+            })
+
+        lang_instruction = (
+            "Responda em portugues." if language == "pt" else "Respond in English."
+        )
+
+        system_prompt = (
+            "Voce e um verificador de fatos especializado. "
+            "Abaixo estao afirmacoes previamente classificadas como 'unverifiable' "
+            "e novas evidencias encontradas na web.\n\n"
+            "Para CADA afirmacao, analise se as evidencias agora permitem confirma-la.\n"
+            "Retorne para cada uma:\n"
+            "- index: o indice original da afirmacao\n"
+            "- verdict: 'grounded' (se as evidencias agora confirmam) ou "
+            "'unverifiable' (se ainda nao ha evidencia suficiente)\n"
+            "- evidence: resumo curto da evidencia encontrada (ou por que continua inverificavel)\n"
+            "- sources: lista de URLs das evidencias usadas (pode ser vazia)\n"
+            "- severity: manter a severidade original\n\n"
+            f"{lang_instruction}\n\n"
+            "Responda APENAS em JSON: "
+            '{"results": [{"index": 0, "verdict": "...", "evidence": "...", '
+            '"sources": ["..."], "severity": "..."}]}'
+        )
+
+        claims_json = json.dumps(claims_list, ensure_ascii=False)
+        user_content = (
+            f"AFIRMACOES INVERIFICAVEIS:\n{claims_json}\n\n"
+            f"EVIDENCIAS ENCONTRADAS:\n{evidence_block}"
+        )
+
+        try:
+            response = await llm.call_api(
+                system=system_prompt,
+                user_content=user_content,
+                max_tokens=3000,
+                correlation_id=correlation_id,
+                model=config.classification_model,
+                task_type="deep_verify_claims",
+            )
+
+            json_str = _extract_json(response)
+            repaired = repair_json(json_str)
+            parsed = json.loads(repaired)
+            llm_results = parsed.get("results", [])
+
+        except Exception as e:
+            logger.error(f"[{correlation_id}] Deep verify classification failed: {e}")
+            # Return claims unchanged
+            return [
+                {
+                    "index": c["index"],
+                    "verdict": "unverifiable",
+                    "evidence": c.get("evidence", ""),
+                    "sources": [],
+                    "severity": c.get("severity", "low"),
+                }
+                for c in unverifiable_claims
+            ]
+
+        # Build results, merging LLM output with fallbacks
+        updated = []
+        for i, claim in enumerate(unverifiable_claims):
+            # Match by index from LLM response
+            llm_entry = {}
+            for r in llm_results:
+                if r.get("index") == claim["index"]:
+                    llm_entry = r
+                    break
+            # Fallback: match by position
+            if not llm_entry and i < len(llm_results):
+                llm_entry = llm_results[i]
+
+            verdict = llm_entry.get("verdict", "unverifiable")
+            # Only allow grounded or unverifiable from deep verify
+            if verdict not in ("grounded", "unverifiable"):
+                verdict = "unverifiable"
+
+            updated.append({
+                "index": claim["index"],
+                "verdict": verdict,
+                "evidence": llm_entry.get("evidence", claim.get("evidence", "")),
+                "sources": llm_entry.get("sources", []),
+                "severity": llm_entry.get("severity", claim.get("severity", "low")),
+            })
+
+        return updated
+
 
 # ========================================
 # HELPERS

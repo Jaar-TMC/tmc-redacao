@@ -11,6 +11,8 @@ import {
   CheckCircle2,
   HelpCircle,
   Eye,
+  Search,
+  Loader2,
 } from 'lucide-react';
 
 // ---------------------------------------------------------------------------
@@ -303,7 +305,7 @@ ClaimCard.propTypes = {
 // FactCheckModal
 // ---------------------------------------------------------------------------
 
-export default function FactCheckModal({ isOpen, onClose, scanResult, onClaimClick }) {
+export default function FactCheckModal({ isOpen, onClose, scanResult, onClaimClick, onDeepVerify, isDeepVerifying }) {
   // The modal animates via CSS — always show at full opacity/scale since
   // the modal mounts/unmounts with isOpen. CSS transition on initial render
   // is handled by the browser's layout-then-paint cycle.
@@ -427,6 +429,41 @@ export default function FactCheckModal({ isOpen, onClose, scanResult, onClaimCli
             </span>
           </h3>
 
+          {/* Deep Verify button — only when there are unverifiable claims */}
+          {unverifiable_claims > 0 && !scanError && (
+            <button
+              type="button"
+              onClick={onDeepVerify}
+              disabled={isDeepVerifying}
+              className="mb-3 w-full flex items-center justify-center gap-2 rounded-lg border border-tmc-orange
+                px-4 py-2 text-sm font-medium text-tmc-orange
+                hover:bg-tmc-orange/10 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+            >
+              {isDeepVerifying ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Verificando {unverifiable_claims} claims...
+                </>
+              ) : (
+                <>
+                  <Search className="h-4 w-4" />
+                  Verificação Profunda ({unverifiable_claims} não verificáveis)
+                </>
+              )}
+            </button>
+          )}
+
+          {/* Deep verify success badge */}
+          {scanResult?._deep_verify && (
+            <div className="mb-3 flex items-center gap-2 rounded-lg bg-green-50 border border-green-200 px-3 py-2 text-xs text-green-700">
+              <CheckCircle2 className="h-3.5 w-3.5" />
+              {scanResult._deep_verify.claims_resolved} claim(s) resolvidas via verificação profunda
+              <span className="text-green-500 ml-auto">
+                {scanResult._deep_verify.sources_searched} fontes pesquisadas
+              </span>
+            </div>
+          )}
+
           {scanError ? (
             <div className="flex flex-col items-center gap-2 py-8">
               <AlertTriangle className="h-6 w-6 text-red-500" />
@@ -520,4 +557,6 @@ FactCheckModal.propTypes = {
     error: PropTypes.string,
   }),
   onClaimClick: PropTypes.func,
+  onDeepVerify: PropTypes.func,
+  isDeepVerifying: PropTypes.bool,
 };

@@ -253,12 +253,14 @@ const CriarPostPage = () => {
   const {
     scanResult: factCheckResult,
     isScanning: isFactChecking,
+    isDeepVerifying,
     error: factCheckError,
     highlightsVisible,
     showModal: showFactCheckModal,
     setShowModal: setShowFactCheckModal,
     contentChangedSinceScan,
     runScan: runFactCheckScan,
+    runDeepVerify,
     toggleHighlights,
     markContentChanged: markFactCheckContentChanged,
   } = useFactCheckScan();
@@ -1226,7 +1228,7 @@ const CriarPostPage = () => {
                 isScanning={isFactChecking}
                 scanResult={factCheckResult}
                 highlightsVisible={highlightsVisible}
-                contentLength={content?.length || 0}
+                contentLength={editorRef.current?.getText()?.length || 0}
                 contentChanged={contentChangedSinceScan}
                 onScan={() => {
                   const editor = editorRef.current?.editor;
@@ -1771,6 +1773,8 @@ const CriarPostPage = () => {
         isOpen={showFactCheckModal}
         onClose={() => setShowFactCheckModal(false)}
         scanResult={factCheckResult}
+        onDeepVerify={() => runDeepVerify(factCheckResult, title)}
+        isDeepVerifying={isDeepVerifying}
         onClaimClick={(claimIndex) => {
           setShowFactCheckModal(false);
           // Scroll to the highlighted claim in the editor

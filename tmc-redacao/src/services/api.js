@@ -848,6 +848,33 @@ export async function factCheckScan({
   }
 }
 
+/**
+ * Deep verify unverifiable claims from a fact-check scan.
+ * Batch-verifies all unverifiable claims using Exa search + Haiku reclassification.
+ */
+export async function factCheckDeepVerify({ claims, articleTitle = '' }) {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 30000);
+
+  try {
+    return await fetchApi('/fact-check-deep-verify', {
+      method: 'POST',
+      body: JSON.stringify({
+        claims,
+        article_title: articleTitle,
+      }),
+      signal: controller.signal,
+    });
+  } catch (error) {
+    if (error.name === 'AbortError') {
+      throw new Error('A verificação profunda excedeu o tempo limite. Tente novamente.');
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
 // ============================================
 // Utility Functions
 // ============================================
@@ -906,6 +933,7 @@ export default {
   updateUserArticle,
   deleteUserArticle,
   factCheckScan,
+  factCheckDeepVerify,
   isApiAvailable,
   getApiBaseUrl,
   registerAuthHandlers,
