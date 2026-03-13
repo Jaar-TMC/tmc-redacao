@@ -6,4 +6,8 @@ scratchpad/
 *.log
 tmpclaude-*
 __pycache__/
+*.pyc
+.coverage
 node_modules/
+tmc-redacao/dist/
+gcp-setup/
