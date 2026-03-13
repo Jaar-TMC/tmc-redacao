@@ -1,0 +1,276 @@
+- generic [ref=e53]:
+  - link "Pular para o conteúdo principal" [ref=e54] [cursor=pointer]:
+    - /url: "#main-content"
+  - link "Ir para busca" [ref=e55] [cursor=pointer]:
+    - /url: "#site-search"
+  - banner [ref=e56]:
+    - generic [ref=e57]:
+      - generic [ref=e58]:
+        - link "Página inicial TMC" [ref=e59] [cursor=pointer]:
+          - /url: /
+          - img "TMC - The Media Company" [ref=e60]
+        - navigation "Navegação principal" [ref=e106]:
+          - link "Redação" [ref=e107] [cursor=pointer]:
+            - /url: /
+          - link "Transcrição" [ref=e108] [cursor=pointer]:
+            - /url: /transcricao
+          - link "Minhas Matérias" [ref=e109] [cursor=pointer]:
+            - /url: /minhas-materias
+          - link "Configurações" [ref=e110] [cursor=pointer]:
+            - /url: /configuracoes
+      - generic [ref=e111]:
+        - button "Abrir menu de criação" [ref=e113]:
+          - img [ref=e114]
+          - generic [ref=e116]: Criar
+          - img [ref=e117]
+        - button "Menu de ajuda" [ref=e120]:
+          - img [ref=e121]
+        - button "Sair" [ref=e124]:
+          - img [ref=e125]
+        - region "Informações do usuário" [ref=e128]:
+          - generic [ref=e129]:
+            - paragraph [ref=e130]: Administrador
+            - paragraph [ref=e131]: admin
+          - generic [ref=e133]: A
+  - search "Busca no site" [ref=e134]:
+    - paragraph [ref=e135]: "Busca do site: Use a barra de filtros na página principal para buscar matérias. Use o menu de navegação para acessar diferentes seções do sistema."
+  - main [ref=e136]:
+    - generic [ref=e138]:
+      - complementary "Temas em alta" [ref=e140]:
+        - generic [ref=e141]:
+          - generic [ref=e142]:
+            - heading "TENDÊNCIAS" [level=2] [ref=e143]
+            - generic [ref=e144]:
+              - button "Pausar atualização automática de tendências" [ref=e145]:
+                - img [ref=e146]
+              - button "Atualizar tendências manualmente" [ref=e149]:
+                - img [ref=e150]
+          - paragraph [ref=e155]: Temas mais buscados e discutidos agora
+        - region "Lista de tendências (navegável com teclado)" [ref=e156]:
+          - region "Feed em Alta" [ref=e157]:
+            - generic [ref=e158]:
+              - generic [ref=e159]:
+                - img [ref=e161]
+                - heading "Feed em Alta" [level=3] [ref=e164]
+              - button "Informações sobre temas quentes" [ref=e166]:
+                - img [ref=e167]
+            - paragraph [ref=e169]: Feed dos concorrentes
+            - list [ref=e386]:
+              - button "Filtrar por Política. 184 matérias" [ref=e387] [cursor=pointer]:
+                - generic [ref=e388]:
+                  - img [ref=e389]
+                  - generic [ref=e391]: Política
+                - generic [ref=e392]:
+                  - generic [ref=e393]: "#1"
+                  - generic "184 matérias" [ref=e394]: 184 mat.
+              - button "Filtrar por Agência Cnn. 146 matérias" [ref=e395] [cursor=pointer]:
+                - generic [ref=e396]:
+                  - img [ref=e397]
+                  - generic [ref=e399]: Agência Cnn
+                - generic "146 matérias" [ref=e401]: 146 mat.
+              - button "Filtrar por Cnn Esportes. 145 matérias" [ref=e402] [cursor=pointer]:
+                - generic [ref=e403]:
+                  - img [ref=e404]
+                  - generic [ref=e406]: Cnn Esportes
+                - generic "145 matérias" [ref=e408]: 145 mat.
+              - button "Filtrar por Cnn Brasil Money. 121 matérias" [ref=e409] [cursor=pointer]:
+                - generic [ref=e411]: Cnn Brasil Money
+                - generic "121 matérias" [ref=e413]: 121 mat.
+              - button "Filtrar por Irã. 120 matérias" [ref=e414] [cursor=pointer]:
+                - generic [ref=e416]: Irã
+                - generic "120 matérias" [ref=e418]: 120 mat.
+              - button "Filtrar por Internacional. 117 matérias" [ref=e419] [cursor=pointer]:
+                - generic [ref=e421]: Internacional
+                - generic "117 matérias" [ref=e423]: 117 mat.
+              - button "Filtrar por Irã. 109 matérias" [ref=e424] [cursor=pointer]:
+                - generic [ref=e426]: Irã
+                - generic "109 matérias" [ref=e428]: 109 mat.
+              - 'button "Filtrar por #cnnpop. 108 matérias" [ref=e429] [cursor=pointer]':
+                - generic [ref=e431]: "#cnnpop"
+                - generic "108 matérias" [ref=e433]: 108 mat.
+              - button "Filtrar por Oriente Médio. 107 matérias" [ref=e434] [cursor=pointer]:
+                - generic [ref=e436]: Oriente Médio
+                - generic "107 matérias" [ref=e438]: 107 mat.
+              - button "Filtrar por Mercados. 100 matérias" [ref=e439] [cursor=pointer]:
+                - generic [ref=e441]: Mercados
+                - generic "100 matérias" [ref=e443]: 100 mat.
+              - button "Filtrar por Israel. 94 matérias" [ref=e444] [cursor=pointer]:
+                - generic [ref=e446]: Israel
+                - generic "94 matérias" [ref=e448]: 94 mat.
+              - button "Filtrar por Entretenimento. 91 matérias" [ref=e449] [cursor=pointer]:
+                - generic [ref=e451]: Entretenimento
+                - generic "91 matérias" [ref=e453]: 91 mat.
+              - button "Filtrar por Futebol. 75 matérias" [ref=e454] [cursor=pointer]:
+                - generic [ref=e456]: Futebol
+                - generic "75 matérias" [ref=e458]: 75 mat.
+              - button "Filtrar por Eua. 75 matérias" [ref=e459] [cursor=pointer]:
+                - generic [ref=e461]: Eua
+                - generic "75 matérias" [ref=e463]: 75 mat.
+              - button "Filtrar por Brasil. 70 matérias" [ref=e464] [cursor=pointer]:
+                - generic [ref=e466]: Brasil
+                - generic "70 matérias" [ref=e468]: 70 mat.
+              - button "Filtrar por Petróleo. 69 matérias" [ref=e469] [cursor=pointer]:
+                - generic [ref=e471]: Petróleo
+                - generic "69 matérias" [ref=e473]: 69 mat.
+              - button "Filtrar por Donald Trump. 67 matérias" [ref=e474] [cursor=pointer]:
+                - generic [ref=e476]: Donald Trump
+                - generic "67 matérias" [ref=e478]: 67 mat.
+              - button "Filtrar por Estados Unidos. 66 matérias" [ref=e479] [cursor=pointer]:
+                - generic [ref=e481]: Estados Unidos
+                - generic "66 matérias" [ref=e483]: 66 mat.
+              - button "Filtrar por Guerra. 64 matérias" [ref=e484] [cursor=pointer]:
+                - generic [ref=e486]: Guerra
+                - generic "64 matérias" [ref=e488]: 64 mat.
+              - button "Filtrar por São Paulo. 58 matérias" [ref=e489] [cursor=pointer]:
+                - generic [ref=e491]: São Paulo
+                - generic "58 matérias" [ref=e493]: 58 mat.
+        - status [ref=e197]: Atualizado agora
+      - generic [ref=e198]:
+        - search "Filtros de matérias" [ref=e200]:
+          - generic [ref=e201]:
+            - generic [ref=e202]:
+              - generic [ref=e203]: Buscar matérias
+              - img [ref=e204]
+              - searchbox "Buscar matérias por título ou conteúdo" [ref=e207]
+            - group "Filtros de categoria, tag e origem" [ref=e208]:
+              - 'button "Filtrar por tema: Todos os temas" [ref=e210]':
+                - img [ref=e211]
+                - img [ref=e214]
+              - 'button "Filtrar por tag: Todas as tags" [ref=e217]':
+                - img [ref=e218]
+                - img [ref=e221]
+              - 'button "Filtrar por origem: Todas as origens" [ref=e224]':
+                - img [ref=e225]
+                - img [ref=e229]
+          - generic [ref=e231]:
+            - generic [ref=e232]:
+              - generic [ref=e233]: "Período:"
+              - radiogroup "Filtrar por frescor" [ref=e234]:
+                - radio "Todas as matérias, 0 matérias" [checked] [ref=e235] [cursor=pointer]:
+                  - generic [ref=e236]: Todas
+                - radio "Última hora, 0 matérias" [ref=e237] [cursor=pointer]:
+                  - img [ref=e238]
+                  - generic [ref=e240]: Última hora
+                - radio "Últimas 3 horas, 0 matérias" [ref=e241] [cursor=pointer]:
+                  - img [ref=e242]
+                  - generic [ref=e244]: Últimas 3h
+                - radio "Últimas 8 horas, 0 matérias" [ref=e245] [cursor=pointer]:
+                  - img [ref=e246]
+                  - generic [ref=e252]: Últimas 8h
+            - generic [ref=e253]:
+              - generic [ref=e254]: "Score:"
+              - radiogroup "Filtrar por score editorial" [ref=e255]:
+                - radio "Todos os scores" [checked] [ref=e256] [cursor=pointer]:
+                  - generic [ref=e257]: Todos
+                - radio "Score A - Destaque" [ref=e258] [cursor=pointer]:
+                  - generic [ref=e260]: A
+                  - generic [ref=e261]: Destaque
+                - radio "Score B - Relevante" [ref=e262] [cursor=pointer]:
+                  - generic [ref=e264]: B
+                  - generic [ref=e265]: Relevante
+                - radio "Score C - Baixo" [ref=e266] [cursor=pointer]:
+                  - generic [ref=e268]: C
+                  - generic [ref=e269]: Baixo
+              - button "Entenda o score editorial" [ref=e271]:
+                - img [ref=e272]
+            - generic [ref=e275]:
+              - generic [ref=e276]: "Ordenar:"
+              - radiogroup "Ordenar matérias" [ref=e277]:
+                - radio "Ordenar por mais recentes" [checked] [ref=e278] [cursor=pointer]:
+                  - img [ref=e279]
+                  - generic [ref=e282]: Recentes
+                - radio "Ordenar por maior score" [ref=e283] [cursor=pointer]:
+                  - img [ref=e284]
+                  - generic [ref=e286]: Score
+        - generic [ref=e287]:
+          - generic [ref=e288]:
+            - status "Carregando conteúdo" [ref=e289]:
+              - generic [ref=e290]: Carregando...
+            - status "Carregando conteúdo" [ref=e291]:
+              - generic [ref=e292]: Carregando...
+            - status "Carregando conteúdo" [ref=e293]:
+              - generic [ref=e294]: Carregando...
+            - status "Carregando conteúdo" [ref=e295]:
+              - generic [ref=e296]: Carregando...
+            - generic [ref=e297]:
+              - status "Carregando conteúdo" [ref=e298]:
+                - generic [ref=e299]: Carregando...
+              - status "Carregando conteúdo" [ref=e300]:
+                - generic [ref=e301]: Carregando...
+          - generic [ref=e302]:
+            - status "Carregando conteúdo" [ref=e303]:
+              - generic [ref=e304]: Carregando...
+            - status "Carregando conteúdo" [ref=e305]:
+              - generic [ref=e306]: Carregando...
+            - status "Carregando conteúdo" [ref=e307]:
+              - generic [ref=e308]: Carregando...
+            - status "Carregando conteúdo" [ref=e309]:
+              - generic [ref=e310]: Carregando...
+            - generic [ref=e311]:
+              - status "Carregando conteúdo" [ref=e312]:
+                - generic [ref=e313]: Carregando...
+              - status "Carregando conteúdo" [ref=e314]:
+                - generic [ref=e315]: Carregando...
+          - generic [ref=e316]:
+            - status "Carregando conteúdo" [ref=e317]:
+              - generic [ref=e318]: Carregando...
+            - status "Carregando conteúdo" [ref=e319]:
+              - generic [ref=e320]: Carregando...
+            - status "Carregando conteúdo" [ref=e321]:
+              - generic [ref=e322]: Carregando...
+            - status "Carregando conteúdo" [ref=e323]:
+              - generic [ref=e324]: Carregando...
+            - generic [ref=e325]:
+              - status "Carregando conteúdo" [ref=e326]:
+                - generic [ref=e327]: Carregando...
+              - status "Carregando conteúdo" [ref=e328]:
+                - generic [ref=e329]: Carregando...
+          - generic [ref=e330]:
+            - status "Carregando conteúdo" [ref=e331]:
+              - generic [ref=e332]: Carregando...
+            - status "Carregando conteúdo" [ref=e333]:
+              - generic [ref=e334]: Carregando...
+            - status "Carregando conteúdo" [ref=e335]:
+              - generic [ref=e336]: Carregando...
+            - status "Carregando conteúdo" [ref=e337]:
+              - generic [ref=e338]: Carregando...
+            - generic [ref=e339]:
+              - status "Carregando conteúdo" [ref=e340]:
+                - generic [ref=e341]: Carregando...
+              - status "Carregando conteúdo" [ref=e342]:
+                - generic [ref=e343]: Carregando...
+          - generic [ref=e344]:
+            - status "Carregando conteúdo" [ref=e345]:
+              - generic [ref=e346]: Carregando...
+            - status "Carregando conteúdo" [ref=e347]:
+              - generic [ref=e348]: Carregando...
+            - status "Carregando conteúdo" [ref=e349]:
+              - generic [ref=e350]: Carregando...
+            - status "Carregando conteúdo" [ref=e351]:
+              - generic [ref=e352]: Carregando...
+            - generic [ref=e353]:
+              - status "Carregando conteúdo" [ref=e354]:
+                - generic [ref=e355]: Carregando...
+              - status "Carregando conteúdo" [ref=e356]:
+                - generic [ref=e357]: Carregando...
+          - generic [ref=e358]:
+            - status "Carregando conteúdo" [ref=e359]:
+              - generic [ref=e360]: Carregando...
+            - status "Carregando conteúdo" [ref=e361]:
+              - generic [ref=e362]: Carregando...
+            - status "Carregando conteúdo" [ref=e363]:
+              - generic [ref=e364]: Carregando...
+            - status "Carregando conteúdo" [ref=e365]:
+              - generic [ref=e366]: Carregando...
+            - generic [ref=e367]:
+              - status "Carregando conteúdo" [ref=e368]:
+                - generic [ref=e369]: Carregando...
+              - status "Carregando conteúdo" [ref=e370]:
+                - generic [ref=e371]: Carregando...
+      - complementary "Painel de ação para matérias selecionadas" [ref=e373]:
+        - heading "Painel de Ação" [level=2] [ref=e375]
+        - generic [ref=e377]:
+          - img [ref=e379]
+          - heading "Nenhuma matéria selecionada" [level=3] [ref=e382]
+          - paragraph [ref=e383]: Selecione uma ou mais matérias para gerar conteúdo original baseado nelas
+        - status [ref=e385]: 156 matérias coletadas hoje

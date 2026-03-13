@@ -589,3 +589,124 @@ nav button {
 .rich-text-editor .ProseMirror {
   min-height: 300px;
 }
+
+/* ============================================
+ * Fact-Check Highlight Decorations
+ * Applied via ProseMirror Decorations (non-destructive)
+ * ============================================
+ */
+
+/* Base highlight style */
+.fc-highlight {
+  position: relative;
+  border-radius: 2px;
+  padding: 1px 0;
+  cursor: pointer;
+  transition: background-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+/* Fabricated — red (critical) */
+.fc-fabricated {
+  background-color: rgba(239, 68, 68, 0.15);
+  border-bottom: 2px solid #EF4444;
+}
+
+.fc-fabricated:hover {
+  background-color: rgba(239, 68, 68, 0.25);
+  box-shadow: 0 0 0 2px rgba(239, 68, 68, 0.1);
+}
+
+/* Unverifiable — amber (warning) */
+.fc-unverifiable {
+  background-color: rgba(245, 158, 11, 0.12);
+  border-bottom: 2px solid #F59E0B;
+}
+
+.fc-unverifiable:hover {
+  background-color: rgba(245, 158, 11, 0.22);
+  box-shadow: 0 0 0 2px rgba(245, 158, 11, 0.1);
+}
+
+/* Opinion — blue (informational) */
+.fc-opinion {
+  background-color: rgba(59, 130, 246, 0.08);
+  border-bottom: 2px dashed #3B82F6;
+}
+
+.fc-opinion:hover {
+  background-color: rgba(59, 130, 246, 0.15);
+}
+
+/* Fact-Check Tooltip (shown on hover via JS) */
+.fc-tooltip {
+  position: fixed;
+  z-index: 9999;
+  max-width: 320px;
+  padding: 10px 14px;
+  background: #1a1a1a;
+  color: #f5f5f5;
+  border-radius: 8px;
+  font-size: 12px;
+  line-height: 1.5;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
+  pointer-events: none;
+  opacity: 0;
+  transform: translateY(4px);
+  transition: opacity 0.15s ease, transform 0.15s ease;
+}
+
+.fc-tooltip.fc-tooltip--visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.fc-tooltip__verdict {
+  display: inline-block;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 2px 6px;
+  border-radius: 4px;
+  margin-bottom: 6px;
+}
+
+.fc-tooltip__verdict--fabricated {
+  background: #EF4444;
+  color: white;
+}
+
+.fc-tooltip__verdict--unverifiable {
+  background: #F59E0B;
+  color: white;
+}
+
+.fc-tooltip__verdict--opinion {
+  background: #3B82F6;
+  color: white;
+}
+
+.fc-tooltip__evidence {
+  color: #a3a3a3;
+  margin-top: 4px;
+  font-style: italic;
+}
+
+/* Scan button pulse animation */
+@keyframes fc-scan-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(232, 119, 34, 0.4); }
+  50% { box-shadow: 0 0 0 6px rgba(232, 119, 34, 0); }
+}
+
+.fc-scan-pulse {
+  animation: fc-scan-pulse 2s ease-in-out infinite;
+}
+
+/* ASI gauge animation */
+@keyframes fc-gauge-fill {
+  from { stroke-dashoffset: 339.292; }
+}
+
+.fc-gauge-animate {
+  animation: fc-gauge-fill 1s ease-out forwards;
+}
