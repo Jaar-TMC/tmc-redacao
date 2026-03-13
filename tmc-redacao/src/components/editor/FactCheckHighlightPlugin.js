@@ -80,35 +80,28 @@ function buildTextIndex(doc) {
 }
 
 /**
- * Normalize whitespace for more reliable substring matching.
- */
-function normalizeText(str) {
-  return str.replace(/\s+/g, ' ').trim();
-}
-
-/**
  * Find the ProseMirror from/to positions for a given search string within
  * the document, using the pre-built text index.
+ *
+ * Uses case-insensitive matching on raw text (no whitespace normalization)
+ * to ensure character offsets map correctly back to ProseMirror positions.
  *
  * Returns { from, to } or null if not found.
  */
 function findTextInDoc(segments, searchStr) {
   if (!searchStr || segments.length === 0) return null;
 
-  // Build the concatenated plaintext
+  // Build the concatenated plaintext (raw, no normalization)
   const fullText = segments.reduce((acc, seg) => {
-    // Pad with spaces to account for block gaps
     const gap = seg.offset - acc.length;
     return acc + ' '.repeat(Math.max(0, gap)) + seg.text;
   }, '');
 
-  const normalizedFull = normalizeText(fullText).toLowerCase();
-  const normalizedSearch = normalizeText(searchStr).toLowerCase();
-
-  const charIndex = normalizedFull.indexOf(normalizedSearch);
+  // Case-insensitive search on raw text
+  const charIndex = fullText.toLowerCase().indexOf(searchStr.toLowerCase());
   if (charIndex === -1) return null;
 
-  const charEnd = charIndex + normalizedSearch.length;
+  const charEnd = charIndex + searchStr.length;
 
   // Map character positions back to ProseMirror positions
   let pmFrom = null;
@@ -141,6 +134,8 @@ function findTextInDoc(segments, searchStr) {
  * @param {import('@tiptap/core').Editor} editor - TipTap editor instance
  * @param {Array<{text: string, verdict: string, severity?: string, category?: string, evidence?: string, position_hint?: string}>} claims
  */
+const VALID_VERDICTS = new Set(['grounded', 'fabricated', 'unverifiable', 'opinion']);
+
 export function applyFactCheckDecorations(editor, claims) {
   if (!editor || !claims || claims.length === 0) return;
 
@@ -153,6 +148,9 @@ export function applyFactCheckDecorations(editor, claims) {
     // Skip grounded claims — they are safe
     if (claim.verdict === 'grounded') return;
 
+    // Validate verdict against whitelist for safe CSS class construction
+    const safeVerdict = VALID_VERDICTS.has(claim.verdict) ? claim.verdict : 'unverifiable';
+
     // Try position_hint first, fall back to claim text
     const searchText = claim.position_hint || claim.text;
     const result = findTextInDoc(segments, searchText);
@@ -163,7 +161,7 @@ export function applyFactCheckDecorations(editor, claims) {
       if (fallbackResult) {
         decorations.push(
           Decoration.inline(fallbackResult.from, fallbackResult.to, {
-            class: `fc-highlight fc-${claim.verdict}`,
+            class: `fc-highlight fc-${safeVerdict}`,
             'data-claim-index': String(index),
             'data-verdict': claim.verdict,
             'data-severity': claim.severity || 'medium',
@@ -176,7 +174,7 @@ export function applyFactCheckDecorations(editor, claims) {
     if (result) {
       decorations.push(
         Decoration.inline(result.from, result.to, {
-          class: `fc-highlight fc-${claim.verdict}`,
+          class: `fc-highlight fc-${safeVerdict}`,
           'data-claim-index': String(index),
           'data-verdict': claim.verdict,
           'data-severity': claim.severity || 'medium',

@@ -95,7 +95,8 @@ const TextoBasePage = () => {
         (data.exclusives && data.exclusives.length > 0) ||
         (data.quotes && data.quotes.length > 0)
       );
-      setCanProceed(hasSelection);
+      // Block proceeding while AI topic extraction is still running
+      setCanProceed(hasSelection && !data.isExtracting);
     }
   }, [setVariantSelections]);
 

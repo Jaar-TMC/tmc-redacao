@@ -993,13 +993,25 @@ class DatabaseService:
                     -- Exclude source names (media outlets)
                     AND tag NOT IN ('g1', 'globo', 'folha', 'uol', 'estadao', 'cnn', 'bbc',
                                     'r7', 'terra', 'ig', 'globoesporte', 'tecmundo', 'infomoney',
-                                    'noticias', 'noticia', 'news')
+                                    'noticias', 'noticia', 'news',
+                                    -- CNN sub-brands and sections
+                                    'cnn esportes', 'cnn brasil', 'cnn brasil money', 'cnn money',
+                                    'agencia cnn', 'agência cnn', 'cnn pop', '#cnnpop', 'cnnpop',
+                                    'cnn viagem', 'cnn soft', 'cnn series',
+                                    -- Other media section names
+                                    'folha de s.paulo', 'folha de são paulo', 'o globo',
+                                    'valor economico', 'valor econômico', 'poder360',
+                                    'metrópoles', 'metropoles', 'carta capital', 'cartacapital')
                     -- Exclude domain-like tags (.com, .br, .net, etc)
                     AND tag NOT LIKE '%%.com'
                     AND tag NOT LIKE '%%.com.br'
                     AND tag NOT LIKE '%%.br'
                     AND tag NOT LIKE '%%.net'
                     AND tag NOT LIKE '%%.org'
+                    -- Exclude CNN-prefixed section tags
+                    AND tag NOT LIKE 'cnn %%'
+                    -- Exclude hashtag-style tags
+                    AND tag NOT LIKE '#cnn%%'
                 GROUP BY tag
             )
             SELECT TOP %s tag, article_count
@@ -1050,12 +1062,20 @@ class DatabaseService:
                     AND LEN(tag) > 2
                     AND tag NOT IN ('g1', 'globo', 'folha', 'uol', 'estadao', 'cnn', 'bbc',
                                     'r7', 'terra', 'ig', 'globoesporte', 'tecmundo', 'infomoney',
-                                    'noticias', 'noticia', 'news')
+                                    'noticias', 'noticia', 'news',
+                                    'cnn esportes', 'cnn brasil', 'cnn brasil money', 'cnn money',
+                                    'agencia cnn', 'agência cnn', 'cnn pop', '#cnnpop', 'cnnpop',
+                                    'cnn viagem', 'cnn soft', 'cnn series',
+                                    'folha de s.paulo', 'folha de são paulo', 'o globo',
+                                    'valor economico', 'valor econômico', 'poder360',
+                                    'metrópoles', 'metropoles', 'carta capital', 'cartacapital')
                     AND tag NOT LIKE '%%.com'
                     AND tag NOT LIKE '%%.com.br'
                     AND tag NOT LIKE '%%.br'
                     AND tag NOT LIKE '%%.net'
                     AND tag NOT LIKE '%%.org'
+                    AND tag NOT LIKE 'cnn %%'
+                    AND tag NOT LIKE '#cnn%%'
                     {search_filter}
                 GROUP BY tag
             )
@@ -1179,12 +1199,20 @@ class DatabaseService:
                     AND LEN(tag) > 2
                     AND tag NOT IN ('g1', 'globo', 'folha', 'uol', 'estadao', 'cnn', 'bbc',
                                     'r7', 'terra', 'ig', 'globoesporte', 'tecmundo', 'infomoney',
-                                    'noticias', 'noticia', 'news')
+                                    'noticias', 'noticia', 'news',
+                                    'cnn esportes', 'cnn brasil', 'cnn brasil money', 'cnn money',
+                                    'agencia cnn', 'agência cnn', 'cnn pop', '#cnnpop', 'cnnpop',
+                                    'cnn viagem', 'cnn soft', 'cnn series',
+                                    'folha de s.paulo', 'folha de são paulo', 'o globo',
+                                    'valor economico', 'valor econômico', 'poder360',
+                                    'metrópoles', 'metropoles', 'carta capital', 'cartacapital')
                     AND tag NOT LIKE '%%.com'
                     AND tag NOT LIKE '%%.com.br'
                     AND tag NOT LIKE '%%.br'
                     AND tag NOT LIKE '%%.net'
                     AND tag NOT LIKE '%%.org'
+                    AND tag NOT LIKE 'cnn %%'
+                    AND tag NOT LIKE '#cnn%%'
                 GROUP BY tag
             )
             SELECT TOP %s tag, article_count

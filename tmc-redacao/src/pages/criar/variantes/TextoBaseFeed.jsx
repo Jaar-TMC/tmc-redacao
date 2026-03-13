@@ -305,15 +305,18 @@ const TextoBaseFeed = ({
         });
       });
 
+      const isExtracting = materias.some(m => m.isLoadingTopics);
+
       const data = {
         selectedTopics: Array.from(selectedTopics),
         editedTexts,
         topicTexts, // Include the actual texts
-        wordCount: stats.words
+        wordCount: stats.words,
+        isExtracting, // Signal to parent that AI extraction is still running
       };
 
       // Cache materias once AI extraction is complete (for instant restore on return)
-      if (materias.length > 0 && materias.every(m => !m.isLoadingTopics)) {
+      if (materias.length > 0 && !isExtracting) {
         data.cachedMaterias = materias;
       }
 

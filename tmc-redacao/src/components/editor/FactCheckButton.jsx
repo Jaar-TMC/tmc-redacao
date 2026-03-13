@@ -37,9 +37,10 @@ export default function FactCheckButton({
         type="button"
         onClick={onScan}
         disabled={isButtonDisabled}
+        aria-label="Verificar Segurança"
         className={`flex items-center gap-2 px-3 py-1.5 bg-off-white text-dark-gray hover:bg-light-gray rounded-lg text-sm font-medium transition-colors flex-shrink-0 ${
-          isButtonDisabled ? 'opacity-70 cursor-wait' : ''
-        }`}
+          isScanning ? 'opacity-70 cursor-wait' : ''
+        } disabled:opacity-50 disabled:cursor-not-allowed`}
       >
         {isScanning ? (
           <>

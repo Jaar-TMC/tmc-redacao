@@ -52,19 +52,26 @@ const FactCheckTooltip = ({ claims, containerRef }) => {
     }, 100);
   }, []);
 
+  // Hide tooltip on scroll to prevent detached positioning
+  const hideOnScroll = useCallback(() => {
+    setTooltip(null);
+  }, []);
+
   useEffect(() => {
     const container = containerRef?.current;
     if (!container) return;
 
     container.addEventListener('mouseover', showTooltip);
     container.addEventListener('mouseout', hideTooltip);
+    container.addEventListener('scroll', hideOnScroll);
 
     return () => {
       container.removeEventListener('mouseover', showTooltip);
       container.removeEventListener('mouseout', hideTooltip);
+      container.removeEventListener('scroll', hideOnScroll);
       if (hideTimeoutRef.current) clearTimeout(hideTimeoutRef.current);
     };
-  }, [containerRef, showTooltip, hideTooltip]);
+  }, [containerRef, showTooltip, hideTooltip, hideOnScroll]);
 
   if (!tooltip) return null;
 
