@@ -525,14 +525,15 @@ class FactCheckService:
             logger.info("Enrichment disabled via config")
             return result
 
-        if not EXA_API_KEY:
+        if not _get_exa_api_key():
             logger.warning("EXA_API_KEY not set, skipping enrichment")
             return result
 
         # Aggressive mode for short sources - need more external material
         aggressive = source_len < 500
         num_queries = 3 if aggressive else 2
-        num_results = min(EXA_MAX_RESULTS + 3, 10) if aggressive else EXA_MAX_RESULTS
+        exa_max = _get_exa_max_results()
+        num_results = min(exa_max + 3, 10) if aggressive else exa_max
         max_text_chars = 4000 if aggressive else 2000
         max_facts = 15 if aggressive else 8
         context_limit = 6000 if aggressive else 3000
@@ -670,7 +671,7 @@ class FactCheckService:
     async def _search_exa(
         self,
         query: str,
-        num_results: int = EXA_MAX_RESULTS,
+        num_results: int = None,
         max_text: int = 2000
     ) -> list:
         """
@@ -686,6 +687,8 @@ class FactCheckService:
 
         Returns list of {title, url, text, publishedDate} dicts.
         """
+        if num_results is None:
+            num_results = _get_exa_max_results()
         # Circuit breaker check
         if self._exa_circuit_open:
             if time.time() < self._exa_circuit_open_until:
@@ -698,7 +701,7 @@ class FactCheckService:
 
         headers = {
             "Content-Type": "application/json",
-            "x-api-key": EXA_API_KEY,
+            "x-api-key": _get_exa_api_key(),
         }
 
         payload = {
@@ -757,7 +760,7 @@ class FactCheckService:
     def _get_date_range_start(self) -> str:
         """Get ISO date string for search range start."""
         from datetime import datetime, timedelta
-        start = datetime.utcnow() - timedelta(days=EXA_SEARCH_DAYS)
+        start = datetime.utcnow() - timedelta(days=_get_exa_search_days())
         return start.strftime("%Y-%m-%dT%H:%M:%S.000Z")
 
     async def verify_claim_with_exa(
@@ -1147,7 +1150,7 @@ Regras:
         Returns:
             VerificationMetadata with confidence score and risk assessment
         """
-        if not VERIFICATION_ENABLED:
+        if not _get_verification_enabled():
             return VerificationMetadata(
                 is_verified=False,
                 warnings=["Verification disabled via config"],
@@ -2147,7 +2150,7 @@ IMPORTANTE - REGRAS DE CLASSIFICACAO:
         Returns:
             Tuple of (updated_claims, cove_results, reclassified_count)
         """
-        if not COVE_ENABLED:
+        if not _get_cove_enabled():
             return claims, [], 0
 
         fabricated = [
@@ -2595,4 +2598,4 @@ def _cleanup_fact_check_service():
 
 def is_fact_check_enabled() -> bool:
     """Check if fact checking is enabled."""
-    return FACT_CHECK_ENABLED
+    return _get_fact_check_enabled()

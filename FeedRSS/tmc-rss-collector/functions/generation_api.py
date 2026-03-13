@@ -50,18 +50,29 @@ _INJECTION_PATTERNS = [
 # Default image for Schema.org (1B)
 _DEFAULT_IMAGE_URL = "https://tmc.com.br/og-default.jpg"
 
-# Phase 1.1: Hard minimum source thresholds
-MIN_SOURCE_CHARS = int(os.environ.get("MIN_SOURCE_CHARS", "300"))
-NOTA_ONLY_THRESHOLD = int(os.environ.get("NOTA_ONLY_THRESHOLD", "500"))
-SHORT_SOURCE_THRESHOLD = int(os.environ.get("SHORT_SOURCE_THRESHOLD", "800"))
+# Lazy accessors — read from centralized get_config() where attributes exist.
+# Values not in config.py remain as direct os.environ reads.
+def _get_min_source_chars():
+    from services.config import get_config
+    return get_config().min_source_chars
 
-# Phase 1.2: Production safety mode
-PRODUCTION_SAFETY_MODE = os.environ.get("PRODUCTION_SAFETY_MODE", "true").lower() == "true"
+def _get_nota_only_threshold():
+    from services.config import get_config
+    return get_config().nota_only_threshold
 
-# Phase 2.3: Temporal decontamination
-DECONTAMINATION_ENABLED = os.environ.get("DECONTAMINATION_ENABLED", "true").lower() == "true"
+def _get_short_source_threshold():
+    from services.config import get_config
+    return get_config().short_source_threshold
 
-# Quality Loop Configuration
+def _get_production_safety_mode():
+    from services.config import get_config
+    return get_config().production_safety_mode
+
+def _get_decontamination_enabled():
+    from services.config import get_config
+    return get_config().decontamination_enabled
+
+# Quality Loop Configuration (not in config.py — kept as os.environ reads)
 QUALITY_LOOP_ENABLED = os.environ.get("QUALITY_LOOP_ENABLED", "true").lower() == "true"
 QUALITY_LOOP_MAX_ATTEMPTS = int(os.environ.get("QUALITY_LOOP_MAX_ATTEMPTS", "3"))
 QUALITY_LOOP_MAX_CLAIM_SEARCHES = int(os.environ.get("QUALITY_LOOP_MAX_CLAIM_SEARCHES", "5"))
@@ -251,6 +262,9 @@ def evaluate_safety_gates(
     Returns:
         SafetyDecision with publish_blocked, block_reasons, human_review_required, review_reasons
     """
+    # Bind config values to local vars (frozen singleton, no repeated lookups)
+    PRODUCTION_SAFETY_MODE = _get_production_safety_mode()
+
     decision = SafetyDecision()
 
     risk_level = verification_data.get("risk_level", "high")
@@ -417,6 +431,9 @@ def evaluate_quality_criteria(
     Returns:
         dict with all_passed (bool), failures (list of criterion dicts)
     """
+    # Bind config values to local vars
+    PRODUCTION_SAFETY_MODE = _get_production_safety_mode()
+
     failures = []
 
     # 1. Fabrication check
@@ -587,6 +604,13 @@ async def generate_article_handler(req: func.HttpRequest) -> func.HttpResponse:
     correlation_id = str(uuid.uuid4())[:8]
     logger.info(f"[{correlation_id}] Generate article request received")
     pipeline_start = time.time()
+
+    # Bind config values to local vars (frozen singleton, avoids repeated lookups)
+    MIN_SOURCE_CHARS = _get_min_source_chars()
+    NOTA_ONLY_THRESHOLD = _get_nota_only_threshold()
+    SHORT_SOURCE_THRESHOLD = _get_short_source_threshold()
+    PRODUCTION_SAFETY_MODE = _get_production_safety_mode()
+    DECONTAMINATION_ENABLED = _get_decontamination_enabled()
 
     # Phase 4.6: Metrics instrumentation
     try:

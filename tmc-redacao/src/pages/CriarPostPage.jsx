@@ -1222,6 +1222,18 @@ const CriarPostPage = () => {
                 </button>
               </Tooltip>
 
+              <Tooltip content="Ver texto base e matérias originais" position="bottom">
+                <button
+                  onClick={() => setShowBaseTextModal(true)}
+                  disabled={!hasBaseText}
+                  className="hidden md:flex items-center gap-2 px-3 py-1.5 bg-off-white text-dark-gray hover:bg-light-gray rounded-lg text-sm font-medium transition-colors flex-shrink-0 disabled:opacity-50 disabled:cursor-not-allowed"
+                  aria-label="Ver texto base"
+                >
+                  <FileText size={16} />
+                  <span>Texto Base</span>
+                </button>
+              </Tooltip>
+
               {/* Divider before fact-check */}
               <div className="w-px h-6 bg-light-gray mx-1" />
 
@@ -1793,6 +1805,16 @@ const CriarPostPage = () => {
             }, 2000);
           }
         }}
+      />
+
+      {/* Base Text Modal */}
+      <BaseTextModal
+        isOpen={showBaseTextModal}
+        onClose={() => setShowBaseTextModal(false)}
+        blocos={textoBase?.blocos || []}
+        textoCompleto={textoBase?.textoCompleto || ''}
+        fonteData={fonte?.dados}
+        fonteTipo={fonte?.tipo}
       />
     </div>
   );

@@ -138,6 +138,8 @@ def _get_anthropic_api_key():
 
 def _get_generation_model():
     return _get_config().generation_model
+
+
 MAX_TOKENS = 8192
 MIN_ARTICLE_LENGTH = 2000  # TMC standard for columnists
 
