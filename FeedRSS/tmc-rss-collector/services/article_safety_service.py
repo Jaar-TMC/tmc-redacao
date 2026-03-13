@@ -1030,10 +1030,6 @@ class ArticleSafetyService:
                 if r.get("index") == claim["index"]:
                     llm_entry = r
                     break
-            # Fallback: match by position
-            if not llm_entry and i < len(llm_results):
-                llm_entry = llm_results[i]
-
             verdict = llm_entry.get("verdict", "unverifiable")
             # Only allow grounded or unverifiable from deep verify
             if verdict not in ("grounded", "unverifiable"):

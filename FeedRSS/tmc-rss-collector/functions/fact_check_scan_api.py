@@ -197,9 +197,11 @@ async def deep_verify_handler(req: func.HttpRequest) -> func.HttpResponse:
                 "Erro de validacao: 'claims' deve ser uma lista nao vazia de afirmacoes",
                 400,
             )
+        if len(claims) > 50:
+            claims = claims[:50]
 
-        article_title = body.get("article_title", "")
-        language = body.get("language", "pt")
+        article_title = str(body.get("article_title", ""))[:500]
+        language = str(body.get("language", "pt"))[:5]
 
         # Check feature flag
         if os.environ.get("FACT_CHECK_SCAN_ENABLED", "true").lower() != "true":
