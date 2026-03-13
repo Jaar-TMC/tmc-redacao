@@ -5,6 +5,7 @@ import Link from '@tiptap/extension-link';
 import Image from '@tiptap/extension-image';
 import Underline from '@tiptap/extension-underline';
 import Placeholder from '@tiptap/extension-placeholder';
+import { FactCheckHighlightPlugin } from './FactCheckHighlightPlugin';
 import PropTypes from 'prop-types';
 
 /**
@@ -60,6 +61,7 @@ const RichTextEditor = forwardRef(({
         placeholder,
         emptyEditorClass: 'is-editor-empty',
       }),
+      FactCheckHighlightPlugin,
     ],
     content: content || '',
     editable,

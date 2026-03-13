@@ -30,11 +30,11 @@ import {
 } from 'lucide-react';
 import { markdownToHtml } from '../utils/markdownRenderer';
 import Tooltip from '../components/ui/Tooltip';
-import { SEOAnalyzerPanel, calculateSEOScore, RichTextEditor, EditorToolbar } from '../components/editor';
+import { SEOAnalyzerPanel, calculateSEOScore, RichTextEditor, EditorToolbar, FactCheckButton, FactCheckModal, FactCheckTooltip } from '../components/editor';
 import VerificationBanner from '../components/ui/VerificationBanner';
 import ResumoEditor from '../components/editor/ResumoEditor';
 import { useCriar } from '../context';
-import { useVersionHistory, useChatEditor } from '../hooks';
+import { useVersionHistory, useChatEditor, useFactCheckScan } from '../hooks';
 import { createUserArticle, updateUserArticle, getUserArticle, generateTags, editArticle } from '../services/api';
 import { generateSEOOptimizationPrompt } from '../utils/seoPromptGenerator';
 
@@ -248,6 +248,21 @@ const CriarPostPage = () => {
 
   // Estado para controlar a aba ativa do painel lateral (assistente ou seo)
   const [activeSidebarTab, setActiveSidebarTab] = useState('assistente');
+
+  // Fact-check scan
+  const {
+    scanResult: factCheckResult,
+    isScanning: isFactChecking,
+    error: factCheckError,
+    highlightsVisible,
+    showModal: showFactCheckModal,
+    setShowModal: setShowFactCheckModal,
+    contentChangedSinceScan,
+    runScan: runFactCheckScan,
+    toggleHighlights,
+    markContentChanged: markFactCheckContentChanged,
+  } = useFactCheckScan();
+  const editorContainerRef = useRef(null);
 
   // Mensagem inicial baseada no contexto do tema
   const getInitialMessages = () => {
@@ -1202,11 +1217,42 @@ const CriarPostPage = () => {
                   )}
                 </button>
               </Tooltip>
+
+              {/* Divider before fact-check */}
+              <div className="w-px h-6 bg-light-gray mx-1" />
+
+              {/* Fact-Check Scan Button + ASI Badge + Highlights Toggle */}
+              <FactCheckButton
+                isScanning={isFactChecking}
+                scanResult={factCheckResult}
+                highlightsVisible={highlightsVisible}
+                contentLength={content?.length || 0}
+                contentChanged={contentChangedSinceScan}
+                onScan={() => {
+                  const editor = editorRef.current?.editor;
+                  const plainText = editorRef.current?.getText() || '';
+                  runFactCheckScan(editor, {
+                    articleText: plainText,
+                    articleTitle: title,
+                    sourceUrls: sourceUrls,
+                    userArticleId: articleId || '',
+                  });
+                }}
+                onOpenModal={() => setShowFactCheckModal(true)}
+                onToggleHighlights={() => toggleHighlights(editorRef.current?.editor)}
+              />
             </div>
           </div>
 
           {/* Editor */}
-          <div className="flex-1 p-4 md:p-8 overflow-y-auto bg-white">
+          <div ref={editorContainerRef} className="flex-1 p-4 md:p-8 overflow-y-auto bg-white">
+            {/* Fact-check error banner */}
+            {factCheckError && (
+              <div className="mb-4 flex items-center gap-2 px-3 py-2 rounded-lg border bg-red-50 border-red-200 text-red-700 text-sm">
+                <AlertTriangle size={14} />
+                <span>{factCheckError}</span>
+              </div>
+            )}
             {/* Resumo da Matéria - bullet points */}
             {(resumoBullets.length > 0 || resumoFromResult.length > 0) && (
               <div className="mb-6">
@@ -1222,11 +1268,21 @@ const CriarPostPage = () => {
             <RichTextEditor
               ref={editorRef}
               content={content}
-              onChange={setContent}
+              onChange={(html) => {
+                setContent(html);
+                markFactCheckContentChanged();
+              }}
               placeholder="Comece a escrever seu texto aqui ou use o assistente de IA para obter sugestões..."
               spellCheck={spellCheck}
               className="text-dark-gray text-base leading-relaxed"
             />
+            {/* Fact-check hover tooltip */}
+            {factCheckResult?.claims?.length > 0 && highlightsVisible && (
+              <FactCheckTooltip
+                claims={factCheckResult.claims}
+                containerRef={editorContainerRef}
+              />
+            )}
           </div>
 
           {/* Seção de Tópicos/Tags */}
@@ -1709,6 +1765,29 @@ const CriarPostPage = () => {
       {openDropdown && (
         <div className="fixed inset-0 z-10" onClick={() => setOpenDropdown(null)} />
       )}
+
+      {/* Fact-Check Modal */}
+      <FactCheckModal
+        isOpen={showFactCheckModal}
+        onClose={() => setShowFactCheckModal(false)}
+        scanResult={factCheckResult}
+        onClaimClick={(claimIndex) => {
+          setShowFactCheckModal(false);
+          // Scroll to the highlighted claim in the editor
+          const highlight = editorContainerRef.current?.querySelector(
+            `[data-claim-index="${claimIndex}"]`
+          );
+          if (highlight) {
+            highlight.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            // Flash effect
+            highlight.style.transition = 'box-shadow 0.3s ease';
+            highlight.style.boxShadow = '0 0 0 4px rgba(232, 119, 34, 0.4)';
+            setTimeout(() => {
+              highlight.style.boxShadow = '';
+            }, 2000);
+          }
+        }}
+      />
     </div>
   );
 };

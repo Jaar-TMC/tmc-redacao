@@ -293,16 +293,16 @@ ClaimCard.propTypes = {
 // ---------------------------------------------------------------------------
 
 export default function FactCheckModal({ isOpen, onClose, scanResult, onClaimClick }) {
-  const [visible, setVisible] = useState(false);
+  const visible = isOpen;
+  const [animated, setAnimated] = useState(false);
 
   // Animate entrance
   useEffect(() => {
     if (isOpen) {
-      // Small delay so the transition actually fires
-      const frame = requestAnimationFrame(() => setVisible(true));
+      const frame = requestAnimationFrame(() => setAnimated(true));
       return () => cancelAnimationFrame(frame);
     }
-    setVisible(false);
+    setAnimated(false);
   }, [isOpen]);
 
   // Escape key closes
@@ -351,7 +351,7 @@ export default function FactCheckModal({ isOpen, onClose, scanResult, onClaimCli
       {/* Backdrop */}
       <div
         className={`absolute inset-0 bg-black/50 transition-opacity duration-200
-          ${visible ? 'opacity-100' : 'opacity-0'}`}
+          ${animated ? 'opacity-100' : 'opacity-0'}`}
         onClick={onClose}
         aria-hidden="true"
       />
@@ -361,7 +361,7 @@ export default function FactCheckModal({ isOpen, onClose, scanResult, onClaimCli
         className={`relative flex flex-col bg-white rounded-2xl shadow-2xl
           max-w-2xl w-full mx-4 max-h-[85vh] overflow-hidden
           transition-all duration-300 ease-out
-          ${visible ? 'opacity-100 scale-100' : 'opacity-0 scale-95'}`}
+          ${animated ? 'opacity-100 scale-100' : 'opacity-0 scale-95'}`}
         onClick={(e) => e.stopPropagation()}
         role="dialog"
         aria-modal="true"
