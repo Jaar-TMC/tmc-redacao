@@ -40,7 +40,7 @@ const SistemaPage = () => {
     <div className="max-w-3xl mx-auto space-y-6">
       <div>
         <h1 className="text-2xl font-bold text-gray-900">Sistema</h1>
-        <p className="text-sm text-gray-500 mt-1">Controle geral das operacoes de IA</p>
+        <p className="text-sm text-gray-500 mt-1">Controle geral das operações de IA</p>
       </div>
 
       {/* Main Kill Switch Card */}
@@ -62,8 +62,8 @@ const SistemaPage = () => {
               </h2>
               <p className="text-sm text-gray-600">
                 {aiPaused
-                  ? 'Todas as operacoes estao pausadas, incluindo coleta RSS.'
-                  : 'Geracao, classificacao, scoring e coleta RSS estao operacionais.'}
+                  ? 'Todas as operações estão pausadas, incluindo coleta RSS.'
+                  : 'Geração, classificação, scoring e coleta RSS estão operacionais.'}
               </p>
             </div>
           </div>
@@ -96,7 +96,7 @@ const SistemaPage = () => {
           <div className="bg-white rounded-xl border border-gray-200 p-4">
             <div className="flex items-center gap-2 mb-2">
               <Clock size={16} className="text-gray-400" />
-              <span className="text-xs font-medium text-gray-500 uppercase tracking-wide">Pausado ha</span>
+              <span className="text-xs font-medium text-gray-500 uppercase tracking-wide">Pausado há</span>
             </div>
             <p className="text-2xl font-bold text-gray-900">
               {hoursPaused < 1
@@ -118,7 +118,7 @@ const SistemaPage = () => {
               ${estimatedSavings.toFixed(2)}
             </p>
             <p className="text-xs text-gray-500 mt-1">
-              Custo medio: ${avgHourlyCost.toFixed(2)}/hora
+              Custo médio: ${avgHourlyCost.toFixed(2)}/hora
             </p>
           </div>
 
@@ -131,11 +131,11 @@ const SistemaPage = () => {
             <div className="space-y-1.5 mt-1">
               <div className="flex items-center gap-2 text-xs">
                 <span className="w-2 h-2 rounded-full bg-red-400" />
-                <span className="text-gray-700">Geracao de artigos</span>
+                <span className="text-gray-700">Geração de artigos</span>
               </div>
               <div className="flex items-center gap-2 text-xs">
                 <span className="w-2 h-2 rounded-full bg-red-400" />
-                <span className="text-gray-700">Classificacao, scoring, embeddings</span>
+                <span className="text-gray-700">Classificação, scoring, embeddings</span>
               </div>
               <div className="flex items-center gap-2 text-xs">
                 <span className="w-2 h-2 rounded-full bg-red-400" />
@@ -154,7 +154,7 @@ const SistemaPage = () => {
               <div className="w-10 h-10 rounded-full bg-amber-100 flex items-center justify-center">
                 <AlertTriangle size={20} className="text-amber-600" />
               </div>
-              <h3 className="text-lg font-semibold text-gray-900">Pausar todas as operacoes de IA?</h3>
+              <h3 className="text-lg font-semibold text-gray-900">Pausar todas as operações de IA?</h3>
               <button
                 onClick={() => setShowConfirm(false)}
                 className="ml-auto p-1 hover:bg-gray-100 rounded-lg transition-colors"
@@ -165,15 +165,15 @@ const SistemaPage = () => {
             </div>
 
             <div className="space-y-3 mb-6">
-              <p className="text-sm text-gray-600">As seguintes operacoes serao pausadas:</p>
+              <p className="text-sm text-gray-600">As seguintes operações serão pausadas:</p>
               <ul className="text-sm text-gray-700 space-y-1.5 pl-4">
                 <li className="flex items-center gap-2">
                   <span className="w-1.5 h-1.5 rounded-full bg-red-400" />
-                  Geracao de artigos
+                  Geração de artigos
                 </li>
                 <li className="flex items-center gap-2">
                   <span className="w-1.5 h-1.5 rounded-full bg-red-400" />
-                  Classificacao e scoring
+                  Classificação e scoring
                 </li>
                 <li className="flex items-center gap-2">
                   <span className="w-1.5 h-1.5 rounded-full bg-red-400" />
@@ -181,11 +181,11 @@ const SistemaPage = () => {
                 </li>
                 <li className="flex items-center gap-2">
                   <span className="w-1.5 h-1.5 rounded-full bg-red-400" />
-                  Fact-check e verificacao
+                  Fact-check e verificação
                 </li>
               </ul>
               <p className="text-sm text-amber-700 bg-amber-50 rounded-lg p-3">
-                Todas as operacoes serao interrompidas, incluindo a coleta de RSS.
+                Todas as operações serão interrompidas, incluindo a coleta de RSS.
               </p>
             </div>
 
