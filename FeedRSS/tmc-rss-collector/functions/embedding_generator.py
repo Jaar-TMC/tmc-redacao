@@ -37,6 +37,12 @@ async def embedding_generator_handler(timer: func.TimerRequest) -> None:
 
     logger.info(f"[{execution_id}] Embedding Generator started")
 
+    # Check if AI operations are paused by admin
+    from services.ai_status_service import is_ai_paused
+    if is_ai_paused():
+        logger.info(f"[{execution_id}] AI paused by admin, skipping embedding generation")
+        return
+
     # Check configuration
     if not is_embedding_configured():
         logger.warning(f"[{execution_id}] Embedding service not configured (missing OPENAI_API_KEY)")

@@ -3722,6 +3722,109 @@ class DatabaseService:
             ))
             conn.commit()
 
+    # ==========================================
+    # System Settings
+    # ==========================================
+
+    def get_system_setting(self, key: str) -> Optional[dict]:
+        """Get a system setting by key. Returns None if not found or table missing."""
+        query = """
+            SELECT setting_key, setting_value, updated_by, updated_at
+            FROM system_settings
+            WHERE setting_key = %s
+        """
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(query, (key,))
+                row = cursor.fetchone()
+                if row:
+                    return {
+                        "key": row[0],
+                        "value": row[1],
+                        "updated_by": row[2],
+                        "updated_at": row[3],
+                    }
+                return None
+        except Exception as e:
+            # Handle table-not-exist gracefully (migration not yet applied)
+            if "Invalid object name" in str(e):
+                logger.warning("system_settings table does not exist yet")
+                return None
+            logger.error(f"Error getting system setting '{key}': {e}")
+            return None
+
+    def set_system_setting(self, key: str, value: str, updated_by: str = None) -> bool:
+        """Upsert a system setting. Returns True on success."""
+        query = """
+            IF EXISTS (SELECT 1 FROM system_settings WHERE setting_key = %s)
+                UPDATE system_settings
+                SET setting_value = %s, updated_by = %s, updated_at = GETUTCDATE()
+                WHERE setting_key = %s
+            ELSE
+                INSERT INTO system_settings (setting_key, setting_value, updated_by)
+                VALUES (%s, %s, %s)
+        """
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(query, (key, value, updated_by, key, key, value, updated_by))
+                conn.commit()
+                logger.info(f"System setting '{key}' set to '{value}' by {updated_by}")
+                return True
+        except Exception as e:
+            logger.error(f"Error setting system setting '{key}': {e}")
+            return False
+
+    def get_ai_cost_summary(self, hours: int = 24) -> dict:
+        """Get AI cost summary from llm_usage_log for the last N hours."""
+        query_by_task = """
+            SELECT task_type, COUNT(*) as call_count,
+                   SUM(ISNULL(input_cost_usd, 0) + ISNULL(output_cost_usd, 0)) as total_cost
+            FROM llm_usage_log
+            WHERE created_at >= DATEADD(hour, -%s, GETUTCDATE())
+            GROUP BY task_type
+        """
+        query_total = """
+            SELECT COUNT(*) as total_calls,
+                   SUM(ISNULL(input_cost_usd, 0) + ISNULL(output_cost_usd, 0)) as total_cost
+            FROM llm_usage_log
+            WHERE created_at >= DATEADD(hour, -%s, GETUTCDATE())
+        """
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+
+                cursor.execute(query_by_task, (hours,))
+                by_task = []
+                for row in cursor.fetchall():
+                    by_task.append({
+                        "task_type": row[0],
+                        "call_count": row[1],
+                        "total_cost_usd": float(row[2]) if row[2] else 0.0,
+                    })
+
+                cursor.execute(query_total, (hours,))
+                totals = cursor.fetchone()
+
+                return {
+                    "by_task": by_task,
+                    "total_cost_usd": float(totals[1]) if totals and totals[1] else 0.0,
+                    "total_calls": totals[0] if totals else 0,
+                    "hours": hours,
+                }
+        except Exception as e:
+            if "Invalid object name" in str(e):
+                logger.warning("llm_usage_log table does not exist yet")
+            else:
+                logger.error(f"Error getting AI cost summary: {e}")
+            return {
+                "by_task": [],
+                "total_cost_usd": 0.0,
+                "total_calls": 0,
+                "hours": hours,
+            }
+
 
 # Singleton para uso global (thread-safe)
 _db_service: Optional[DatabaseService] = None

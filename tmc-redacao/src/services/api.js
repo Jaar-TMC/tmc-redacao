@@ -177,6 +177,12 @@ async function fetchApi(endpoint, options = {}) {
     }
 
     if (error instanceof ApiError) {
+      // Enrich 503 AI-paused errors with metadata
+      if (error.status === 503 && error.data?.ai_paused) {
+        error.aiPaused = true;
+        error.pausedBy = error.data.paused_by;
+        error.message = error.data.error || 'Operações de IA pausadas pelo administrador';
+      }
       throw error;
     }
 
@@ -878,6 +884,30 @@ export async function factCheckDeepVerify({ claims, articleTitle = '' }) {
 }
 
 // ============================================
+// AI Status API
+// ============================================
+
+/**
+ * Get current AI system status (paused/active)
+ * @returns {Promise<{paused: boolean, paused_by: string|null, paused_at: string|null, estimated_savings_usd: number, hours_paused: number, avg_hourly_cost: number}>}
+ */
+export async function getAiStatus() {
+  return fetchApi('/ai-status');
+}
+
+/**
+ * Set AI system status (pause/resume)
+ * @param {boolean} paused - Whether to pause AI operations
+ * @returns {Promise<{paused: boolean, paused_by: string|null, paused_at: string|null}>}
+ */
+export async function setAiStatus(paused) {
+  return fetchApi('/ai-status', {
+    method: 'POST',
+    body: JSON.stringify({ paused }),
+  });
+}
+
+// ============================================
 // Utility Functions
 // ============================================
 
@@ -936,6 +966,8 @@ export default {
   deleteUserArticle,
   factCheckScan,
   factCheckDeepVerify,
+  getAiStatus,
+  setAiStatus,
   isApiAvailable,
   getApiBaseUrl,
   registerAuthHandlers,

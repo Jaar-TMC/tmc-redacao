@@ -3,6 +3,7 @@ import { User, PenLine, Menu, X, HelpCircle, ChevronDown, FileText, Youtube, Log
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import LogoTMC from '../../assets/logo-tmc.svg?react';
 import { useAuth } from '../../context/AuthContext';
+import { useAiStatus } from '../../context/AiStatusContext';
 import usePermissions from '../../hooks/usePermissions';
 import { useOnboarding, TOUR_IDS } from '../onboarding';
 import { prefetchData } from '../../services/api';
@@ -21,6 +22,7 @@ const Header = () => {
   const navigate = useNavigate();
   const { user, logout } = useAuth();
   const { isAdmin } = usePermissions();
+  const { aiPaused } = useAiStatus();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [createMenuOpen, setCreateMenuOpen] = useState(false);
   const [helpMenuOpen, setHelpMenuOpen] = useState(false);
@@ -188,6 +190,35 @@ const Header = () => {
               </div>
             )}
           </div>
+
+          {/* AI Status Indicator */}
+          {isAdmin ? (
+            <button
+              type="button"
+              onClick={() => navigate('/configuracoes/sistema')}
+              className={`hidden sm:flex items-center gap-1.5 px-2.5 py-1.5 rounded-full text-xs font-medium transition-colors ${
+                aiPaused
+                  ? 'bg-red-500/20 text-red-200 hover:bg-red-500/30'
+                  : 'bg-emerald-500/20 text-emerald-200 hover:bg-emerald-500/30'
+              }`}
+              title={aiPaused ? 'IA pausada - clique para gerenciar' : 'IA ativa - clique para gerenciar'}
+            >
+              <span className={`w-2 h-2 rounded-full ${aiPaused ? 'bg-red-400 animate-pulse' : 'bg-emerald-400'}`} />
+              {aiPaused ? 'IA Pausada' : 'IA Ativa'}
+            </button>
+          ) : (
+            <div
+              className={`hidden sm:flex items-center gap-1.5 px-2.5 py-1.5 rounded-full text-xs font-medium cursor-default ${
+                aiPaused
+                  ? 'bg-red-500/20 text-red-200'
+                  : 'bg-emerald-500/20 text-emerald-200'
+              }`}
+              title={aiPaused ? 'Operações de IA pausadas' : 'IA ativa'}
+            >
+              <span className={`w-2 h-2 rounded-full ${aiPaused ? 'bg-red-400 animate-pulse' : 'bg-emerald-400'}`} />
+              {aiPaused ? 'IA Pausada' : 'IA Ativa'}
+            </div>
+          )}
 
           {/* Help Menu - Tour Controls */}
           <div className="relative hidden md:block" ref={helpMenuRef}>

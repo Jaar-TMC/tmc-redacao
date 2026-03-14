@@ -47,6 +47,12 @@ async def scoring_calculator_handler(timer: func.TimerRequest) -> None:
 
     logger.info(f"[{execution_id}] Scoring Calculator started")
 
+    # Check if AI operations are paused by admin
+    from services.ai_status_service import is_ai_paused
+    if is_ai_paused():
+        logger.info(f"[{execution_id}] AI paused by admin, skipping scoring calculation")
+        return
+
     db = get_db()
 
     # Verify database connection

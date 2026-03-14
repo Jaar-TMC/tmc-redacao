@@ -10,7 +10,7 @@ import json
 import logging
 import asyncio
 from functools import wraps
-from utils.auth import require_auth, require_admin
+from utils.auth import require_auth, require_admin, require_ai_active
 
 # Configurar logging
 logging.basicConfig(
@@ -438,9 +438,28 @@ async def metrics(req: func.HttpRequest) -> func.HttpResponse:
     )
 
 
+@app.route(route="ai-status", methods=["GET", "OPTIONS"], auth_level=func.AuthLevel.ANONYMOUS)
+@with_cors
+@require_auth
+async def ai_status_get(req: func.HttpRequest) -> func.HttpResponse:
+    """GET /api/ai-status - Current AI operational status."""
+    from functions.ai_status_api import get_ai_status_handler
+    return await get_ai_status_handler(req)
+
+
+@app.route(route="ai-status", methods=["POST"], auth_level=func.AuthLevel.ANONYMOUS)
+@with_cors
+@require_auth
+async def ai_status_set(req: func.HttpRequest) -> func.HttpResponse:
+    """POST /api/ai-status - Pause or resume AI operations (admin only)."""
+    from functions.ai_status_api import set_ai_status_handler
+    return await set_ai_status_handler(req)
+
+
 @app.route(route="generate", methods=["POST", "OPTIONS"])
 @with_cors
 @require_auth
+@require_ai_active
 async def generate_article(req: func.HttpRequest) -> func.HttpResponse:
     """
     POST /api/generate - Gera matéria usando IA.
@@ -476,6 +495,7 @@ async def generate_article(req: func.HttpRequest) -> func.HttpResponse:
 @app.route(route="extract-topics", methods=["POST", "OPTIONS"])
 @with_cors
 @require_auth
+@require_ai_active
 async def extract_topics(req: func.HttpRequest) -> func.HttpResponse:
     """
     POST /api/extract-topics - Extrai tópicos do texto usando IA.
@@ -496,6 +516,7 @@ async def extract_topics(req: func.HttpRequest) -> func.HttpResponse:
 @app.route(route="generate-tags", methods=["POST", "OPTIONS"])
 @with_cors
 @require_auth
+@require_ai_active
 async def generate_tags(req: func.HttpRequest) -> func.HttpResponse:
     """
     POST /api/generate-tags - Gera tags para conteúdo usando IA.
@@ -516,6 +537,7 @@ async def generate_tags(req: func.HttpRequest) -> func.HttpResponse:
 @app.route(route="merge-topics", methods=["POST", "OPTIONS"])
 @with_cors
 @require_auth
+@require_ai_active
 async def merge_topics(req: func.HttpRequest) -> func.HttpResponse:
     """
     POST /api/merge-topics - Agrupa tópicos de múltiplas matérias usando IA.
@@ -569,6 +591,7 @@ async def merge_topics(req: func.HttpRequest) -> func.HttpResponse:
 @app.route(route="edit-article", methods=["POST", "OPTIONS"])
 @with_cors
 @require_auth
+@require_ai_active
 async def edit_article(req: func.HttpRequest) -> func.HttpResponse:
     """
     POST /api/edit-article - Edita uma matéria existente usando IA.
@@ -613,6 +636,7 @@ async def edit_article(req: func.HttpRequest) -> func.HttpResponse:
 @app.route(route="fact-check-scan", methods=["POST", "OPTIONS"])
 @with_cors
 @require_auth
+@require_ai_active
 async def fact_check_scan(req: func.HttpRequest) -> func.HttpResponse:
     """POST /api/fact-check-scan - On-demand article safety verification."""
     rate_limit_response = check_rate_limit("fact-check-scan")
@@ -625,6 +649,7 @@ async def fact_check_scan(req: func.HttpRequest) -> func.HttpResponse:
 @app.route(route="fact-check-deep-verify", methods=["POST", "OPTIONS"])
 @with_cors
 @require_auth
+@require_ai_active
 async def fact_check_deep_verify(req: func.HttpRequest) -> func.HttpResponse:
     """POST /api/fact-check-deep-verify - Deep verify unverifiable claims."""
     rate_limit_response = check_rate_limit("fact-check-scan")
@@ -641,6 +666,7 @@ async def fact_check_deep_verify(req: func.HttpRequest) -> func.HttpResponse:
 @app.route(route="research", methods=["POST", "OPTIONS"])
 @with_cors
 @require_auth
+@require_ai_active
 async def research(req: func.HttpRequest) -> func.HttpResponse:
     """
     POST /api/research - Pesquisa fontes web via Exa AI para um dado prompt.

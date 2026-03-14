@@ -3,7 +3,7 @@ import { useEffect, lazy, Suspense } from 'react';
 import Header from './components/layout/Header';
 import ErrorBoundary from './components/ui/ErrorBoundary';
 import Spinner from './components/ui/Spinner';
-import { ArticlesProvider, FiltersProvider, UIProvider, CriarProvider, AuthProvider, useAuth } from './context';
+import { ArticlesProvider, FiltersProvider, UIProvider, CriarProvider, AuthProvider, useAuth, AiStatusProvider } from './context';
 import { ArticlesCacheProvider } from './context/ArticlesCacheContext';
 import { OnboardingProvider, OnboardingTour } from './components/onboarding';
 import ProtectedRoute from './components/auth/ProtectedRoute';
@@ -17,6 +17,7 @@ const MinhasMaterias = lazy(() => import('./pages/MinhasMaterias'));
 const ConfiguracoesPage = lazy(() => import('./pages/ConfiguracoesPage'));
 const BuscadorPage = lazy(() => import('./pages/config/BuscadorPage'));
 const UsuariosPage = lazy(() => import('./pages/config/UsuariosPage'));
+const SistemaPage = lazy(() => import('./pages/SistemaPage'));
 
 // Novo fluxo de criação de matéria (Rework)
 const SelecionarFontePage = lazy(() => import('./pages/criar/index'));
@@ -48,7 +49,8 @@ function DocumentTitleUpdater() {
       '/editar': 'Editar Matéria',
       '/configuracoes': 'Configurações',
       '/configuracoes/buscador': 'Buscador de Notícias - Configurações',
-      '/configuracoes/usuarios': 'Usuários - Configurações'
+      '/configuracoes/usuarios': 'Usuários - Configurações',
+      '/configuracoes/sistema': 'Sistema - Configurações'
     };
 
     const pageTitle = titles[location.pathname] || 'TMC Redação';
@@ -132,6 +134,7 @@ function AppContent() {
   if (isLoading) return <AuthLoadingScreen />;
 
   return (
+    <AiStatusProvider>
     <ArticlesProvider>
       <FiltersProvider>
         <ArticlesCacheProvider>
@@ -199,6 +202,7 @@ function AppContent() {
                       <Route index element={<Navigate to="/configuracoes/buscador" replace />} />
                       <Route path="buscador" element={<BuscadorPage />} />
                       <Route path="usuarios" element={<ProtectedRoute permission="manage_users"><UsuariosPage /></ProtectedRoute>} />
+                      <Route path="sistema" element={<ProtectedRoute permission="manage_users"><SistemaPage /></ProtectedRoute>} />
                     </Route>
 
                     {/* Catch-all: show 404 for authenticated users, redirect to login otherwise */}
@@ -213,6 +217,7 @@ function AppContent() {
         </ArticlesCacheProvider>
       </FiltersProvider>
     </ArticlesProvider>
+    </AiStatusProvider>
   );
 }
 

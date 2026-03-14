@@ -201,7 +201,10 @@ async def process_single_source(source: Source, db, parser: RSSParser,
 
         # 4. Enriquecer artigos com AI (categoria semantica e tags SEO)
         try:
-            if is_ai_enrichment_enabled():
+            from services.ai_status_service import is_ai_paused
+            if is_ai_paused():
+                logger.info(f"[{execution_id}] {source_name}: AI paused by admin, skipping enrichment")
+            elif is_ai_enrichment_enabled():
                 logger.info(f"[{execution_id}] {source_name}: Starting AI enrichment for {len(unique_articles)} articles")
                 unique_articles = await enrich_articles_with_ai(unique_articles)
                 logger.info(f"[{execution_id}] {source_name}: AI enrichment completed")
@@ -217,23 +220,27 @@ async def process_single_source(source: Source, db, parser: RSSParser,
         # 5b. Scoring inline - GUARANTEED: every article gets a score
         articles_scored = 0
         if inserted_articles:
-            scoring_service = get_scoring_service()
-            scores = await scoring_service.score_articles_batch(
-                inserted_articles,
-                use_heuristic_fallback=True,
-                batch_delay=0.3
-            )
-            if scores:
-                try:
-                    articles_scored = await run_db(scoring_service._save_scores, scores)
-                    logger.info(f"[{execution_id}] {source_name}: Scored {articles_scored}/{articles_new} articles inline")
-                except Exception as e:
-                    logger.error(f"[{execution_id}] {source_name}: Failed to save scores to DB: {e}")
-            if articles_scored < len(inserted_articles):
-                logger.warning(
-                    f"[{execution_id}] {source_name}: Only {articles_scored}/{len(inserted_articles)} "
-                    f"scores saved — scoring_calculator will backfill"
+            from services.ai_status_service import is_ai_paused as _ai_paused
+            if _ai_paused():
+                logger.info(f"[{execution_id}] {source_name}: AI paused by admin, skipping inline scoring")
+            else:
+                scoring_service = get_scoring_service()
+                scores = await scoring_service.score_articles_batch(
+                    inserted_articles,
+                    use_heuristic_fallback=True,
+                    batch_delay=0.3
                 )
+                if scores:
+                    try:
+                        articles_scored = await run_db(scoring_service._save_scores, scores)
+                        logger.info(f"[{execution_id}] {source_name}: Scored {articles_scored}/{articles_new} articles inline")
+                    except Exception as e:
+                        logger.error(f"[{execution_id}] {source_name}: Failed to save scores to DB: {e}")
+                if articles_scored < len(inserted_articles):
+                    logger.warning(
+                        f"[{execution_id}] {source_name}: Only {articles_scored}/{len(inserted_articles)} "
+                        f"scores saved — scoring_calculator will backfill"
+                    )
 
         # 6. Atualizar fonte
         await run_db(db.update_source_last_fetch, source.id, articles_new)

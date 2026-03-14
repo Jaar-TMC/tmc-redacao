@@ -102,3 +102,35 @@ def require_admin(handler):
         req.user = user
         return await handler(req)
     return wrapper
+
+
+def require_ai_active(handler):
+    """Decorator: returns 503 if AI operations are paused by admin.
+
+    Stack after @require_auth:
+        @with_cors
+        @require_auth
+        @require_ai_active
+        async def handler(req): ...
+    """
+    @wraps(handler)
+    async def wrapper(req: func.HttpRequest, *args, **kwargs) -> func.HttpResponse:
+        # Skip check for OPTIONS (CORS preflight)
+        if req.method == "OPTIONS":
+            return await handler(req, *args, **kwargs)
+
+        from services.ai_status_service import is_ai_paused, get_ai_status_service
+        if is_ai_paused():
+            status = get_ai_status_service().get_ai_status()
+            return func.HttpResponse(
+                json.dumps({
+                    "error": "Operações de IA estão pausadas pelo administrador.",
+                    "ai_paused": True,
+                    "paused_by": status.get("paused_by"),
+                    "paused_at": str(status.get("paused_at")) if status.get("paused_at") else None,
+                }),
+                status_code=503,
+                mimetype="application/json",
+            )
+        return await handler(req, *args, **kwargs)
+    return wrapper

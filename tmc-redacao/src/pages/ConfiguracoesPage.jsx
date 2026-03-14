@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { NavLink, Outlet, useLocation } from 'react-router-dom';
-import { Newspaper, Users, Menu, X } from 'lucide-react';
+import { Newspaper, Users, Power, Menu, X } from 'lucide-react';
 import { useOnboarding, TOUR_IDS } from '../components/onboarding';
 import usePermissions from '../hooks/usePermissions';
 
@@ -21,6 +21,7 @@ const ConfiguracoesPage = () => {
   const menuItems = [
     { path: '/configuracoes/buscador', label: 'Buscador de Notícias', icon: Newspaper },
     ...(canManageUsers ? [{ path: '/configuracoes/usuarios', label: 'Usuários', icon: Users }] : []),
+    ...(canManageUsers ? [{ path: '/configuracoes/sistema', label: 'Sistema', icon: Power }] : []),
   ];
 
   const currentMenuItem = menuItems.find(item => item.path === location.pathname);
