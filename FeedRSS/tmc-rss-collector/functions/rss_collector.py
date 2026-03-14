@@ -38,6 +38,11 @@ async def rss_collector_handler(timer: func.TimerRequest) -> None:
 
     logger.info(f"[{execution_id}] RSS Collector started")
 
+    from services.ai_status_service import is_ai_paused
+    if is_ai_paused():
+        logger.info(f"[{execution_id}] AI paused by admin, skipping entire RSS collection")
+        return
+
     db = get_db()
 
     # Verificar conexao com banco

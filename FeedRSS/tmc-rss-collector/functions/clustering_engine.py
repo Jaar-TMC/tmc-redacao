@@ -46,6 +46,11 @@ async def clustering_engine_handler(timer: func.TimerRequest) -> None:
 
     logger.info(f"[{execution_id}] Clustering Engine started")
 
+    from services.ai_status_service import is_ai_paused
+    if is_ai_paused():
+        logger.info(f"[{execution_id}] AI paused by admin, skipping clustering")
+        return
+
     # Check if clustering is enabled
     if not is_clustering_enabled():
         logger.info(f"[{execution_id}] Clustering is disabled via CLUSTERING_ENABLED env var")

@@ -553,6 +553,11 @@ async def clustering_maintenance_handler(timer: func.TimerRequest) -> None:
     execution_id = datetime.utcnow().strftime('%Y%m%d_%H%M%S')
     logger.info(f"[{execution_id}] Clustering Maintenance started")
 
+    from services.ai_status_service import is_ai_paused
+    if is_ai_paused():
+        logger.info(f"[{execution_id}] AI paused by admin, skipping clustering maintenance")
+        return
+
     # Verificar se clustering esta habilitado
     if not is_clustering_enabled():
         logger.info(f"[{execution_id}] Clustering is disabled via CLUSTERING_ENABLED env var")

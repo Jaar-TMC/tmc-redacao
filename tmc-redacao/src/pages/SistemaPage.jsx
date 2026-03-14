@@ -62,8 +62,8 @@ const SistemaPage = () => {
               </h2>
               <p className="text-sm text-gray-600">
                 {aiPaused
-                  ? 'Todas as operacoes de IA estao pausadas. A coleta RSS continua funcionando.'
-                  : 'Geracao, classificacao, scoring e clustering estao operacionais.'}
+                  ? 'Todas as operacoes estao pausadas, incluindo coleta RSS.'
+                  : 'Geracao, classificacao, scoring e coleta RSS estao operacionais.'}
               </p>
             </div>
           </div>
@@ -138,12 +138,8 @@ const SistemaPage = () => {
                 <span className="text-gray-700">Classificacao, scoring, embeddings</span>
               </div>
               <div className="flex items-center gap-2 text-xs">
-                <span className="w-2 h-2 rounded-full bg-emerald-400" />
-                <span className="text-gray-700">Coleta RSS (ativa)</span>
-              </div>
-              <div className="flex items-center gap-2 text-xs">
-                <span className="w-2 h-2 rounded-full bg-emerald-400" />
-                <span className="text-gray-700">Clustering (ativo)</span>
+                <span className="w-2 h-2 rounded-full bg-red-400" />
+                <span className="text-gray-700">Coleta RSS</span>
               </div>
             </div>
           </div>
@@ -188,8 +184,8 @@ const SistemaPage = () => {
                   Fact-check e verificacao
                 </li>
               </ul>
-              <p className="text-sm text-emerald-700 bg-emerald-50 rounded-lg p-3">
-                A coleta de RSS continuara funcionando normalmente.
+              <p className="text-sm text-amber-700 bg-amber-50 rounded-lg p-3">
+                Todas as operacoes serao interrompidas, incluindo a coleta de RSS.
               </p>
             </div>
 
