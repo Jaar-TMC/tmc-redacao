@@ -49,6 +49,12 @@ async def fact_check_scan_handler(req: func.HttpRequest) -> func.HttpResponse:
     Returns: FactCheckScanResponse with ASI score and claim analysis
     """
     logger.info("Fact-check scan request received")
+    import uuid as _uuid
+    correlation_id = str(_uuid.uuid4())[:8]
+    from services.request_context import current_user_id, current_action_type, current_correlation_id
+    current_user_id.set(getattr(req, 'user', {}).get('id') if hasattr(req, 'user') else None)
+    current_action_type.set('fact_check_scan')
+    current_correlation_id.set(correlation_id)
 
     try:
         # Parse request body
@@ -177,6 +183,12 @@ async def deep_verify_handler(req: func.HttpRequest) -> func.HttpResponse:
     Returns: { updated_claims, sources_searched, claims_resolved, deep_verify_duration_ms }
     """
     logger.info("Deep verify request received")
+    import uuid as _uuid
+    correlation_id = str(_uuid.uuid4())[:8]
+    from services.request_context import current_user_id, current_action_type, current_correlation_id
+    current_user_id.set(getattr(req, 'user', {}).get('id') if hasattr(req, 'user') else None)
+    current_action_type.set('deep_verify')
+    current_correlation_id.set(correlation_id)
 
     try:
         # Parse request body

@@ -552,7 +552,7 @@ class FactCheckService:
 
             # Execute parallel Exa searches
             search_tasks = [
-                self._search_exa(q, num_results=num_results, max_text=max_text_chars)
+                self._search_exa(q, num_results=num_results, max_text=max_text_chars, operation='enrichment_search')
                 for q in queries[:num_queries]
             ]
             search_results = await asyncio.gather(*search_tasks, return_exceptions=True)
@@ -672,7 +672,8 @@ class FactCheckService:
         self,
         query: str,
         num_results: int = None,
-        max_text: int = 2000
+        max_text: int = 2000,
+        operation: str = 'enrichment_search'
     ) -> list:
         """
         Execute a single Exa search with retry and circuit breaker.
@@ -698,6 +699,8 @@ class FactCheckService:
                 # Half-open: allow one attempt
                 logger.info("Exa circuit breaker half-open, attempting request")
                 self._exa_circuit_open = False
+
+        _search_start = time.time()
 
         headers = {
             "Content-Type": "application/json",
@@ -742,6 +745,27 @@ class FactCheckService:
 
         # Success: reset circuit breaker
         self._exa_failures = 0
+
+        # Cost logging
+        try:
+            from services.request_context import current_user_id, current_action_type, current_correlation_id
+            from services.config import get_config
+            _elapsed_ms = int((time.time() - _search_start) * 1000)
+            from services.cost_queries import insert_api_usage_log
+            insert_api_usage_log({
+                'correlation_id': current_correlation_id.get(),
+                'user_id': current_user_id.get(),
+                'action_type': current_action_type.get(),
+                'provider': 'exa',
+                'operation': operation,
+                'request_count': 1,
+                'input_units': num_results,
+                'cost_usd': get_config().exa_cost_per_search,
+                'latency_ms': _elapsed_ms,
+                'status': 'success',
+            })
+        except Exception:
+            pass  # Never fail on cost logging
 
         data = response.json()
         results = []
@@ -790,7 +814,7 @@ class FactCheckService:
             # Search with timeout
             try:
                 results = await asyncio.wait_for(
-                    self._search_exa(query, num_results=3, max_text=1000),
+                    self._search_exa(query, num_results=3, max_text=1000, operation='claim_verification'),
                     timeout=timeout,
                 )
             except (asyncio.TimeoutError, Exception) as e:

@@ -3182,8 +3182,9 @@ class DatabaseService:
                 INSERT INTO llm_usage_log
                 (correlation_id, task_type, model, endpoint, provider,
                  input_tokens, output_tokens, input_cost_usd, output_cost_usd,
-                 latency_ms, status, error_message, response_chars, stop_reason)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                 latency_ms, status, error_message, response_chars, stop_reason,
+                 user_id, source_id, action_type, cache_read_tokens, cache_creation_tokens)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """
 
             with self.get_connection() as conn:
@@ -3203,6 +3204,11 @@ class DatabaseService:
                     _trunc(log_data.get('error_message'), 500),
                     log_data.get('response_chars'),
                     _trunc(log_data.get('stop_reason'), 20),
+                    log_data.get('user_id'),
+                    log_data.get('source_id'),
+                    _trunc(log_data.get('action_type'), 50),
+                    log_data.get('cache_read_tokens'),
+                    log_data.get('cache_creation_tokens'),
                 ))
                 conn.commit()
 

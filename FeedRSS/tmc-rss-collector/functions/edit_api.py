@@ -75,6 +75,12 @@ async def edit_article_handler(req: func.HttpRequest) -> func.HttpResponse:
     }
     """
     logger.info("Edit article request received")
+    import uuid as _uuid
+    correlation_id = str(_uuid.uuid4())[:8]
+    from services.request_context import current_user_id, current_action_type, current_correlation_id
+    current_user_id.set(getattr(req, 'user', {}).get('id') if hasattr(req, 'user') else None)
+    current_action_type.set('edit_article')
+    current_correlation_id.set(correlation_id)
 
     try:
         # Parse request body

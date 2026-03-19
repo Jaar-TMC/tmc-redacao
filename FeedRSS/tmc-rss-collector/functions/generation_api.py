@@ -603,6 +603,10 @@ async def generate_article_handler(req: func.HttpRequest) -> func.HttpResponse:
     """
     correlation_id = str(uuid.uuid4())[:8]
     logger.info(f"[{correlation_id}] Generate article request received")
+    from services.request_context import current_user_id, current_action_type, current_correlation_id
+    current_user_id.set(getattr(req, 'user', {}).get('id') if hasattr(req, 'user') else None)
+    current_action_type.set('generate_article')
+    current_correlation_id.set(correlation_id)
     pipeline_start = time.time()
 
     # Bind config values to local vars (frozen singleton, avoids repeated lookups)
@@ -1477,6 +1481,12 @@ async def extract_topics_handler(req: func.HttpRequest) -> func.HttpResponse:
     Returns: {topics: [{type, content}, ...]}
     """
     logger.info("Extract topics request received")
+    import uuid as _uuid
+    correlation_id = str(_uuid.uuid4())[:8]
+    from services.request_context import current_user_id, current_action_type, current_correlation_id
+    current_user_id.set(getattr(req, 'user', {}).get('id') if hasattr(req, 'user') else None)
+    current_action_type.set('extract_topics')
+    current_correlation_id.set(correlation_id)
 
     try:
         # Parse request body
@@ -1522,6 +1532,12 @@ async def generate_tags_handler(req: func.HttpRequest) -> func.HttpResponse:
     Returns: {tags: [string, ...]}
     """
     logger.info("Generate tags request received")
+    import uuid as _uuid
+    correlation_id = str(_uuid.uuid4())[:8]
+    from services.request_context import current_user_id, current_action_type, current_correlation_id
+    current_user_id.set(getattr(req, 'user', {}).get('id') if hasattr(req, 'user') else None)
+    current_action_type.set('generate_tags')
+    current_correlation_id.set(correlation_id)
 
     try:
         # Parse request body
@@ -1966,6 +1982,12 @@ async def merge_topics_handler(req: func.HttpRequest) -> func.HttpResponse:
     Returns: {groups, exclusives, quotes, summary}
     """
     logger.info("Merge topics request received")
+    import uuid as _uuid
+    correlation_id = str(_uuid.uuid4())[:8]
+    from services.request_context import current_user_id, current_action_type, current_correlation_id
+    current_user_id.set(getattr(req, 'user', {}).get('id') if hasattr(req, 'user') else None)
+    current_action_type.set('merge_topics')
+    current_correlation_id.set(correlation_id)
 
     try:
         # Parse request body

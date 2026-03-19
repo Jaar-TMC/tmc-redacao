@@ -37,6 +37,9 @@ async def rss_collector_handler(timer: func.TimerRequest) -> None:
     execution_id = start_time.strftime('%Y%m%d_%H%M%S')
 
     logger.info(f"[{execution_id}] RSS Collector started")
+    from services.request_context import current_action_type, current_correlation_id
+    current_action_type.set('system_rss')
+    current_correlation_id.set(execution_id)
 
     from services.ai_status_service import is_ai_paused
     if is_ai_paused():

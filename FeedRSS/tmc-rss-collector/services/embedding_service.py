@@ -227,6 +227,25 @@ class EmbeddingService:
                 f"tokens used: {usage.get('total_tokens', 'N/A')}"
             )
 
+            # Cost logging for dashboard
+            try:
+                from services.request_context import current_action_type, current_correlation_id
+                from services.config import get_config
+                from services.cost_queries import insert_api_usage_log
+                total_tokens = usage.get('total_tokens', 0)
+                insert_api_usage_log({
+                    'correlation_id': current_correlation_id.get(),
+                    'action_type': current_action_type.get() or 'system_embedding',
+                    'provider': 'azure_openai_embedding',
+                    'operation': 'embedding_batch',
+                    'request_count': 1,
+                    'input_units': total_tokens,
+                    'cost_usd': total_tokens * (get_config().embedding_cost_per_1m_tokens / 1_000_000),
+                    'status': 'success',
+                })
+            except Exception:
+                pass  # Never fail on cost logging
+
             return embeddings
 
         except httpx.TimeoutException:

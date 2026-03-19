@@ -51,6 +51,8 @@ class AppConfig:
     exa_api_key: str = ""
     exa_max_results: int = 5
     exa_search_days: int = 7
+    exa_cost_per_search: float = 0.001  # USD per Exa search (reconcile vs invoices)
+    embedding_cost_per_1m_tokens: float = 0.02  # USD per 1M tokens (Azure OpenAI text-embedding-3-small)
 
     # Feature flags
     fact_check_enabled: bool = True
@@ -145,6 +147,8 @@ def load_config() -> AppConfig:
         exa_api_key=os.environ.get("EXA_API_KEY", ""),
         exa_max_results=_int_env("EXA_MAX_RESULTS", 5),
         exa_search_days=_int_env("EXA_SEARCH_DAYS", 7),
+        exa_cost_per_search=_float_env("EXA_COST_PER_SEARCH", 0.001),
+        embedding_cost_per_1m_tokens=_float_env("EMBEDDING_COST_PER_1M_TOKENS", 0.02),
         # Prompt caching
         prompt_caching_enabled=_bool_env("PROMPT_CACHING_ENABLED", True),
         # Feature flags

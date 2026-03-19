@@ -1,4 +1,4 @@
-"""Run migrations 005-008 against Azure SQL."""
+"""Run migrations against Azure SQL."""
 import os
 import sys
 import json
@@ -41,6 +41,8 @@ def main():
         "006_token_blacklist.sql",
         "007_user_articles_add_user_id.sql",
         "008_auth_audit_log.sql",
+        "017_cost_tracking_extensions.sql",
+        "018_api_usage_and_daily_summary.sql",
     ]
 
     for mfile in migration_files:
@@ -49,8 +51,21 @@ def main():
         try:
             with open(path, "r", encoding="utf-8") as f:
                 sql = f.read()
-            cursor.execute(sql)
-            conn.commit()
+            # Split on empty lines between statements to handle batch dependencies
+            # (e.g., ALTER TABLE + CREATE INDEX on new column in same file)
+            import re
+            statements = [s.strip() for s in re.split(r'\n\s*\n', sql) if s.strip() and not s.strip().startswith('--')]
+            for stmt in statements:
+                if stmt.strip().startswith('--'):
+                    continue
+                try:
+                    cursor.execute(stmt)
+                    conn.commit()
+                except Exception as stmt_err:
+                    # Some statements may already be applied (IF NOT EXISTS guards)
+                    conn.rollback()
+                    if '207' not in str(stmt_err) and 'already exists' not in str(stmt_err).lower():
+                        print(f"WARN: {stmt_err}")
             print("OK")
         except Exception as e:
             print(f"ERROR: {e}")

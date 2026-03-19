@@ -271,15 +271,19 @@ class GeminiService:
                     from services.database import get_db
 
                     db = get_db()
-                    db.log_llm_usage(
-                        model=model,
-                        task_type=task_type or "gemini_call",
-                        input_tokens=input_tokens,
-                        output_tokens=output_tokens,
-                        cost_usd=total_cost,
-                        duration_ms=int(elapsed * 1000),
-                        correlation_id=correlation_id or None,
-                    )
+                    db.insert_llm_usage_log({
+                        'model': model,
+                        'task_type': task_type or 'gemini_call',
+                        'provider': 'google',
+                        'endpoint': 'gemini',
+                        'input_tokens': input_tokens,
+                        'output_tokens': output_tokens,
+                        'input_cost_usd': input_tokens * cost_in,
+                        'output_cost_usd': output_tokens * cost_out,
+                        'latency_ms': int(elapsed * 1000),
+                        'status': 'success',
+                        'correlation_id': correlation_id or None,
+                    })
                 except Exception as e:
                     logger.debug(f"Gemini usage log failed: {e}")
 

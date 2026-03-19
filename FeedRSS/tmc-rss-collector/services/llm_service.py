@@ -2047,6 +2047,7 @@ class LLMService:
             # Log connection failure
             try:
                 from services.database import get_db
+                from services.request_context import current_user_id, current_action_type, current_source_id
                 asyncio.get_event_loop().run_in_executor(None, get_db().insert_llm_usage_log, {
                     'correlation_id': correlation_id or None,
                     'task_type': task_type or 'unspecified',
@@ -2056,6 +2057,9 @@ class LLMService:
                     'latency_ms': _elapsed_ms,
                     'status': 'timeout',
                     'error_message': str(e)[:500],
+                    'user_id': current_user_id.get(),
+                    'action_type': current_action_type.get(),
+                    'source_id': current_source_id.get(),
                 })
             except Exception:
                 pass
@@ -2080,6 +2084,7 @@ class LLMService:
             # Log failed call (non-blocking)
             try:
                 from services.database import get_db
+                from services.request_context import current_user_id, current_action_type, current_source_id
                 asyncio.get_event_loop().run_in_executor(None, get_db().insert_llm_usage_log, {
                     'correlation_id': correlation_id or None,
                     'task_type': task_type or 'unspecified',
@@ -2089,6 +2094,9 @@ class LLMService:
                     'latency_ms': _elapsed_ms,
                     'status': 'error',
                     'error_message': error_text[:500],
+                    'user_id': current_user_id.get(),
+                    'action_type': current_action_type.get(),
+                    'source_id': current_source_id.get(),
                 })
             except Exception:
                 pass
@@ -2138,6 +2146,7 @@ class LLMService:
         # Non-blocking DB logging via thread pool (matches asyncio.to_thread pattern)
         try:
             from services.database import get_db
+            from services.request_context import current_user_id, current_action_type, current_source_id
             _log_data = {
                 'correlation_id': correlation_id or None,
                 'task_type': task_type or 'unspecified',
@@ -2152,6 +2161,11 @@ class LLMService:
                 'status': 'success',
                 'response_chars': len(response_text),
                 'stop_reason': stop_reason,
+                'user_id': current_user_id.get(),
+                'action_type': current_action_type.get(),
+                'source_id': current_source_id.get(),
+                'cache_read_tokens': cache_read_input_tokens,
+                'cache_creation_tokens': cache_creation_input_tokens,
             }
             asyncio.get_event_loop().run_in_executor(None, get_db().insert_llm_usage_log, _log_data)
         except Exception as _log_err:

@@ -513,6 +513,26 @@ class ArticleSafetyService:
                 "text": item.get("text", ""),
                 "highlights": item.get("highlights", []),
             })
+
+        # Cost logging
+        try:
+            from services.request_context import current_user_id, current_action_type, current_correlation_id
+            from services.config import get_config
+            from services.cost_queries import insert_api_usage_log
+            insert_api_usage_log({
+                'correlation_id': current_correlation_id.get() or correlation_id,
+                'user_id': current_user_id.get(),
+                'action_type': current_action_type.get(),
+                'provider': 'exa',
+                'operation': 'claim_corroboration',
+                'request_count': 1,
+                'input_units': num_results,
+                'cost_usd': get_config().exa_cost_per_search,
+                'status': 'success',
+            })
+        except Exception:
+            pass
+
         return results
 
     async def _search_google_fact_checks(
@@ -583,7 +603,7 @@ class ArticleSafetyService:
             if response.status_code != 200:
                 return []
             data = response.json()
-            return [
+            fc_results = [
                 {
                     "title": item.get("title", ""),
                     "url": item.get("url", ""),
@@ -592,6 +612,27 @@ class ArticleSafetyService:
                 }
                 for item in data.get("results", [])
             ]
+
+            # Cost logging
+            try:
+                from services.request_context import current_user_id, current_action_type, current_correlation_id
+                from services.config import get_config
+                from services.cost_queries import insert_api_usage_log
+                insert_api_usage_log({
+                    'correlation_id': current_correlation_id.get() or correlation_id,
+                    'user_id': current_user_id.get(),
+                    'action_type': current_action_type.get(),
+                    'provider': 'exa',
+                    'operation': 'factcheck_site_search',
+                    'request_count': 1,
+                    'input_units': 5,
+                    'cost_usd': get_config().exa_cost_per_search,
+                    'status': 'success',
+                })
+            except Exception:
+                pass
+
+            return fc_results
         except Exception as e:
             logger.warning(f"[{correlation_id}] Fact-checker site search failed: {e}")
             return []
@@ -969,6 +1010,26 @@ class ArticleSafetyService:
                 "text": item.get("text", ""),
                 "highlights": item.get("highlights", []),
             })
+
+        # Cost logging
+        try:
+            from services.request_context import current_user_id, current_action_type, current_correlation_id
+            from services.config import get_config
+            from services.cost_queries import insert_api_usage_log
+            insert_api_usage_log({
+                'correlation_id': current_correlation_id.get() or correlation_id,
+                'user_id': current_user_id.get(),
+                'action_type': current_action_type.get(),
+                'provider': 'exa',
+                'operation': 'deep_verify_search',
+                'request_count': 1,
+                'input_units': 5,
+                'cost_usd': get_config().exa_cost_per_search,
+                'status': 'success',
+            })
+        except Exception:
+            pass
+
         return results
 
     async def _deep_verify_classify(

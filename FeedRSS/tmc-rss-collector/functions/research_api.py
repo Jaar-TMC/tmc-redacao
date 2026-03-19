@@ -226,6 +226,26 @@ async def _search_exa(
         })
 
     logger.info(f"Exa search '{query[:50]}...' returned {len(results)} results")
+
+    # Cost logging
+    try:
+        from services.request_context import current_user_id, current_action_type, current_correlation_id
+        from services.config import get_config
+        from services.cost_queries import insert_api_usage_log
+        insert_api_usage_log({
+            'correlation_id': current_correlation_id.get(),
+            'user_id': current_user_id.get(),
+            'action_type': current_action_type.get(),
+            'provider': 'exa',
+            'operation': 'research_search',
+            'request_count': 1,
+            'input_units': num_results,
+            'cost_usd': get_config().exa_cost_per_search,
+            'status': 'success',
+        })
+    except Exception:
+        pass
+
     return results
 
 
@@ -243,6 +263,10 @@ async def research_topic_handler(req: func.HttpRequest) -> func.HttpResponse:
     """
     correlation_id = str(uuid.uuid4())[:8]
     logger.info(f"[{correlation_id}] Research request received")
+    from services.request_context import current_user_id, current_action_type, current_correlation_id
+    current_user_id.set(getattr(req, 'user', {}).get('id') if hasattr(req, 'user') else None)
+    current_action_type.set('research')
+    current_correlation_id.set(correlation_id)
     start_time = time.time()
 
     try:

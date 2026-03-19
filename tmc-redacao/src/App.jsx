@@ -18,6 +18,7 @@ const ConfiguracoesPage = lazy(() => import('./pages/ConfiguracoesPage'));
 const BuscadorPage = lazy(() => import('./pages/config/BuscadorPage'));
 const UsuariosPage = lazy(() => import('./pages/config/UsuariosPage'));
 const SistemaPage = lazy(() => import('./pages/SistemaPage'));
+const CustosPage = lazy(() => import('./pages/config/CustosPage'));
 
 // Novo fluxo de criação de matéria (Rework)
 const SelecionarFontePage = lazy(() => import('./pages/criar/index'));
@@ -50,7 +51,8 @@ function DocumentTitleUpdater() {
       '/configuracoes': 'Configurações',
       '/configuracoes/buscador': 'Buscador de Notícias - Configurações',
       '/configuracoes/usuarios': 'Usuários - Configurações',
-      '/configuracoes/sistema': 'Sistema - Configurações'
+      '/configuracoes/sistema': 'Sistema - Configurações',
+      '/configuracoes/custos': 'Custos - Configurações'
     };
 
     const pageTitle = titles[location.pathname] || 'TMC Redação';
@@ -203,6 +205,7 @@ function AppContent() {
                       <Route path="buscador" element={<BuscadorPage />} />
                       <Route path="usuarios" element={<ProtectedRoute permission="manage_users"><UsuariosPage /></ProtectedRoute>} />
                       <Route path="sistema" element={<ProtectedRoute permission="manage_users"><SistemaPage /></ProtectedRoute>} />
+                      <Route path="custos" element={<ProtectedRoute permission="manage_users"><CustosPage /></ProtectedRoute>} />
                     </Route>
 
                     {/* Catch-all: show 404 for authenticated users, redirect to login otherwise */}

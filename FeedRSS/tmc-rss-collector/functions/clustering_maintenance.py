@@ -552,6 +552,9 @@ async def clustering_maintenance_handler(timer: func.TimerRequest) -> None:
     """
     execution_id = datetime.utcnow().strftime('%Y%m%d_%H%M%S')
     logger.info(f"[{execution_id}] Clustering Maintenance started")
+    from services.request_context import current_action_type, current_correlation_id
+    current_action_type.set('system_clustering_maintenance')
+    current_correlation_id.set(execution_id)
 
     from services.ai_status_service import is_ai_paused
     if is_ai_paused():

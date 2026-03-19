@@ -71,6 +71,7 @@ export default defineConfig({
                 '@tiptap/extension-placeholder',
               ],
               'vendor-sanitize': ['dompurify'],
+              'vendor-charts': ['recharts'],
             },
           },
         },

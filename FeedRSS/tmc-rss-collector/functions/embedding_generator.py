@@ -36,6 +36,9 @@ async def embedding_generator_handler(timer: func.TimerRequest) -> None:
     execution_id = start_time.strftime('%Y%m%d_%H%M%S')
 
     logger.info(f"[{execution_id}] Embedding Generator started")
+    from services.request_context import current_action_type, current_correlation_id
+    current_action_type.set('system_embedding')
+    current_correlation_id.set(execution_id)
 
     # Check if AI operations are paused by admin
     from services.ai_status_service import is_ai_paused

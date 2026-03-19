@@ -221,6 +221,77 @@ async def clustering_maintenance(timer: func.TimerRequest) -> None:
 
 
 # ========================================
+# TIMER TRIGGER - DAILY COST AGGREGATION
+# ========================================
+
+@app.timer_trigger(
+    schedule="0 30 0 * * *",  # Daily at 00:30 UTC
+    arg_name="timer",
+    run_on_startup=False
+)
+async def daily_cost_aggregation(timer: func.TimerRequest) -> None:
+    """
+    Timer trigger para agregacao diaria de custos.
+    Executa diariamente as 00:30 UTC (30min buffer para logs tardios).
+    Agrega llm_usage_log e api_usage_log em daily_cost_summary e daily_cost_detail.
+    """
+    from datetime import datetime, timedelta
+    from services.cost_queries import aggregate_daily_costs
+    yesterday = (datetime.utcnow() - timedelta(days=1)).date()
+    logger.info(f"Daily cost aggregation started for {yesterday}")
+    result = await aggregate_daily_costs(yesterday)
+    logger.info(f"Daily cost aggregation result: {result}")
+
+
+# ========================================
+# TIMER TRIGGER - DATA RETENTION CLEANUP
+# ========================================
+
+@app.timer_trigger(
+    schedule="0 0 3 1 * *",  # 1st of each month at 03:00 UTC
+    arg_name="timer",
+    run_on_startup=False
+)
+async def cost_data_cleanup(timer: func.TimerRequest) -> None:
+    """
+    Timer trigger para limpeza mensal de dados brutos de custo.
+    Deleta registros de llm_usage_log e api_usage_log com mais de 90 dias,
+    apos confirmar que estao agregados em daily_cost_summary/daily_cost_detail.
+    """
+    from datetime import datetime, timedelta
+    cutoff = (datetime.utcnow() - timedelta(days=90)).date()
+    logger.info(f"Cost data cleanup started, cutoff: {cutoff}")
+
+    try:
+        from services.database import get_db
+        db = get_db()
+        with db.get_connection() as conn:
+            cursor = conn.cursor()
+
+            # Delete old raw LLM usage logs (aggregated data preserved in summary tables)
+            # Only delete data for dates confirmed aggregated
+            cursor.execute("""
+                DELETE FROM llm_usage_log
+                WHERE created_at < %s
+                  AND CONVERT(DATE, created_at) IN (SELECT DISTINCT date FROM daily_cost_summary)
+            """, (str(cutoff),))
+            llm_deleted = cursor.rowcount
+
+            # Delete old raw API usage logs
+            cursor.execute("""
+                DELETE FROM api_usage_log
+                WHERE created_at < %s
+                  AND CONVERT(DATE, created_at) IN (SELECT DISTINCT date FROM daily_cost_summary)
+            """, (str(cutoff),))
+            api_deleted = cursor.rowcount
+
+            conn.commit()
+            logger.info(f"Cost data cleanup complete: {llm_deleted} LLM + {api_deleted} API records deleted (older than {cutoff})")
+    except Exception as e:
+        logger.error(f"Cost data cleanup failed: {e}")
+
+
+# ========================================
 # HTTP TRIGGERS - HEALTH & STATS
 # ========================================
 
@@ -1185,6 +1256,64 @@ async def auth_reset_password(req: func.HttpRequest) -> func.HttpResponse:
 
 
 # ========================================
+# HTTP TRIGGERS - COSTS API
+# ========================================
+
+@app.route(route="costs/overview", methods=["GET", "OPTIONS"])
+@with_cors
+@require_admin
+async def costs_overview(req: func.HttpRequest) -> func.HttpResponse:
+    """GET /api/costs/overview - Cost overview for dashboard cards (admin only)."""
+    from functions.costs_api import costs_overview_handler
+    return await costs_overview_handler(req)
+
+
+@app.route(route="costs/trends", methods=["GET", "OPTIONS"])
+@with_cors
+@require_admin
+async def costs_trends(req: func.HttpRequest) -> func.HttpResponse:
+    """GET /api/costs/trends - Cost time series for trends chart (admin only)."""
+    from functions.costs_api import costs_trends_handler
+    return await costs_trends_handler(req)
+
+
+@app.route(route="costs/breakdown", methods=["GET", "OPTIONS"])
+@with_cors
+@require_admin
+async def costs_breakdown(req: func.HttpRequest) -> func.HttpResponse:
+    """GET /api/costs/breakdown - Cost breakdown by action type (admin only)."""
+    from functions.costs_api import costs_breakdown_handler
+    return await costs_breakdown_handler(req)
+
+
+@app.route(route="costs/by-user", methods=["GET", "OPTIONS"])
+@with_cors
+@require_admin
+async def costs_by_user(req: func.HttpRequest) -> func.HttpResponse:
+    """GET /api/costs/by-user - Cost breakdown by user (admin only)."""
+    from functions.costs_api import costs_by_user_handler
+    return await costs_by_user_handler(req)
+
+
+@app.route(route="costs/by-source", methods=["GET", "OPTIONS"])
+@with_cors
+@require_admin
+async def costs_by_source(req: func.HttpRequest) -> func.HttpResponse:
+    """GET /api/costs/by-source - Cost breakdown by RSS source (admin only)."""
+    from functions.costs_api import costs_by_source_handler
+    return await costs_by_source_handler(req)
+
+
+@app.route(route="costs/source-estimate", methods=["GET", "OPTIONS"])
+@with_cors
+@require_admin
+async def costs_source_estimate(req: func.HttpRequest) -> func.HttpResponse:
+    """GET /api/costs/source-estimate - Per-source cost averages for what-if calc (admin only)."""
+    from functions.costs_api import costs_source_estimate_handler
+    return await costs_source_estimate_handler(req)
+
+
+# ========================================
 # STARTUP
 # ========================================
 
@@ -1195,6 +1324,8 @@ logger.info("  - Timer: embedding_generator (cada 5 min)")
 logger.info("  - Timer: scoring_calculator (cada 10 min)")
 logger.info("  - Timer: clustering_engine (cada 30 min)")
 logger.info("  - Timer: clustering_maintenance (diario 3AM UTC)")
+logger.info("  - Timer: daily_cost_aggregation (diario 00:30 UTC)")
+logger.info("  - Timer: cost_data_cleanup (mensal 1o dia 3AM UTC)")
 logger.info("  - GET  /api/health")
 logger.info("  - GET  /api/stats")
 logger.info("  - GET  /api/articles")
@@ -1233,3 +1364,9 @@ logger.info("  - POST /api/auth/users")
 logger.info("  - PUT  /api/auth/users/{id}")
 logger.info("  - DELETE /api/auth/users/{id}")
 logger.info("  - POST /api/auth/users/{id}/reset-password")
+logger.info("  - GET  /api/costs/overview")
+logger.info("  - GET  /api/costs/trends")
+logger.info("  - GET  /api/costs/breakdown")
+logger.info("  - GET  /api/costs/by-user")
+logger.info("  - GET  /api/costs/by-source")
+logger.info("  - GET  /api/costs/source-estimate")
