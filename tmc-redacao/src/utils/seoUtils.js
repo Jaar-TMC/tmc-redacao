@@ -240,8 +240,10 @@ export const analyzeContentStructure = (content) => {
   };
   results.score += results.details.hasList.points;
 
-  // Check for blockquotes
-  const hasQuotes = STRUCTURE_PATTERNS.blockquote.test(content) || STRUCTURE_PATTERNS.markdown.blockquote.test(content);
+  // Check for quotes (blockquotes OR inline journalistic quotes with reporting verbs)
+  const hasBlockquotes = STRUCTURE_PATTERNS.blockquote.test(content) || STRUCTURE_PATTERNS.markdown.blockquote.test(content);
+  const hasInlineQuotes = /[\u201C\u201D][^\u201C\u201D]{10,}[\u201C\u201D]/.test(content) || /"[^"]{10,}"/.test(stripHtml(content));
+  const hasQuotes = hasBlockquotes || hasInlineQuotes;
   results.details.hasQuotes = {
     passed: hasQuotes,
     points: hasQuotes ? 1 : 0,
@@ -446,24 +448,24 @@ export const analyzeTitleOptimization = (title, content, targetKeyword) => {
   };
   results.score += results.details.powerWords.points;
 
-  // Numbers (1 pt)
+  // Numbers (1 pt bonus)
   const hasNumbers = /\d+/.test(title || '');
   results.details.numbers = {
     found: hasNumbers,
     points: hasNumbers ? 1 : 0,
-    status: hasNumbers ? 'success' : 'neutral',
-    message: hasNumbers ? 'Número no título' : 'Números aumentam CTR em 36%'
+    status: hasNumbers ? 'success' : 'success',  // Never penalize absence
+    message: hasNumbers ? 'Número no título (+1 bônus)' : 'Opcional: números aumentam CTR'
   };
   results.score += results.details.numbers.points;
 
-  // Emotional appeal (1 pt)
+  // Emotional appeal (1 pt bonus)
   const emotionalWords = ['exclusivo', 'urgente', 'chocante', 'surpreendente', 'inédito', 'histórico', 'polêmico', 'emocionante'];
   const hasEmotional = emotionalWords.some(ew => cleanTitle.includes(ew));
   results.details.emotional = {
     found: hasEmotional,
     points: hasEmotional ? 1 : 0,
-    status: hasEmotional ? 'success' : 'neutral',
-    message: hasEmotional ? 'Apelo emocional presente' : 'Considere adicionar apelo emocional'
+    status: hasEmotional ? 'success' : 'success',  // Never penalize absence
+    message: hasEmotional ? 'Apelo emocional presente (+1 bônus)' : 'Opcional: palavras de impacto aumentam cliques'
   };
   results.score += results.details.emotional.points;
 
@@ -1012,6 +1014,23 @@ export const analyzeTrust = (content, title) => {
   TRUST_SIGNALS.multipleViewpoints.forEach(pattern => {
     if (pattern.test(text)) balanceCount++;
   });
+  // Also check for common journalistic balance indicators
+  const additionalBalancePatterns = [
+    /no\s+entanto/i,
+    /por[ée]m/i,
+    /entretanto/i,
+    /apesar\s+(disso|de)/i,
+    /contudo/i,
+    /enquanto\s+isso/i,
+    /diferente(mente)?\s+d[eo]/i,
+    /divergem|divergência|discordam/i,
+    /debate|discussão|polêmica/i,
+    /favoráveis?\s+e\s+contrários/i,
+    /prós?\s+e\s+contras?/i
+  ];
+  additionalBalancePatterns.forEach(pattern => {
+    if (pattern.test(text)) balanceCount++;
+  });
   const hasBalance = balanceCount >= 1;
   results.details.balancedPerspective = {
     indicators: balanceCount,
@@ -1354,20 +1373,32 @@ export const analyzeFeaturedSnippetReadiness = (content, _title) => {
   const firstPara = getFirstParagraph(content);
   const firstParaWords = countWords(firstPara);
 
-  // Direct answer (2 pts)
-  const hasDirectAnswer = firstParaWords >= 30 && firstParaWords <= 80;
+  // Direct answer - tiered scoring (3 pts)
+  // Ideal: 40-60 words, Good: 30-80 words, Acceptable: 20-100 words
+  let directAnswerScore = 0;
+  let directAnswerStatus = 'error';
+  if (firstParaWords >= 40 && firstParaWords <= 60) {
+    directAnswerScore = 3;
+    directAnswerStatus = 'success';
+  } else if (firstParaWords >= 30 && firstParaWords <= 80) {
+    directAnswerScore = 2;
+    directAnswerStatus = 'success';
+  } else if (firstParaWords >= 20 && firstParaWords <= 100) {
+    directAnswerScore = 1;
+    directAnswerStatus = 'warning';
+  }
   results.details.directAnswer = {
     words: firstParaWords,
     ideal: '40-60',
-    points: hasDirectAnswer ? 2 : firstParaWords >= 20 ? 1 : 0,
-    status: hasDirectAnswer ? 'success' : firstParaWords >= 20 ? 'warning' : 'error',
-    message: hasDirectAnswer
-      ? 'Primeiro parágrafo com tamanho ideal para snippet'
-      : firstParaWords < 30
+    points: directAnswerScore,
+    status: directAnswerStatus,
+    message: directAnswerScore >= 2
+      ? `Primeiro parágrafo adequado para snippet (${firstParaWords} palavras)`
+      : firstParaWords < 20
         ? 'Primeiro parágrafo muito curto para snippet'
-        : 'Primeiro parágrafo muito longo para snippet'
+        : 'Ajuste o primeiro parágrafo para 40-60 palavras'
   };
-  results.score += results.details.directAnswer.points;
+  results.score += directAnswerScore;
 
   // Has list (1 pt)
   const hasList = STRUCTURE_PATTERNS.bulletList.test(content || '') ||
@@ -1384,29 +1415,20 @@ export const analyzeFeaturedSnippetReadiness = (content, _title) => {
   };
   results.score += results.details.hasList.points;
 
-  // Has table (1 pt)
-  const hasTable = STRUCTURE_PATTERNS.table.test(content || '');
-  results.details.hasTable = {
-    found: hasTable,
-    points: hasTable ? 1 : 0,
-    status: hasTable ? 'success' : 'neutral',
-    message: hasTable
-      ? 'Tabela presente'
-      : 'Tabelas ajudam em snippets de comparação'
+  // Clear structure for AI extraction (1 pt) — replaces hasTable
+  // Checks if content has headings + paragraphs (more relevant than tables for news)
+  const hasHeadings = /<h[2-4][^>]*>/i.test(content || '') || /^#{2,4}\s+/m.test(content || '');
+  const hasMultipleParagraphs = countParagraphs(content) >= 3;
+  const hasClearStructure = hasHeadings && hasMultipleParagraphs;
+  results.details.clearStructure = {
+    found: hasClearStructure,
+    points: hasClearStructure ? 1 : 0,
+    status: hasClearStructure ? 'success' : 'neutral',
+    message: hasClearStructure
+      ? 'Estrutura clara para extração por IA'
+      : 'Adicione subtítulos e organize em parágrafos'
   };
-  results.score += results.details.hasTable.points;
-
-  // Concise answer (1 pt)
-  const idealAnswer = firstParaWords >= 40 && firstParaWords <= 60;
-  results.details.conciseAnswer = {
-    isIdeal: idealAnswer,
-    points: idealAnswer ? 1 : 0,
-    status: idealAnswer ? 'success' : 'neutral',
-    message: idealAnswer
-      ? 'Resposta concisa (40-60 palavras)'
-      : `Ajuste para 40-60 palavras (atual: ${firstParaWords})`
-  };
-  results.score += results.details.conciseAnswer.points;
+  results.score += results.details.clearStructure.points;
 
   // Overall status
   results.status = results.score >= 4 ? 'success' : results.score >= 2 ? 'warning' : 'error';

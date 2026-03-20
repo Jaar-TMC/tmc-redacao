@@ -171,7 +171,14 @@ export const TRUST_SIGNALS = {
     /enquanto\s+(uns|alguns|outros)/i,
     /há\s+quem\s+(defenda|critique|acredite)/i,
     /pontos\s+de\s+vista/i,
-    /ambos\s+os\s+lados/i
+    /ambos\s+os\s+lados/i,
+    /no\s+entanto/i,
+    /por[ée]m/i,
+    /entretanto/i,
+    /apesar\s+(disso|de)/i,
+    /contudo/i,
+    /divergem|divergência/i,
+    /debate|polêmica/i
   ],
   factualClaims: [
     /dados\s+(mostram|indicam|revelam|apontam)/i,
@@ -303,8 +310,8 @@ export const SCORING_THRESHOLDS = {
   },
   metaDescription: {
     min: 120,
-    idealMin: 150,
-    idealMax: 160,
+    idealMin: 140,
+    idealMax: 165,
     max: 180
   },
   slug: {

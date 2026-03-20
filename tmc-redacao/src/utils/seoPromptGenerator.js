@@ -126,10 +126,10 @@ const generateDeficitAnalysis = (categories) => {
   const metaDesc = categories.onPageOptimization?.metrics?.metaDescription;
   if (metaDesc?.details?.length?.value) {
     const len = metaDesc.details.length.value;
-    if (len < 150) {
-      deficits.push(`LINHA FINA: ${len} caracteres (PRECISA: 150-160) - ADICIONE ${150 - len} caracteres`);
-    } else if (len > 160) {
-      deficits.push(`LINHA FINA: ${len} caracteres (PRECISA: 150-160) - REMOVA ${len - 160} caracteres`);
+    if (len < 140) {
+      deficits.push(`LINHA FINA: ${len} caracteres (PRECISA: 140-165) - ADICIONE ${140 - len} caracteres`);
+    } else if (len > 165) {
+      deficits.push(`LINHA FINA: ${len} caracteres (PRECISA: 140-165) - REMOVA ${len - 165} caracteres`);
     }
   }
 
@@ -220,22 +220,22 @@ Outros requisitos:
 
 EXEMPLO CORRETO (155 caracteres - SUCESSO):
 "Descubra como o novo imposto trabalhista afeta sua renda em 2026. Entenda as mudancas legais, os impactos financeiros e as excecoes previstas. Confira o guia."
-- Comprimento: 155 caracteres (entre 150-160) OK
+- Comprimento: 155 caracteres (entre 140-165) OK
 - Palavra-chave: presente OK
 - CTA ("Confira"): presente OK
 - RESULTADO: 7/7 pontos
 
 EXEMPLO INCORRETO (112 caracteres - FALHA):
 "Novo imposto de 2026. Confira as mudancas nas regras tributarias para trabalhadores."
-- Comprimento: 112 caracteres (ABAIXO de 150 - faltam 38) FALHA
+- Comprimento: 112 caracteres (ABAIXO de 140 - faltam 28) FALHA
 - RESULTADO: 1/7 pontos
 
-VOCE DEVE gerar como o EXEMPLO CORRETO. Se sua linha fina tiver menos de 150 caracteres, ADICIONE mais contexto ate atingir 150-160.
+VOCE DEVE gerar como o EXEMPLO CORRETO. Se sua linha fina tiver menos de 140 caracteres, ADICIONE mais contexto ate atingir 140-165.
 
 ### PRIORIDADE DE REQUISITOS (quando houver conflito):
 
 PRIORIDADE 1 (NUNCA viole - inegociavel):
-1. Comprimento exato: Titulo 50-60 chars, Linha Fina 150-160 chars
+1. Comprimento exato: Titulo 50-60 chars, Linha Fina 140-165 chars
 2. Frase completa com pontuacao correta
 
 PRIORIDADE 2 (Mantenha se possivel):
@@ -286,7 +286,7 @@ ANTES DE FINALIZAR, VALIDE CADA ITEM:
 
 Para a LINHA FINA:
 1. Conte os caracteres (incluindo espacos e pontuacao)
-2. Esta entre 150-160? Se NAO, REESCREVA adicionando ou removendo palavras
+2. Esta entre 140-165? Se NAO, REESCREVA adicionando ou removendo palavras
 3. Tem CTA (confira, saiba mais, veja, entenda)? Se NAO, ADICIONE
 4. Repita ate estar correto - NAO FINALIZE com comprimento errado
 
@@ -702,8 +702,8 @@ const getActionItems = (categoryKey, metricKey, metric) => {
           items.push('Adicione palavra de impacto (exclusivo, revela, novo, etc.)');
         }
       } else if (metricKey === 'metaDescription') {
-        if (metric?.details?.length?.value < 150) {
-          items.push('Expanda a linha fina para 150-160 caracteres');
+        if (metric?.details?.length?.value < 140) {
+          items.push('Expanda a linha fina para 140-165 caracteres');
         }
         if (!metric?.details?.cta?.found) {
           items.push('Adicione convite para ler (saiba mais, veja, confira)');

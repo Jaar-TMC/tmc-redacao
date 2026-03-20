@@ -94,8 +94,8 @@ export const SEO_SCORING_RULES = {
       keywordInFirst3Words: true
     },
     linhaFina: {
-      minChars: 150,
-      maxChars: 160,
+      minChars: 140,
+      maxChars: 165,
       needsCTA: true,
       needsKeyword: true
     },
@@ -227,7 +227,7 @@ export const SEO_PROMPT_TEMPLATES = {
 - Considere incluir um numero se relevante`,
 
     metaDescription: `OTIMIZE A LINHA FINA:
-- Tamanho atual: {currentLength} caracteres (ideal: 150-160)
+- Tamanho atual: {currentLength} caracteres (ideal: 140-165)
 - Inclua a palavra-chave principal
 - Adicione um CTA (saiba mais, veja, confira, entenda)
 - Diferencie do titulo - complemente, nao repita
