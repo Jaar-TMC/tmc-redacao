@@ -18,7 +18,7 @@ export const FiltersProvider = ({ children }) => {
     tag: null,
     category: null,
     source: null,
-    urgency: null,
+    urgency: 1,
     scoreClassification: null,
     sortOrder: 'newest',
   });
@@ -43,7 +43,7 @@ export const FiltersProvider = ({ children }) => {
       tag: null,
       category: null,
       source: null,
-      urgency: null,
+      urgency: 1,
       scoreClassification: null,
       sortOrder: 'newest',
     });
