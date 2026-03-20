@@ -30,11 +30,14 @@ async def list_sources_handler(req: func.HttpRequest) -> func.HttpResponse:
             "total": len(sources)
         }
 
-        return func.HttpResponse(
+        resp = func.HttpResponse(
             json.dumps(response, default=str),
             status_code=200,
             mimetype="application/json"
         )
+        # Cache sources list for 10 minutes (sources rarely change)
+        resp.headers["Cache-Control"] = "public, max-age=600"
+        return resp
 
     except Exception as e:
         logger.error(f"Error listing sources: {e}")

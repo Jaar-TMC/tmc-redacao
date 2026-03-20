@@ -110,6 +110,14 @@ async def rss_collector_handler(timer: func.TimerRequest) -> None:
             total_scored += result.get('scored', 0)
             total_short_filtered += result.get('short_filtered', 0)
 
+    # Refresh pre-aggregated tag counts (non-blocking, non-critical)
+    if total_new > 0:
+        try:
+            count = await run_db(db.refresh_tag_aggregations, period_hours=72)
+            logger.info(f"[{execution_id}] Tag aggregations refreshed: {count} tags")
+        except Exception as e:
+            logger.warning(f"[{execution_id}] Tag aggregation refresh failed (non-critical): {e}")
+
     # Log final
     duration = (datetime.utcnow() - start_time).total_seconds()
     logger.info(

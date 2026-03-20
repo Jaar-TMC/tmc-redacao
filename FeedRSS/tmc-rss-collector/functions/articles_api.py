@@ -155,7 +155,7 @@ async def list_articles_handler(req: func.HttpRequest) -> func.HttpResponse:
                     if has_tag_filters:
                         tag_list = await run_db(db.get_all_tags_filtered, **tag_kwargs)
                     else:
-                        tag_list = await run_db(db.get_all_tags, limit=100)
+                        tag_list = await run_db(db.get_all_tags_fast, limit=100)
 
                     tag_items = [{"id": i + 1, "tag": t['tag'], "theme": t['theme'], "count": t['count']} for i, t in enumerate(tag_list)]
 
@@ -186,11 +186,14 @@ async def list_articles_handler(req: func.HttpRequest) -> func.HttpResponse:
             "facets": facets
         }
 
-        return func.HttpResponse(
+        resp = func.HttpResponse(
             json.dumps(response, default=str),
             status_code=200,
             mimetype="application/json"
         )
+        # Cache articles list for 60 seconds (data changes every 15 min via RSS collector)
+        resp.headers["Cache-Control"] = "public, max-age=60"
+        return resp
 
     except ValueError as e:
         logger.error(f"ValueError in list_articles: {e}", exc_info=True)
@@ -236,11 +239,14 @@ async def get_article_handler(req: func.HttpRequest) -> func.HttpResponse:
                 mimetype="application/json"
             )
 
-        return func.HttpResponse(
+        resp = func.HttpResponse(
             json.dumps(article.to_frontend_format(), default=str),
             status_code=200,
             mimetype="application/json"
         )
+        # Cache single article for 2 minutes (content is static after collection)
+        resp.headers["Cache-Control"] = "public, max-age=120"
+        return resp
 
     except Exception as e:
         logger.error(f"Error getting article: {e}")
@@ -292,11 +298,14 @@ async def get_categories_handler(req: func.HttpRequest) -> func.HttpResponse:
         # Ordenar por contagem
         categories.sort(key=lambda x: x['count'], reverse=True)
 
-        return func.HttpResponse(
+        resp = func.HttpResponse(
             json.dumps({"categories": categories}),
             status_code=200,
             mimetype="application/json"
         )
+        # Cache categories for 5 minutes (only change when new articles are collected)
+        resp.headers["Cache-Control"] = "public, max-age=300"
+        return resp
 
     except Exception as e:
         logger.error(f"Error getting categories: {e}", exc_info=True)
@@ -330,7 +339,7 @@ async def get_trending_tags_handler(req: func.HttpRequest) -> func.HttpResponse:
 
         # Get trending tags from database
         db = get_db()
-        tags = await run_db(db.get_trending_tags, limit=limit, period_hours=period_hours)
+        tags = await run_db(db.get_trending_tags_fast, limit=limit, period_hours=period_hours or 72)
 
         # Format response with proper display names
         items = []
@@ -348,11 +357,14 @@ async def get_trending_tags_handler(req: func.HttpRequest) -> func.HttpResponse:
                 "trend": "stable"  # Could be calculated comparing to previous period
             })
 
-        return func.HttpResponse(
+        resp = func.HttpResponse(
             json.dumps({"items": items, "total": len(items)}),
             status_code=200,
             mimetype="application/json"
         )
+        # Cache trending tags for 5 minutes (recalculated periodically)
+        resp.headers["Cache-Control"] = "public, max-age=300"
+        return resp
 
     except ValueError as e:
         logger.error(f"ValueError in get_trending_tags: {e}", exc_info=True)
@@ -411,7 +423,7 @@ async def get_all_tags_handler(req: func.HttpRequest) -> func.HttpResponse:
                 category=category, source_id=source, period=period, limit=limit
             )
         else:
-            tags = await run_db(db.get_all_tags, search=search, limit=limit)
+            tags = await run_db(db.get_all_tags_fast, search=search, limit=limit)
 
         # Format response
         items = []
@@ -423,11 +435,14 @@ async def get_all_tags_handler(req: func.HttpRequest) -> func.HttpResponse:
                 "count": tag_data['count']
             })
 
-        return func.HttpResponse(
+        resp = func.HttpResponse(
             json.dumps({"items": items, "total": len(items)}),
             status_code=200,
             mimetype="application/json"
         )
+        # Cache tags for 5 minutes (only change when new articles are collected)
+        resp.headers["Cache-Control"] = "public, max-age=300"
+        return resp
 
     except Exception as e:
         logger.error(f"Error getting all tags: {e}")

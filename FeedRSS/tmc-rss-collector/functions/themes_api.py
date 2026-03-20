@@ -239,11 +239,14 @@ async def list_themes_handler(req: func.HttpRequest) -> func.HttpResponse:
             "pages": pages
         }
 
-        return func.HttpResponse(
+        resp = func.HttpResponse(
             json.dumps(response, default=str),
             status_code=200,
             mimetype="application/json"
         )
+        # Cache themes list for 5 minutes (clustering runs every 30 min)
+        resp.headers["Cache-Control"] = "public, max-age=300"
+        return resp
 
     except ValueError as e:
         return func.HttpResponse(
@@ -374,11 +377,14 @@ async def get_theme_handler(req: func.HttpRequest) -> func.HttpResponse:
             "updatedAt": theme.get('last_updated_at').isoformat() if theme.get('last_updated_at') else None
         }
 
-        return func.HttpResponse(
+        resp = func.HttpResponse(
             json.dumps(response, default=str),
             status_code=200,
             mimetype="application/json"
         )
+        # Cache theme detail for 5 minutes (clustering runs every 30 min)
+        resp.headers["Cache-Control"] = "public, max-age=300"
+        return resp
 
     except ValueError as e:
         return func.HttpResponse(
@@ -591,11 +597,14 @@ async def get_clustering_stats_handler(req: func.HttpRequest) -> func.HttpRespon
             "recommendations": recommendations
         }
 
-        return func.HttpResponse(
+        resp = func.HttpResponse(
             json.dumps(response, default=str),
             status_code=200,
             mimetype="application/json"
         )
+        # Cache clustering stats for 5 minutes (maintenance runs daily)
+        resp.headers["Cache-Control"] = "public, max-age=300"
+        return resp
 
     except Exception as e:
         logger.error(f"Error getting clustering stats: {e}")

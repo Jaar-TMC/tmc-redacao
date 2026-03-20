@@ -43,6 +43,8 @@ def main():
         "008_auth_audit_log.sql",
         "017_cost_tracking_extensions.sql",
         "018_api_usage_and_daily_summary.sql",
+        "019_category_index.sql",
+        "020_tag_aggregations.sql",
     ]
 
     for mfile in migration_files:
@@ -74,7 +76,7 @@ def main():
     # Verify
     cursor.execute("""
         SELECT name FROM sys.tables
-        WHERE name IN ('users', 'token_blacklist', 'auth_audit_log')
+        WHERE name IN ('users', 'token_blacklist', 'auth_audit_log', 'tag_aggregations')
         ORDER BY name
     """)
     tables = [row[0] for row in cursor.fetchall()]

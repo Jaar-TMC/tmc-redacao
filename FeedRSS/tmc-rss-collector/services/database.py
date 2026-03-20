@@ -627,7 +627,8 @@ class DatabaseService:
             cursor = conn.cursor()
 
             # 1. Main query with COUNT(*) OVER() - replaces both count + article queries.
-            # LEFT JOIN article_scores kept only for detail columns (score_inesperado etc.).
+            # Score detail columns (score_inesperado etc.) removed from list query —
+            # frontend never uses them and the LEFT JOIN article_scores was a bottleneck.
             # WHERE and ORDER BY use denormalized a.total_score / a.classification (no JOIN needed).
             select_cols = """
                 SELECT a.id, a.source_id, a.title, a.content, a.preview, a.url,
@@ -635,11 +636,9 @@ class DatabaseService:
                        a.collected_at, a.hash,
                        s.name as source_name, s.url as source_url, s.favicon_url,
                        a.total_score, a.classification,
-                       sc.score_inesperado, sc.score_impacto, sc.score_busca_agora, sc.score_conversa,
                        COUNT(*) OVER() as total_count
                 FROM collected_articles a
                 JOIN sources s ON a.source_id = s.id
-                LEFT JOIN article_scores sc ON sc.article_id = a.id
                 {where_clause}
             """.format(where_clause=where_clause)
 
@@ -933,6 +932,7 @@ class DatabaseService:
             Number of articles deleted
         """
         # Delete articles with exact same title (keep oldest), batch limited
+        # PERF: Bounded to 72-hour window to avoid full table scan
         query = """
             WITH Duplicates AS (
                 SELECT id,
@@ -942,6 +942,7 @@ class DatabaseService:
                            ORDER BY collected_at ASC
                        ) as rn
                 FROM collected_articles
+                WHERE collected_at >= DATEADD(hour, -72, GETUTCDATE())
             )
             DELETE TOP (500) FROM collected_articles
             WHERE id IN (
@@ -993,6 +994,122 @@ class DatabaseService:
             ))
             conn.commit()
 
+    def refresh_tag_aggregations(self, period_hours: int = 72) -> int:
+        """
+        Pre-aggregate tag counts into tag_aggregations table.
+        Called by RSS collector timer (every 15 min) -- NOT on HTTP requests.
+        Returns number of tags aggregated.
+        """
+        excluded_tags = (
+            "'g1', 'globo', 'folha', 'uol', 'estadao', 'cnn', 'bbc', "
+            "'r7', 'terra', 'ig', 'globoesporte', 'tecmundo', 'infomoney', "
+            "'noticias', 'noticia', 'news', "
+            "'cnn esportes', 'cnn brasil', 'cnn brasil money', 'cnn money', "
+            "'agencia cnn', 'agência cnn', 'cnn pop', '#cnnpop', 'cnnpop', "
+            "'cnn viagem', 'cnn soft', 'cnn series', "
+            "'folha de s.paulo', 'folha de são paulo', 'o globo', "
+            "'valor economico', 'valor econômico', 'poder360', "
+            "'metrópoles', 'metropoles', 'carta capital', 'cartacapital'"
+        )
+
+        delete_query = "DELETE FROM tag_aggregations WHERE period_hours = %s"
+
+        insert_query = f"""
+            INSERT INTO tag_aggregations (tag, article_count, period_hours, last_updated)
+            SELECT tag, article_count, %s, GETUTCDATE()
+            FROM (
+                SELECT
+                    LOWER(LTRIM(RTRIM(t.value))) as tag,
+                    COUNT(DISTINCT a.id) as article_count
+                FROM collected_articles a
+                CROSS APPLY OPENJSON(a.tags) t
+                WHERE a.published_at >= DATEADD(hour, -%s, GETUTCDATE())
+                GROUP BY LOWER(LTRIM(RTRIM(t.value)))
+            ) raw
+            WHERE tag IS NOT NULL
+                AND LEN(tag) > 2
+                AND tag NOT IN ({excluded_tags})
+                AND tag NOT LIKE '%%.com'
+                AND tag NOT LIKE '%%.com.br'
+                AND tag NOT LIKE '%%.br'
+                AND tag NOT LIKE '%%.net'
+                AND tag NOT LIKE '%%.org'
+                AND tag NOT LIKE 'cnn %%'
+                AND tag NOT LIKE '#cnn%%'
+        """
+
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(delete_query, (period_hours,))
+            cursor.execute(insert_query, (period_hours, period_hours))
+            count = cursor.rowcount
+            conn.commit()
+            logger.info(f"[refresh_tag_aggregations] Refreshed {count} tags for {period_hours}h window")
+            return count
+
+    def get_trending_tags_fast(self, limit: int = 20, period_hours: int = 72) -> List[dict]:
+        """
+        Get trending tags from pre-aggregated table (< 10ms).
+        Falls back to live OPENJSON query if aggregation table is empty/stale.
+        """
+        query = """
+            SELECT TOP %s tag, article_count
+            FROM tag_aggregations
+            WHERE period_hours = %s
+                AND last_updated >= DATEADD(hour, -1, GETUTCDATE())
+            ORDER BY article_count DESC
+        """
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(query, (limit, period_hours))
+            rows = cursor.fetchall()
+
+        if rows:
+            return [{"tag": row[0], "count": row[1]} for row in rows]
+
+        # Fallback: aggregation table empty or stale -- use live query
+        logger.warning("[get_trending_tags_fast] Aggregation stale, falling back to live query")
+        return self.get_trending_tags(limit=limit, period_hours=period_hours)
+
+    def get_all_tags_fast(self, search: Optional[str] = None, limit: int = 100, period_hours: int = 72) -> List[dict]:
+        """
+        Get all tags from pre-aggregated table with optional search filter.
+        Falls back to live query if aggregation is stale.
+        """
+        params = [period_hours]
+        search_filter = ""
+        if search:
+            search_filter = "AND tag LIKE %s"
+            search_escaped = search.replace('[', '[[]').replace('%', '[%]').replace('_', '[_]')
+            params.append(f"%{search_escaped}%")
+
+        query = f"""
+            SELECT TOP %s tag, article_count
+            FROM tag_aggregations
+            WHERE period_hours = %s
+                AND last_updated >= DATEADD(hour, -1, GETUTCDATE())
+                {search_filter}
+            ORDER BY article_count DESC, tag ASC
+        """
+        params_ordered = [limit] + params
+
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(query, tuple(params_ordered))
+            rows = cursor.fetchall()
+
+        if rows:
+            result = []
+            for row in rows:
+                tag = row[0]
+                theme = ' '.join(word.capitalize() for word in tag.replace('-', ' ').split())
+                result.append({"tag": tag, "theme": theme, "count": row[1]})
+            return result
+
+        # Fallback to live query
+        logger.warning("[get_all_tags_fast] Aggregation stale, falling back to live query")
+        return self.get_all_tags(search=search, limit=limit)
+
     def get_trending_tags(self, limit: int = 20, period_hours: Optional[int] = None) -> List[dict]:
         """
         Get trending tags with distinct article counts from ALL articles.
@@ -1007,12 +1124,11 @@ class DatabaseService:
         Returns:
             List of dicts: [{"tag": "tagname", "count": N}, ...]
         """
-        # Build period filter if specified
-        period_filter = ""
-        params = []
-        if period_hours:
-            period_filter = "WHERE a.published_at >= DATEADD(hour, -%s, GETUTCDATE())"
-            params.append(period_hours)
+        # Always limit the scan window to avoid OPENJSON on entire table.
+        # Default to 72h (trending = recent by definition). Caller can override.
+        effective_hours = period_hours if period_hours else 72
+        period_filter = "WHERE a.published_at >= DATEADD(hour, -%s, GETUTCDATE())"
+        params = [effective_hours]
 
         # SQL Server approach: Parse JSON tags and count distinct articles
         # Note: tags are stored as JSON array like '["tag1", "tag2"]'
@@ -1081,8 +1197,11 @@ class DatabaseService:
         Returns:
             List of dicts: [{"tag": "tagname", "theme": "Tag Name", "count": N}, ...]
         """
+        # Always limit the scan window to avoid OPENJSON on entire table.
+        # Default to 72h — tags older than that are rarely relevant for filtering.
+        params = [72]
+
         search_filter = ""
-        params = []
         if search:
             search_filter = "AND tag LIKE %s"
             search_escaped = search.replace('[', '[[]').replace('%', '[%]').replace('_', '[_]')
@@ -1095,6 +1214,7 @@ class DatabaseService:
                     LOWER(LTRIM(RTRIM(t.value))) as tag
                 FROM collected_articles a
                 CROSS APPLY OPENJSON(a.tags) t
+                WHERE a.published_at >= DATEADD(hour, -%s, GETUTCDATE())
             ),
             TagCounts AS (
                 SELECT
@@ -1193,6 +1313,21 @@ class DatabaseService:
         conditions = []
         params = []
 
+        # Always limit the scan window to avoid OPENJSON on entire table.
+        # If caller provides a period, use it; otherwise default to 72h.
+        has_period = False
+        if period:
+            try:
+                hours = int(period)
+                if 1 <= hours <= 24:
+                    conditions.append("a.published_at >= DATEADD(hour, -%s, GETUTCDATE())")
+                    params.append(hours)
+                    has_period = True
+            except ValueError:
+                pass
+        if not has_period:
+            conditions.append("a.published_at >= DATEADD(hour, -72, GETUTCDATE())")
+
         # Build base filter conditions (reusing logic from _build_article_filters)
         # classification is denormalized on collected_articles - no scores JOIN needed
         if classification and classification in ('A', 'B', 'C'):
@@ -1212,14 +1347,6 @@ class DatabaseService:
                 OR a.preview COLLATE Latin1_General_CI_AI LIKE %s COLLATE Latin1_General_CI_AI
             )""")
             params.extend([search_param, search_param])
-        if period:
-            try:
-                hours = int(period)
-                if 1 <= hours <= 24:
-                    conditions.append("a.published_at >= DATEADD(hour, -%s, GETUTCDATE())")
-                    params.append(hours)
-            except ValueError:
-                pass
 
         where_extra = ("AND " + " AND ".join(conditions)) if conditions else ""
 

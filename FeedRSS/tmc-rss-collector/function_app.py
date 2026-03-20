@@ -63,6 +63,29 @@ def add_cors_headers(response: func.HttpResponse, origin: str = None) -> func.Ht
     )
 
 
+def add_cache_headers(response: func.HttpResponse, max_age: int = 0, public: bool = True) -> func.HttpResponse:
+    """Add Cache-Control headers to HTTP response.
+
+    Args:
+        response: The HTTP response to modify
+        max_age: Cache duration in seconds (0 = no-cache)
+        public: If True, response can be cached by CDN/proxies
+    """
+    headers = dict(response.headers) if response.headers else {}
+    if max_age > 0:
+        visibility = "public" if public else "private"
+        headers["Cache-Control"] = f"{visibility}, max-age={max_age}"
+    else:
+        headers["Cache-Control"] = "no-store"
+
+    return func.HttpResponse(
+        response.get_body(),
+        status_code=response.status_code,
+        headers=headers,
+        mimetype=response.mimetype
+    )
+
+
 def with_cors(handler):
     """Decorator to add CORS headers to HTTP handlers."""
     @wraps(handler)
@@ -289,6 +312,25 @@ async def cost_data_cleanup(timer: func.TimerRequest) -> None:
             logger.info(f"Cost data cleanup complete: {llm_deleted} LLM + {api_deleted} API records deleted (older than {cutoff})")
     except Exception as e:
         logger.error(f"Cost data cleanup failed: {e}")
+
+
+# ========================================
+# TIMER TRIGGER - KEEPALIVE (Cold Start Prevention)
+# ========================================
+
+@app.timer_trigger(
+    schedule="0 */4 * * * *",  # Every 4 minutes
+    arg_name="timer",
+    run_on_startup=True  # Warm up immediately on deploy
+)
+async def keepalive(timer: func.TimerRequest) -> None:
+    """
+    Timer trigger to prevent cold starts on Consumption Plan.
+    Runs every 4 minutes with a lightweight DB health check
+    to keep both the Functions instance and connection pool warm.
+    """
+    from functions.keepalive import keepalive_handler
+    await keepalive_handler(timer)
 
 
 # ========================================
@@ -1326,6 +1368,7 @@ logger.info("  - Timer: clustering_engine (cada 30 min)")
 logger.info("  - Timer: clustering_maintenance (diario 3AM UTC)")
 logger.info("  - Timer: daily_cost_aggregation (diario 00:30 UTC)")
 logger.info("  - Timer: cost_data_cleanup (mensal 1o dia 3AM UTC)")
+logger.info("  - Timer: keepalive (cada 4min, cold-start prevention)")
 logger.info("  - GET  /api/health")
 logger.info("  - GET  /api/stats")
 logger.info("  - GET  /api/articles")

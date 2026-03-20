@@ -140,12 +140,14 @@ async def login_handler(req: func.HttpRequest) -> func.HttpResponse:
             f"Path=/api/auth; Max-Age={max_age}"
         )
 
-        return func.HttpResponse(
+        resp = func.HttpResponse(
             json.dumps(response_body, default=str),
             status_code=200,
             headers={"Set-Cookie": cookie},
             mimetype="application/json"
         )
+        resp.headers["Cache-Control"] = "no-store"
+        return resp
 
     except Exception as e:
         logger.exception(f"Error in login: {e}")
@@ -244,11 +246,13 @@ async def refresh_handler(req: func.HttpRequest) -> func.HttpResponse:
                         role=user.role,
                         name=user.name,
                     )
-                    return func.HttpResponse(
+                    resp = func.HttpResponse(
                         json.dumps({"access_token": access_token}, default=str),
                         status_code=200,
                         mimetype="application/json"
                     )
+                    resp.headers["Cache-Control"] = "no-store"
+                    return resp
                 else:
                     # COMPROMISE DETECTED: token reused after grace period.
                     # Revoke the entire token family.
@@ -345,12 +349,14 @@ async def refresh_handler(req: func.HttpRequest) -> func.HttpResponse:
         )
 
         # 13. Return new access token with rotated refresh cookie
-        return func.HttpResponse(
+        resp = func.HttpResponse(
             json.dumps({"access_token": access_token}, default=str),
             status_code=200,
             headers={"Set-Cookie": cookie},
             mimetype="application/json"
         )
+        resp.headers["Cache-Control"] = "no-store"
+        return resp
 
     except Exception as e:
         logger.error(f"Error in refresh: {e}")
@@ -377,11 +383,13 @@ async def me_handler(req: func.HttpRequest) -> func.HttpResponse:
                 mimetype="application/json"
             )
 
-        return func.HttpResponse(
+        resp = func.HttpResponse(
             json.dumps(user.to_frontend_format(), default=str),
             status_code=200,
             mimetype="application/json"
         )
+        resp.headers["Cache-Control"] = "no-store"
+        return resp
 
     except Exception as e:
         logger.error(f"Error in me: {e}")
@@ -487,12 +495,14 @@ async def logout_handler(req: func.HttpRequest) -> func.HttpResponse:
         # Clear refresh_token cookie
         clear_cookie = "refresh_token=; HttpOnly; SameSite=None; Secure; Path=/api/auth; Max-Age=0"
 
-        return func.HttpResponse(
+        resp = func.HttpResponse(
             json.dumps({"message": "Logout successful"}),
             status_code=200,
             headers={"Set-Cookie": clear_cookie},
             mimetype="application/json"
         )
+        resp.headers["Cache-Control"] = "no-store"
+        return resp
 
     except Exception as e:
         logger.error(f"Error in logout: {e}")
