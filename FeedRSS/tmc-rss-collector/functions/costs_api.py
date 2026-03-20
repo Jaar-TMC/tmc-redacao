@@ -34,15 +34,20 @@ def create_success_response(data: dict, status_code: int = 200) -> func.HttpResp
 async def costs_overview_handler(req: func.HttpRequest) -> func.HttpResponse:
     """
     GET /api/costs/overview
-    Params: period (today|7d|30d|90d|year, default 30d)
+    Params: period (today|7d|30d|90d|year, default 30d) OR start_date+end_date (YYYY-MM-DD)
     """
     try:
+        start_date = req.params.get('start_date')
+        end_date = req.params.get('end_date')
         period = req.params.get('period', '30d')
-        if period not in ('today', '7d', '30d', '90d', 'year'):
-            return create_error_response("Periodo invalido. Use: today, 7d, 30d, 90d, year", 400)
 
         from services.cost_queries import get_cost_overview
-        data = get_cost_overview(period)
+        if start_date and end_date:
+            data = get_cost_overview(period, start_date_str=start_date, end_date_str=end_date)
+        else:
+            if period not in ('today', '7d', '30d', '90d', 'year'):
+                return create_error_response("Periodo invalido. Use: today, 7d, 30d, 90d, year", 400)
+            data = get_cost_overview(period)
         return create_success_response(data)
     except Exception as e:
         logger.exception(f"Error in costs overview: {e}")

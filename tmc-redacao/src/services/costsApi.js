@@ -1,7 +1,14 @@
 import { fetchApi } from './api';
 
-export async function getCostOverview(period, { signal } = {}) {
-  return fetchApi(`/costs/overview?period=${period}`, { signal });
+export async function getCostOverview(period, { signal, start, end } = {}) {
+  const params = new URLSearchParams();
+  if (start && end) {
+    params.set('start_date', start);
+    params.set('end_date', end);
+  } else {
+    params.set('period', period);
+  }
+  return fetchApi(`/costs/overview?${params}`, { signal });
 }
 
 export async function getCostTrends({ granularity, start, end, period } = {}, { signal } = {}) {

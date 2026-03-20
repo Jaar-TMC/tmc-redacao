@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { Download, AlertCircle } from 'lucide-react';
+import { Download, AlertCircle, Calendar } from 'lucide-react';
 import TabButton from '../../components/ui/TabButton';
 import StatusMessage from '../../components/ui/StatusMessage';
 import CostOverviewCards from '../../components/custos/CostOverviewCards';
@@ -23,11 +23,28 @@ const PERIODS = [
   { value: '30d', label: '30d' },
   { value: '90d', label: '90d' },
   { value: 'year', label: 'Ano' },
+  { value: 'custom', label: 'Personalizado' },
 ];
 
-function periodToDateRange(period) {
+function toDateString(d) {
+  return d.toISOString().split('T')[0];
+}
+
+function granularityForDays(days) {
+  if (days <= 1) return 'hour';
+  if (days <= 60) return 'day';
+  if (days <= 180) return 'week';
+  return 'month';
+}
+
+function periodToDateRange(period, customStart, customEnd) {
+  if (period === 'custom' && customStart && customEnd) {
+    const days = Math.max(1, Math.round((new Date(customEnd) - new Date(customStart)) / 86400000));
+    return { startDate: customStart, endDate: customEnd, granularity: granularityForDays(days) };
+  }
+
   const now = new Date();
-  const end = now.toISOString().split('T')[0];
+  const end = toDateString(now);
   let start;
   let granularity;
 
@@ -37,15 +54,15 @@ function periodToDateRange(period) {
       granularity = 'hour';
       break;
     case '7d':
-      start = new Date(now - 7 * 86400000).toISOString().split('T')[0];
+      start = toDateString(new Date(now - 7 * 86400000));
       granularity = 'day';
       break;
     case '30d':
-      start = new Date(now - 30 * 86400000).toISOString().split('T')[0];
+      start = toDateString(new Date(now - 30 * 86400000));
       granularity = 'day';
       break;
     case '90d':
-      start = new Date(now - 90 * 86400000).toISOString().split('T')[0];
+      start = toDateString(new Date(now - 90 * 86400000));
       granularity = 'week';
       break;
     case 'year':
@@ -53,7 +70,7 @@ function periodToDateRange(period) {
       granularity = 'month';
       break;
     default:
-      start = new Date(now - 30 * 86400000).toISOString().split('T')[0];
+      start = toDateString(new Date(now - 30 * 86400000));
       granularity = 'day';
   }
 
@@ -62,6 +79,8 @@ function periodToDateRange(period) {
 
 const CustosPage = () => {
   const [period, setPeriod] = useState('30d');
+  const [customStart, setCustomStart] = useState(() => toDateString(new Date(Date.now() - 30 * 86400000)));
+  const [customEnd, setCustomEnd] = useState(() => toDateString(new Date()));
   const [overview, setOverview] = useState(null);
   const [trends, setTrends] = useState(null);
   const [breakdown, setBreakdown] = useState(null);
@@ -84,7 +103,7 @@ const CustosPage = () => {
   const abortControllerRef = useRef(null);
   const periodDebounceRef = useRef(null);
 
-  const fetchAllData = useCallback(async (currentPeriod) => {
+  const fetchAllData = useCallback(async (currentPeriod, cStart, cEnd) => {
     // Cancel previous requests
     if (abortControllerRef.current) {
       abortControllerRef.current.abort();
@@ -93,8 +112,11 @@ const CustosPage = () => {
     abortControllerRef.current = controller;
     const { signal } = controller;
 
-    const { startDate, endDate, granularity: gran } = periodToDateRange(currentPeriod);
+    const { startDate, endDate, granularity: gran } = periodToDateRange(currentPeriod, cStart, cEnd);
     setGranularity(gran);
+
+    const isCustom = currentPeriod === 'custom';
+    const periodParam = isCustom ? undefined : currentPeriod;
 
     // Set all loading
     setLoadingStates({
@@ -107,11 +129,11 @@ const CustosPage = () => {
     });
 
     const results = await Promise.allSettled([
-      getCostOverview(currentPeriod, { signal }),
-      getCostTrends({ granularity: gran, start: startDate, end: endDate, period: currentPeriod }, { signal }),
-      getCostBreakdown({ start: startDate, end: endDate, period: currentPeriod }, { signal }),
-      getCostByUser({ start: startDate, end: endDate, period: currentPeriod }, { signal }),
-      getCostBySource({ start: startDate, end: endDate, period: currentPeriod }, { signal }),
+      getCostOverview(periodParam, { signal, start: isCustom ? startDate : undefined, end: isCustom ? endDate : undefined }),
+      getCostTrends({ granularity: gran, start: startDate, end: endDate, period: periodParam }, { signal }),
+      getCostBreakdown({ start: startDate, end: endDate, period: periodParam }, { signal }),
+      getCostByUser({ start: startDate, end: endDate, period: periodParam }, { signal }),
+      getCostBySource({ start: startDate, end: endDate, period: periodParam }, { signal }),
       getSourceEstimate({ signal }),
     ]);
 
@@ -143,20 +165,31 @@ const CustosPage = () => {
 
   const handlePeriodChange = useCallback((newPeriod) => {
     setPeriod(newPeriod);
+    if (newPeriod === 'custom') return; // wait for date inputs
     clearTimeout(periodDebounceRef.current);
     periodDebounceRef.current = setTimeout(() => {
       fetchAllData(newPeriod);
     }, 200);
   }, [fetchAllData]);
 
+  const handleCustomDateApply = useCallback(() => {
+    if (!customStart || !customEnd || customStart > customEnd) return;
+    clearTimeout(periodDebounceRef.current);
+    periodDebounceRef.current = setTimeout(() => {
+      fetchAllData('custom', customStart, customEnd);
+    }, 200);
+  }, [fetchAllData, customStart, customEnd]);
+
   const retrySection = useCallback((key) => {
-    const { startDate, endDate, granularity: gran } = periodToDateRange(period);
+    const isCustom = period === 'custom';
+    const { startDate, endDate, granularity: gran } = periodToDateRange(period, customStart, customEnd);
+    const periodParam = isCustom ? undefined : period;
     const fetchMap = {
-      overview: () => getCostOverview(period),
-      trends: () => getCostTrends({ granularity: gran, start: startDate, end: endDate, period }),
-      breakdown: () => getCostBreakdown({ start: startDate, end: endDate, period }),
-      byUser: () => getCostByUser({ start: startDate, end: endDate, period }),
-      bySource: () => getCostBySource({ start: startDate, end: endDate, period }),
+      overview: () => getCostOverview(periodParam, { start: isCustom ? startDate : undefined, end: isCustom ? endDate : undefined }),
+      trends: () => getCostTrends({ granularity: gran, start: startDate, end: endDate, period: periodParam }),
+      breakdown: () => getCostBreakdown({ start: startDate, end: endDate, period: periodParam }),
+      byUser: () => getCostByUser({ start: startDate, end: endDate, period: periodParam }),
+      bySource: () => getCostBySource({ start: startDate, end: endDate, period: periodParam }),
       sourceEstimate: () => getSourceEstimate(),
     };
     const setterMap = { overview: setOverview, trends: setTrends, breakdown: setBreakdown, byUser: setByUser, bySource: setBySource, sourceEstimate: setSourceEstimate };
@@ -170,7 +203,7 @@ const CustosPage = () => {
       .then(data => { setter(data); setErrors(prev => ({ ...prev, [key]: null })); })
       .catch(err => { setErrors(prev => ({ ...prev, [key]: err?.message || 'Erro ao carregar dados' })); })
       .finally(() => { setLoadingStates(prev => ({ ...prev, [key]: false })); });
-  }, [period]);
+  }, [period, customStart, customEnd]);
 
   // Initial fetch on mount
   useEffect(() => {
@@ -195,14 +228,15 @@ const CustosPage = () => {
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `custos-tmc-${period}-${new Date().toISOString().split('T')[0]}.csv`;
+      const suffix = period === 'custom' ? `${customStart}_${customEnd}` : period;
+      a.download = `custos-tmc-${suffix}-${toDateString(new Date())}.csv`;
       a.click();
       URL.revokeObjectURL(url);
       setStatusMessage({ type: 'success', message: 'CSV exportado com sucesso', isVisible: true });
     } catch {
       setStatusMessage({ type: 'error', message: 'Erro ao exportar CSV', isVisible: true });
     }
-  }, [breakdown, period]);
+  }, [breakdown, period, customStart, customEnd]);
 
   return (
     <div className="max-w-6xl mx-auto space-y-6">
@@ -239,30 +273,78 @@ const CustosPage = () => {
       </div>
 
       {/* Period selector */}
-      <div className="flex items-center gap-3">
-        {/* Mobile: select */}
-        <select
-          value={period}
-          onChange={(e) => handlePeriodChange(e.target.value)}
-          className="md:hidden px-3 py-2 border border-light-gray rounded-lg text-sm bg-white min-h-[44px]"
-          aria-label="Período de custos"
-        >
-          {PERIODS.map(p => <option key={p.value} value={p.value}>{p.label}</option>)}
-        </select>
+      <div className="flex flex-col gap-3">
+        <div className="flex items-center gap-3">
+          {/* Mobile: select */}
+          <select
+            value={period}
+            onChange={(e) => handlePeriodChange(e.target.value)}
+            className="md:hidden px-3 py-2 border border-light-gray rounded-lg text-sm bg-white min-h-[44px]"
+            aria-label="Período de custos"
+          >
+            {PERIODS.map(p => <option key={p.value} value={p.value}>{p.label}</option>)}
+          </select>
 
-        {/* Desktop: TabButtons */}
-        <div className="hidden md:flex flex-wrap gap-1 bg-off-white p-1 rounded-lg w-fit" role="tablist" aria-label="Período de custos">
-          {PERIODS.map(p => (
-            <TabButton
-              key={p.value}
-              active={period === p.value}
-              onClick={() => handlePeriodChange(p.value)}
-              ariaLabel={`Período: ${p.label}`}
-            >
-              {p.label}
-            </TabButton>
-          ))}
+          {/* Desktop: TabButtons */}
+          <div className="hidden md:flex flex-wrap gap-1 bg-off-white p-1 rounded-lg w-fit" role="tablist" aria-label="Período de custos">
+            {PERIODS.map(p => (
+              <TabButton
+                key={p.value}
+                active={period === p.value}
+                onClick={() => handlePeriodChange(p.value)}
+                ariaLabel={`Período: ${p.label}`}
+              >
+                {p.value === 'custom' ? (
+                  <span className="flex items-center gap-1.5">
+                    <Calendar size={14} aria-hidden="true" />
+                    {p.label}
+                  </span>
+                ) : p.label}
+              </TabButton>
+            ))}
+          </div>
         </div>
+
+        {/* Custom date range inputs */}
+        {period === 'custom' && (
+          <div className="flex flex-wrap items-end gap-3 bg-off-white border border-light-gray rounded-lg p-3">
+            <div className="flex flex-col gap-1">
+              <label htmlFor="custom-start" className="text-xs font-medium text-medium-gray">Início</label>
+              <input
+                id="custom-start"
+                type="date"
+                value={customStart}
+                max={customEnd}
+                onChange={(e) => setCustomStart(e.target.value)}
+                className="px-3 py-2 border border-light-gray rounded-lg text-sm bg-white min-h-[44px]"
+              />
+            </div>
+            <div className="flex flex-col gap-1">
+              <label htmlFor="custom-end" className="text-xs font-medium text-medium-gray">Fim</label>
+              <input
+                id="custom-end"
+                type="date"
+                value={customEnd}
+                min={customStart}
+                max={toDateString(new Date())}
+                onChange={(e) => setCustomEnd(e.target.value)}
+                className="px-3 py-2 border border-light-gray rounded-lg text-sm bg-white min-h-[44px]"
+              />
+            </div>
+            <button
+              onClick={handleCustomDateApply}
+              disabled={!customStart || !customEnd || customStart > customEnd}
+              className="px-5 py-2 text-sm font-medium text-white bg-tmc-orange rounded-lg hover:bg-tmc-orange/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed min-h-[44px]"
+            >
+              Aplicar
+            </button>
+            {customStart && customEnd && customStart <= customEnd && (
+              <span className="text-xs text-medium-gray self-center">
+                {Math.round((new Date(customEnd) - new Date(customStart)) / 86400000) + 1} dias
+              </span>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Status message */}

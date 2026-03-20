@@ -104,15 +104,20 @@ def _prev_period_dates(start_date, end_date):
     return prev_start, prev_end
 
 
-def get_cost_overview(period: str = '30d') -> dict:
+def get_cost_overview(period: str = '30d', start_date_str: str = None, end_date_str: str = None) -> dict:
     """
     Get cost overview for dashboard cards.
     Returns totals by provider with delta vs previous period.
+    If start_date_str and end_date_str are provided, they override the period.
     """
     try:
         from services.database import get_db
         db = get_db()
-        start_date, end_date = period_to_dates(period)
+        if start_date_str and end_date_str:
+            start_date = date.fromisoformat(start_date_str)
+            end_date = date.fromisoformat(end_date_str)
+        else:
+            start_date, end_date = period_to_dates(period)
         prev_start, prev_end = _prev_period_dates(start_date, end_date)
 
         with db.get_connection() as conn:
