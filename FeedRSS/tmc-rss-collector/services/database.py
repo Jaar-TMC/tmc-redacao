@@ -1050,64 +1050,75 @@ class DatabaseService:
     def get_trending_tags_fast(self, limit: int = 20, period_hours: int = 72) -> List[dict]:
         """
         Get trending tags from pre-aggregated table (< 10ms).
-        Falls back to live OPENJSON query if aggregation table is empty/stale.
+        Falls back to live OPENJSON query if aggregation table is empty/stale
+        or if the table does not exist yet (migration not run).
         """
-        query = """
-            SELECT TOP %s tag, article_count
-            FROM tag_aggregations
-            WHERE period_hours = %s
-                AND last_updated >= DATEADD(hour, -1, GETUTCDATE())
-            ORDER BY article_count DESC
-        """
-        with self.get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute(query, (limit, period_hours))
-            rows = cursor.fetchall()
+        try:
+            query = """
+                SELECT TOP %s tag, article_count
+                FROM tag_aggregations
+                WHERE period_hours = %s
+                    AND last_updated >= DATEADD(hour, -1, GETUTCDATE())
+                ORDER BY article_count DESC
+            """
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(query, (limit, period_hours))
+                rows = cursor.fetchall()
 
-        if rows:
-            return [{"tag": row[0], "count": row[1]} for row in rows]
+            if rows:
+                return [{"tag": row[0], "count": row[1]} for row in rows]
 
-        # Fallback: aggregation table empty or stale -- use live query
-        logger.warning("[get_trending_tags_fast] Aggregation stale, falling back to live query")
+            # Aggregation table empty or stale
+            logger.warning("[get_trending_tags_fast] Aggregation stale, falling back to live query")
+        except Exception as e:
+            # Table may not exist yet (migration pending) — fall back gracefully
+            logger.warning(f"[get_trending_tags_fast] Fast query failed ({e}), falling back to live query")
+
         return self.get_trending_tags(limit=limit, period_hours=period_hours)
 
     def get_all_tags_fast(self, search: Optional[str] = None, limit: int = 100, period_hours: int = 72) -> List[dict]:
         """
         Get all tags from pre-aggregated table with optional search filter.
-        Falls back to live query if aggregation is stale.
+        Falls back to live query if aggregation is stale or table doesn't exist.
         """
-        params = [period_hours]
-        search_filter = ""
-        if search:
-            search_filter = "AND tag LIKE %s"
-            search_escaped = search.replace('[', '[[]').replace('%', '[%]').replace('_', '[_]')
-            params.append(f"%{search_escaped}%")
+        try:
+            params = [period_hours]
+            search_filter = ""
+            if search:
+                search_filter = "AND tag LIKE %s"
+                search_escaped = search.replace('[', '[[]').replace('%', '[%]').replace('_', '[_]')
+                params.append(f"%{search_escaped}%")
 
-        query = f"""
-            SELECT TOP %s tag, article_count
-            FROM tag_aggregations
-            WHERE period_hours = %s
-                AND last_updated >= DATEADD(hour, -1, GETUTCDATE())
-                {search_filter}
-            ORDER BY article_count DESC, tag ASC
-        """
-        params_ordered = [limit] + params
+            query = f"""
+                SELECT TOP %s tag, article_count
+                FROM tag_aggregations
+                WHERE period_hours = %s
+                    AND last_updated >= DATEADD(hour, -1, GETUTCDATE())
+                    {search_filter}
+                ORDER BY article_count DESC, tag ASC
+            """
+            params_ordered = [limit] + params
 
-        with self.get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute(query, tuple(params_ordered))
-            rows = cursor.fetchall()
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(query, tuple(params_ordered))
+                rows = cursor.fetchall()
 
-        if rows:
-            result = []
-            for row in rows:
-                tag = row[0]
-                theme = ' '.join(word.capitalize() for word in tag.replace('-', ' ').split())
-                result.append({"tag": tag, "theme": theme, "count": row[1]})
-            return result
+            if rows:
+                result = []
+                for row in rows:
+                    tag = row[0]
+                    theme = ' '.join(word.capitalize() for word in tag.replace('-', ' ').split())
+                    result.append({"tag": tag, "theme": theme, "count": row[1]})
+                return result
 
-        # Fallback to live query
-        logger.warning("[get_all_tags_fast] Aggregation stale, falling back to live query")
+            # Aggregation table empty or stale
+            logger.warning("[get_all_tags_fast] Aggregation stale, falling back to live query")
+        except Exception as e:
+            # Table may not exist yet (migration pending) — fall back gracefully
+            logger.warning(f"[get_all_tags_fast] Fast query failed ({e}), falling back to live query")
+
         return self.get_all_tags(search=search, limit=limit)
 
     def get_trending_tags(self, limit: int = 20, period_hours: Optional[int] = None) -> List[dict]:
