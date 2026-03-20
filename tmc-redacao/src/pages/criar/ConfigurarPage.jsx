@@ -47,7 +47,7 @@ const tooltips = {
     )
   },
   lide: {
-    title: 'Orientação sobre o Lide',
+    title: 'Orientação sobre o Lead',
     content: (
       <div className="space-y-2">
         <p>O lide é o primeiro parágrafo da matéria - deve responder às perguntas: O quê? Quem? Quando? Onde? Por quê? Como?</p>
@@ -473,9 +473,9 @@ const ConfigurarPage = () => {
                 />
               </ConfigField>
 
-              {/* Orientação do Lide */}
+              {/* Orientação do Lead */}
               <ConfigField
-                label="Orientação sobre o Lide"
+                label="Orientação sobre o Lead"
                 icon={<FileText size={18} />}
                 tooltip={tooltips.lide}
               >
