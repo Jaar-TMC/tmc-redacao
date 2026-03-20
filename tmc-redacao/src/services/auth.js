@@ -39,14 +39,23 @@ export async function authLogin(email, password, rememberMe = false) {
 }
 
 /**
- * Refresh access token using httpOnly cookie
+ * Refresh access token using httpOnly cookie.
+ * Uses a short 5s timeout — if the refresh token is broken (500),
+ * we want to fail fast and redirect to login, not hang for 30s.
  * @returns {Promise<{access_token: string}>}
  */
 export async function authRefresh() {
-  return fetchApi('/auth/refresh', {
-    method: 'POST',
-    credentials: 'include',
-  });
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 5000);
+  try {
+    return await fetchApi('/auth/refresh', {
+      method: 'POST',
+      credentials: 'include',
+      signal: controller.signal,
+    });
+  } finally {
+    clearTimeout(timeoutId);
+  }
 }
 
 /**

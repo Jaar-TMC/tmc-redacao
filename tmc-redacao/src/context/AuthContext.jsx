@@ -34,7 +34,7 @@ export function AuthProvider({ children }) {
     );
   }, []);
 
-  // Silent refresh on mount
+  // Silent refresh on mount — fail fast if token is broken
   useEffect(() => {
     const tryRefresh = async () => {
       try {
@@ -43,9 +43,14 @@ export function AuthProvider({ children }) {
           setAuthToken(data.access_token);
           const userData = await authGetMe();
           setUser(userData);
+        } else {
+          clearAuthToken();
+          setUser(null);
         }
       } catch {
-        // Refresh failed - user not authenticated, that's OK
+        // Refresh failed — clear auth state so we redirect to login immediately
+        clearAuthToken();
+        setUser(null);
       } finally {
         setIsLoading(false);
       }
