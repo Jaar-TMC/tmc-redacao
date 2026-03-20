@@ -37,6 +37,28 @@ import { useVersionHistory, useChatEditor, useFactCheckScan } from '../hooks';
 import { createUserArticle, updateUserArticle, getUserArticle, generateTags, editArticle } from '../services/api';
 import { generateSEOOptimizationPrompt } from '../utils/seoPromptGenerator';
 
+/**
+ * Generate a SEO-friendly slug from a title (Portuguese-aware)
+ */
+const generateSlugFromTitle = (title) => {
+  if (!title) return '';
+  const SLUG_STOP = [
+    'a','o','e','de','do','da','dos','das','em','no','na','nos','nas',
+    'um','uma','uns','umas','para','por','com','sem','sob','sobre','entre',
+    'que','qual','quando','como','onde','se','mas','ou','nem','ao','aos',
+    'pelo','pela','pelos','pelas','seu','sua','seus','suas'
+  ];
+  return title
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '') // strip accents
+    .toLowerCase()
+    .replace(/[^a-z0-9\s-]/g, '') // only alphanumeric + space + dash
+    .split(/\s+/)
+    .filter(w => w.length > 0 && !SLUG_STOP.includes(w))
+    .slice(0, 6) // max 6 words
+    .join('-')
+    || 'artigo';
+};
+
 const CriarPostPage = () => {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
@@ -55,7 +77,9 @@ const CriarPostPage = () => {
   const slugSugerido = resultado?.slugSugerido || null;
   const [showPublishConfirm, setShowPublishConfirm] = useState(false);
   const [publishOverridden, setPublishOverridden] = useState(false);
-  const [slugValue, setSlugValue] = useState(slugSugerido || '');
+  // Auto-generate slug from title if not provided by generation pipeline
+  const initialSlug = slugSugerido || generateSlugFromTitle(resultado?.titulo || '');
+  const [slugValue, setSlugValue] = useState(initialSlug);
   const [slugCopied, setSlugCopied] = useState(false);
   // v7.1: additional pipeline fields
   const sensitiveTopicsDetected = resultado?.sensitiveTopicsDetected || false;
@@ -144,6 +168,10 @@ const CriarPostPage = () => {
       setTags(Array.isArray(loadedArticle.tags) ? loadedArticle.tags : []);
       if (Array.isArray(loadedArticle.resumo)) {
         setResumoBullets(loadedArticle.resumo);
+      }
+      // Auto-generate slug from title when editing existing articles (slug not persisted in DB)
+      if (loadedArticle.title) {
+        setSlugValue(prev => prev || generateSlugFromTitle(loadedArticle.title));
       }
     }
   }, [loadedArticle]);
@@ -940,10 +968,10 @@ const CriarPostPage = () => {
                 {isPublishing ? (
                   <>
                     <Loader2 size={16} className="animate-spin" />
-                    <span>Publicando...</span>
+                    <span>Salvando...</span>
                   </>
                 ) : (
-                  <span>Publicar</span>
+                  <span>Aprovar e Salvar</span>
                 )}
               </button>
             </div>
@@ -1026,7 +1054,7 @@ const CriarPostPage = () => {
               <div className="flex items-center gap-2">
                 <ShieldAlert size={16} className="text-amber-500" />
                 <span className="text-sm text-amber-800">
-                  Recomendamos verificar a segurança do texto antes de publicar
+                  Recomendamos verificar os fatos do texto antes de salvar
                 </span>
               </div>
               <button
@@ -1045,7 +1073,7 @@ const CriarPostPage = () => {
                 className="text-xs px-3 py-1.5 bg-amber-600 text-white rounded font-medium hover:bg-amber-700 transition-colors
                   disabled:opacity-60 disabled:cursor-not-allowed"
               >
-                {isFactChecking ? 'Verificando...' : 'Verificar Segurança'}
+                {isFactChecking ? 'Verificando...' : 'Verificação de Fatos'}
               </button>
             </div>
           </div>
@@ -1375,7 +1403,7 @@ const CriarPostPage = () => {
           </div>
 
           {/* v7: Slug field */}
-          {slugSugerido && (
+          {slugValue && (
             <div className="bg-white border-t border-light-gray px-4 md:px-6 py-2">
               <div className="flex items-center gap-2">
                 <Link2 size={14} className="text-medium-gray flex-shrink-0" />
@@ -1496,33 +1524,6 @@ const CriarPostPage = () => {
                         <p className="text-sm whitespace-pre-wrap">{message.content}</p>
                       )}
 
-                      {/* SEO Compliance Warnings */}
-                      {message.seoWarnings && message.seoWarnings.length > 0 && message.type === 'ai' && (
-                        <div className="mt-3 pt-3 border-t border-light-gray">
-                          <div className="flex items-center gap-1.5 mb-2">
-                            <AlertTriangle size={12} className="text-warning" />
-                            <span className="text-xs font-medium text-warning">Avisos SEO:</span>
-                          </div>
-                          <div className="space-y-1.5">
-                            {message.seoWarnings.map((warning, idx) => (
-                              <div
-                                key={idx}
-                                className={`text-xs px-2 py-1.5 rounded ${
-                                  warning.severity === 'error'
-                                    ? 'bg-red-50 text-red-700 border border-red-200'
-                                    : 'bg-amber-50 text-amber-700 border border-amber-200'
-                                }`}
-                              >
-                                <p className="font-medium">{warning.message}</p>
-                                <p className="text-[10px] opacity-80 mt-0.5">{warning.suggestion}</p>
-                              </div>
-                            ))}
-                          </div>
-                          <p className="text-[10px] text-medium-gray mt-2">
-                            Use "Modificar" para pedir ajustes nos caracteres.
-                          </p>
-                        </div>
-                      )}
 
                       {/* Pending Approval - Show action buttons */}
                       {message.isPendingApproval && message.type === 'ai' && (
@@ -1719,7 +1720,7 @@ const CriarPostPage = () => {
                   const prompt = generateSEOOptimizationPrompt(
                     seoAnalysis,
                     'default',
-                    'quick', // Use quick mode by default
+                    'complete', // Complete mode: address up to 5 improvements per round
                     [], // No specific focus areas
                     { title, content, tags } // Article data for keyword extraction
                   );

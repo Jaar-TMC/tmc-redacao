@@ -785,7 +785,7 @@ export const analyzeExperience = (content) => {
     details: {}
   };
 
-  const text = content || '';
+  const text = stripHtml(content || '');
 
   // First person account / reporting (2 pts)
   const reportingMatches = EXPERIENCE_PATTERNS.filter(pattern => pattern.test(text));
@@ -853,7 +853,7 @@ export const analyzeExpertise = (content, hasAuthor = false) => {
     details: {}
   };
 
-  const text = content || '';
+  const text = stripHtml(content || '');
 
   // Author byline (1 pt)
   results.details.authorByline = {
@@ -923,7 +923,7 @@ export const analyzeAuthority = (content) => {
     details: {}
   };
 
-  const text = (content || '').toLowerCase();
+  const text = stripHtml(content || '').toLowerCase();
 
   // Official sources (2 pts)
   const officialSourcesFound = ALL_AUTHORITY_SOURCES.filter(source => text.includes(source));
@@ -941,7 +941,7 @@ export const analyzeAuthority = (content) => {
 
   // Expert quotes (2 pts)
   const reportingVerbsFound = REPORTING_VERBS.filter(verb =>
-    new RegExp(`\\b${verb}\\b`, 'i').test(content || '')
+    new RegExp(`\\b${verb}\\b`, 'i').test(text)
   );
   const hasExpertQuotes = reportingVerbsFound.length >= 2;
   results.details.expertQuotes = {
@@ -955,8 +955,8 @@ export const analyzeAuthority = (content) => {
   results.score += results.details.expertQuotes.points;
 
   // Institutional references (1 pt)
-  const institutionPatterns = /\b(universidade|instituto|fundação|associação|confederação|federação|ministério)\s+[A-Za-z]/i;
-  const hasInstitutions = institutionPatterns.test(content || '');
+  const institutionPatterns = /\b(universidade|instituto|fundação|associação|confederação|federação|ministério)\s+[a-záéíóúâêîôûãõç]/i;
+  const hasInstitutions = institutionPatterns.test(stripHtml(content || ''));
   results.details.institutionalRefs = {
     found: hasInstitutions,
     points: hasInstitutions ? 1 : 0,
@@ -988,7 +988,7 @@ export const analyzeTrust = (content, title) => {
     details: {}
   };
 
-  const text = content || '';
+  const text = stripHtml(content || '');
 
   // Factual claims (2 pts)
   let factualCount = 0;
@@ -1507,6 +1507,61 @@ export const analyzeAIOverviewOptimization = (content, title) => {
 // ═══════════════════════════════════════════════════════════════
 
 /**
+ * Extract primary keyword from title by finding the most relevant single word
+ * that appears frequently in content. Falls back to first significant title word.
+ */
+const extractEffectiveKeyword = (title, content, tags) => {
+  // 1. Use first tag if available (user-defined intent)
+  if (tags && tags.length > 0 && tags[0].trim()) {
+    return tags[0].toLowerCase().trim();
+  }
+
+  if (!title) return '';
+
+  // 2. Extract significant words from title (>3 chars, not stop words)
+  const KEYWORD_STOP_WORDS = [
+    'a', 'o', 'e', 'é', 'de', 'do', 'da', 'dos', 'das',
+    'em', 'no', 'na', 'nos', 'nas', 'um', 'uma', 'uns', 'umas',
+    'para', 'por', 'com', 'sem', 'sob', 'sobre', 'entre',
+    'que', 'qual', 'quais', 'quando', 'como', 'onde',
+    'se', 'mas', 'ou', 'nem', 'não', 'mais', 'menos',
+    'seu', 'sua', 'seus', 'suas', 'esse', 'essa',
+    'este', 'esta', 'ele', 'ela', 'ao', 'aos', 'pelo', 'pela',
+    'novo', 'nova', 'novos', 'novas', 'pode', 'vai', 'ser', 'ter',
+    'foi', 'são', 'está', 'tem', 'será', 'após', 'ante', 'desde'
+  ];
+
+  const normalizedTitle = title.toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9\s]/g, ' ');
+
+  const titleWords = normalizedTitle
+    .split(/\s+/)
+    .filter(w => w.length > 3 && !KEYWORD_STOP_WORDS.includes(w));
+
+  if (titleWords.length === 0) return '';
+
+  // 3. Count frequency in content for each title word
+  const cleanContent = stripHtml(content).toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '');
+
+  const wordFreq = {};
+  titleWords.forEach(word => {
+    // nosemgrep: javascript.lang.security.audit.detect-non-literal-regexp.detect-non-literal-regexp
+    const regex = new RegExp(`\\b${word}`, 'gi');
+    const matches = cleanContent.match(regex);
+    wordFreq[word] = matches ? matches.length : 0;
+  });
+
+  // Return most frequent title word that appears in content
+  const sorted = Object.entries(wordFreq).sort((a, b) => b[1] - a[1]);
+  const bestWord = sorted.find(([, count]) => count > 0);
+  return bestWord ? bestWord[0] : titleWords[0] || '';
+};
+
+/**
  * Perform complete SEO analysis
  */
 export const performSEOAnalysis = ({
@@ -1521,7 +1576,7 @@ export const performSEOAnalysis = ({
   hasAuthor = false
 }) => {
   // Derive target keyword from title if not provided
-  const effectiveKeyword = targetKeyword || (title ? title.split(/\s+/).slice(0, 3).join(' ') : '');
+  const effectiveKeyword = targetKeyword || extractEffectiveKeyword(title, content, _tags);
 
   // 1. Content Quality (30 pts)
   const contentDepth = analyzeContentDepth(content, articleType);
@@ -1675,23 +1730,22 @@ export const performSEOAnalysis = ({
 const generateRecommendations = (categories) => {
   const recommendations = [];
 
-  // Check each category for improvement opportunities
+  // Check each category for improvement opportunities - include ALL metrics with room to improve
   Object.entries(categories).forEach(([categoryKey, category]) => {
-    if (category.status !== 'success') {
-      Object.entries(category.metrics).forEach(([metricKey, metric]) => {
-        if (metric.status === 'error' || (metric.status === 'warning' && metric.score < metric.maxScore * 0.5)) {
-          recommendations.push({
-            category: categoryKey,
-            metric: metricKey,
-            priority: metric.status === 'error' ? 'high' : 'medium',
-            message: metric.message,
-            pointsAvailable: metric.maxScore - metric.score,
-            currentScore: metric.score,
-            maxScore: metric.maxScore
-          });
-        }
-      });
-    }
+    Object.entries(category.metrics).forEach(([metricKey, metric]) => {
+      const pointsAvailable = metric.maxScore - metric.score;
+      if (pointsAvailable > 0 && metric.maxScore > 0) {
+        recommendations.push({
+          category: categoryKey,
+          metric: metricKey,
+          priority: metric.status === 'error' ? 'high' : pointsAvailable >= 3 ? 'high' : 'medium',
+          message: metric.message,
+          pointsAvailable,
+          currentScore: metric.score,
+          maxScore: metric.maxScore
+        });
+      }
+    });
   });
 
   // Sort by points available (highest impact first)

@@ -94,8 +94,8 @@ export const SEO_SCORING_RULES = {
       keywordInFirst3Words: true
     },
     linhaFina: {
-      minChars: 120,
-      maxChars: 155,
+      minChars: 150,
+      maxChars: 160,
       needsCTA: true,
       needsKeyword: true
     },
@@ -127,13 +127,13 @@ export const SEO_SCORING_RULES = {
     'authority',
     'trust',
     'featuredSnippet',
-    'aiOverview'
+    'aiOverview',
+    'externalLinks'
   ],
 
   // Categories that require manual work (user must do)
   manualOnlyMetrics: [
     'internalLinks',
-    'externalLinks',
     'mediaOptimization',
     'urlSlug'
   ]
@@ -227,7 +227,7 @@ export const SEO_PROMPT_TEMPLATES = {
 - Considere incluir um numero se relevante`,
 
     metaDescription: `OTIMIZE A LINHA FINA:
-- Tamanho atual: {currentLength} caracteres (ideal: 120-155)
+- Tamanho atual: {currentLength} caracteres (ideal: 150-160)
 - Inclua a palavra-chave principal
 - Adicione um CTA (saiba mais, veja, confira, entenda)
 - Diferencie do titulo - complemente, nao repita

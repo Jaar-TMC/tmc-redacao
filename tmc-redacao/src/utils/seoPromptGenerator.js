@@ -126,10 +126,10 @@ const generateDeficitAnalysis = (categories) => {
   const metaDesc = categories.onPageOptimization?.metrics?.metaDescription;
   if (metaDesc?.details?.length?.value) {
     const len = metaDesc.details.length.value;
-    if (len < 120) {
-      deficits.push(`LINHA FINA: ${len} caracteres (PRECISA: 120-155) - ADICIONE ${120 - len} caracteres`);
-    } else if (len > 155) {
-      deficits.push(`LINHA FINA: ${len} caracteres (PRECISA: 120-155) - REMOVA ${len - 155} caracteres`);
+    if (len < 150) {
+      deficits.push(`LINHA FINA: ${len} caracteres (PRECISA: 150-160) - ADICIONE ${150 - len} caracteres`);
+    } else if (len > 160) {
+      deficits.push(`LINHA FINA: ${len} caracteres (PRECISA: 150-160) - REMOVA ${len - 160} caracteres`);
     }
   }
 
@@ -218,24 +218,24 @@ Outros requisitos:
 
 ### LINHA FINA - EXEMPLOS DE CALIBRACAO:
 
-EXEMPLO CORRETO (142 caracteres - SUCESSO):
-"Descubra como o novo imposto trabalhista afeta sua renda em 2026. Entenda as mudancas legais e seu impacto financeiro. Confira guia completo."
-- Comprimento: 142 caracteres (entre 120-155) OK
+EXEMPLO CORRETO (155 caracteres - SUCESSO):
+"Descubra como o novo imposto trabalhista afeta sua renda em 2026. Entenda as mudancas legais, os impactos financeiros e as excecoes previstas. Confira o guia."
+- Comprimento: 155 caracteres (entre 150-160) OK
 - Palavra-chave: presente OK
 - CTA ("Confira"): presente OK
 - RESULTADO: 7/7 pontos
 
 EXEMPLO INCORRETO (112 caracteres - FALHA):
-"Novo imposto de 2026. Confira as mudancas."
-- Comprimento: 112 caracteres (ABAIXO de 120 - faltam 8) FALHA
+"Novo imposto de 2026. Confira as mudancas nas regras tributarias para trabalhadores."
+- Comprimento: 112 caracteres (ABAIXO de 150 - faltam 38) FALHA
 - RESULTADO: 1/7 pontos
 
-VOCE DEVE gerar como o EXEMPLO CORRETO. Se sua linha fina tiver menos de 120 caracteres, ADICIONE mais contexto ate atingir 120-155.
+VOCE DEVE gerar como o EXEMPLO CORRETO. Se sua linha fina tiver menos de 150 caracteres, ADICIONE mais contexto ate atingir 150-160.
 
 ### PRIORIDADE DE REQUISITOS (quando houver conflito):
 
 PRIORIDADE 1 (NUNCA viole - inegociavel):
-1. Comprimento exato: Titulo 50-60 chars, Linha Fina 120-155 chars
+1. Comprimento exato: Titulo 50-60 chars, Linha Fina 150-160 chars
 2. Frase completa com pontuacao correta
 
 PRIORIDADE 2 (Mantenha se possivel):
@@ -286,7 +286,7 @@ ANTES DE FINALIZAR, VALIDE CADA ITEM:
 
 Para a LINHA FINA:
 1. Conte os caracteres (incluindo espacos e pontuacao)
-2. Esta entre 120-155? Se NAO, REESCREVA adicionando ou removendo palavras
+2. Esta entre 150-160? Se NAO, REESCREVA adicionando ou removendo palavras
 3. Tem CTA (confira, saiba mais, veja, entenda)? Se NAO, ADICIONE
 4. Repita ate estar correto - NAO FINALIZE com comprimento errado
 
@@ -406,31 +406,30 @@ const generateMetricInstruction = (categoryKey, metricKey, metric) => {
 const getOptimizedElements = (categories) => {
   const optimized = [];
 
-  // Check title
-  if (categories.onPageOptimization?.metrics?.titleOptimization?.status === 'success') {
-    const titleLength = categories.onPageOptimization.metrics.titleOptimization.details?.length?.value;
+  // Only lock elements that have PERFECT scores (no room to improve)
+  const titleMetric = categories.onPageOptimization?.metrics?.titleOptimization;
+  if (titleMetric && titleMetric.score === titleMetric.maxScore) {
+    const titleLength = titleMetric.details?.length?.value;
     optimized.push(`Titulo (${titleLength || ''} caracteres, otimizado)`);
   }
 
-  // Check meta description
-  if (categories.onPageOptimization?.metrics?.metaDescription?.status === 'success') {
-    const metaLength = categories.onPageOptimization.metrics.metaDescription.details?.length?.value;
+  const metaMetric = categories.onPageOptimization?.metrics?.metaDescription;
+  if (metaMetric && metaMetric.score === metaMetric.maxScore) {
+    const metaLength = metaMetric.details?.length?.value;
     optimized.push(`Linha fina (${metaLength || ''} caracteres)`);
   }
 
-  // Check keyword density
-  if (categories.onPageOptimization?.metrics?.keywordStrategy?.status === 'success') {
-    const density = categories.onPageOptimization.metrics.keywordStrategy.details?.primaryDensity?.value;
+  const keywordMetric = categories.onPageOptimization?.metrics?.keywordStrategy;
+  if (keywordMetric && keywordMetric.score === keywordMetric.maxScore) {
+    const density = keywordMetric.details?.primaryDensity?.value;
     optimized.push(`Palavras-chave (densidade de ${density || ''}%)`);
   }
 
-  // Check readability
-  if (categories.contentQuality?.metrics?.readability?.status === 'success') {
+  if (categories.contentQuality?.metrics?.readability?.score === categories.contentQuality?.metrics?.readability?.maxScore) {
     optimized.push('Legibilidade');
   }
 
-  // Check structure
-  if (categories.contentQuality?.metrics?.contentStructure?.status === 'success') {
+  if (categories.contentQuality?.metrics?.contentStructure?.score === categories.contentQuality?.metrics?.contentStructure?.maxScore) {
     optimized.push('Estrutura do conteudo');
   }
 
@@ -703,8 +702,8 @@ const getActionItems = (categoryKey, metricKey, metric) => {
           items.push('Adicione palavra de impacto (exclusivo, revela, novo, etc.)');
         }
       } else if (metricKey === 'metaDescription') {
-        if (metric?.details?.length?.value < 120) {
-          items.push('Expanda a linha fina para 120-155 caracteres');
+        if (metric?.details?.length?.value < 150) {
+          items.push('Expanda a linha fina para 150-160 caracteres');
         }
         if (!metric?.details?.cta?.found) {
           items.push('Adicione convite para ler (saiba mais, veja, confira)');
@@ -803,7 +802,6 @@ export const generateOptimizationSummary = (seoAnalysis) => {
 const getManualTaskAction = (metricKey) => {
   const actions = {
     internalLinks: 'Adicionar links internos para outras materias do site',
-    externalLinks: 'Adicionar link externo para fonte oficial',
     mediaOptimization: 'Adicionar imagem com alt text descritivo',
     urlSlug: 'Otimizar URL/slug do artigo'
   };

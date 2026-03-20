@@ -488,19 +488,19 @@ export const HEADING_PATTERNS = {
 // ═══════════════════════════════════════════════════════════════
 
 export const STRUCTURE_PATTERNS = {
-  bulletList: /<ul[^>]*>.*?<\/ul>/gis,
-  numberedList: /<ol[^>]*>.*?<\/ol>/gis,
-  blockquote: /<blockquote[^>]*>.*?<\/blockquote>/gis,
-  table: /<table[^>]*>.*?<\/table>/gis,
-  image: /<img[^>]*>/gi,
-  link: /<a[^>]*href=["']([^"']+)["'][^>]*>/gi,
-  paragraph: /<p[^>]*>.*?<\/p>/gis,
+  bulletList: /<ul[^>]*>.*?<\/ul>/is,
+  numberedList: /<ol[^>]*>.*?<\/ol>/is,
+  blockquote: /<blockquote[^>]*>.*?<\/blockquote>/is,
+  table: /<table[^>]*>.*?<\/table>/is,
+  image: /<img[^>]*>/i,
+  link: /<a[^>]*href=["']([^"']+)["'][^>]*>/i,
+  paragraph: /<p[^>]*>.*?<\/p>/is,
   markdown: {
-    bulletList: /^[*-]\s+.+$/gm,
-    numberedList: /^\d+\.\s+.+$/gm,
-    blockquote: /^>\s+.+$/gm,
-    image: /!\[.*?\]\(.*?\)/g,
-    link: /\[.*?\]\(.*?\)/g
+    bulletList: /^[*-]\s+.+$/m,
+    numberedList: /^\d+\.\s+.+$/m,
+    blockquote: /^>\s+.+$/m,
+    image: /!\[.*?\]\(.*?\)/,
+    link: /\[.*?\]\(.*?\)/
   }
 };
 
