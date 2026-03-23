@@ -85,18 +85,18 @@ const ArticleViewModal = ({ article, isOpen, onClose, onEdit }) => {
 
   return (
     <div
-      className="fixed inset-0 bg-black/50 z-50 flex items-start justify-center overflow-y-auto py-8"
+      className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-8"
       onClick={handleBackdropClick}
       role="dialog"
       aria-modal="true"
       aria-labelledby="article-view-title"
     >
       <div
-        className="bg-white rounded-xl shadow-2xl w-full max-w-4xl mx-4 my-auto"
+        className="bg-white rounded-xl shadow-2xl w-full max-w-4xl mx-4 max-h-[90vh] flex flex-col"
         onClick={(e) => e.stopPropagation()}
       >
-        {/* Header */}
-        <div className="flex items-center justify-between p-4 border-b border-light-gray sticky top-0 bg-white rounded-t-xl z-10">
+        {/* Header - fixed at top */}
+        <div className="flex items-center justify-between p-4 border-b border-light-gray bg-white rounded-t-xl shrink-0">
           <div className="flex items-center gap-3">
             <StatusBadge status={article.status} />
             {article.category && (
@@ -123,8 +123,8 @@ const ArticleViewModal = ({ article, isOpen, onClose, onEdit }) => {
           </div>
         </div>
 
-        {/* Content */}
-        <div className="p-6 md:p-8">
+        {/* Content - scrollable */}
+        <div className="p-6 md:p-8 overflow-y-auto flex-1 min-h-0">
           {/* Title */}
           <h1
             id="article-view-title"
@@ -198,8 +198,8 @@ const ArticleViewModal = ({ article, isOpen, onClose, onEdit }) => {
           )}
         </div>
 
-        {/* Footer */}
-        <div className="flex items-center justify-end gap-3 p-4 border-t border-light-gray bg-off-white rounded-b-xl">
+        {/* Footer - fixed at bottom */}
+        <div className="flex items-center justify-end gap-3 p-4 border-t border-light-gray bg-off-white rounded-b-xl shrink-0">
           <button
             onClick={onClose}
             className="px-4 py-2 text-sm font-medium text-medium-gray hover:text-dark-gray transition-colors"
