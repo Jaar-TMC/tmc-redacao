@@ -33,6 +33,24 @@ class ErrorBoundary extends Component {
       errorInfo
     });
 
+    // Auto-reload on stale chunk errors (happens after new deployments)
+    const msg = error?.message || '';
+    if (
+      msg.includes('Failed to fetch dynamically imported module') ||
+      msg.includes('Loading chunk') ||
+      msg.includes('Loading CSS chunk')
+    ) {
+      const reloadKey = 'tmc_chunk_reload';
+      const lastReload = sessionStorage.getItem(reloadKey);
+      const now = Date.now();
+      // Only auto-reload once per 60s to avoid infinite loops
+      if (!lastReload || now - Number(lastReload) > 60000) {
+        sessionStorage.setItem(reloadKey, String(now));
+        window.location.reload();
+        return;
+      }
+    }
+
     // Store error for debugging/monitoring
     try {
       const errorReport = {
