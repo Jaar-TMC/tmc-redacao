@@ -122,6 +122,10 @@ function TranscricaoPage() {
         errorMessage = 'Vídeo não encontrado ou é privado.';
       } else if (err?.status === 429) {
         errorMessage = 'Muitas requisições. Aguarde um momento e tente novamente.';
+      } else if (err?.status === 503 || err?.status === 502) {
+        errorMessage = err.data?.error || 'YouTube está temporariamente indisponível. Tente novamente em alguns minutos.';
+      } else if (err?.message?.includes('tempo limite')) {
+        errorMessage = 'A transcrição excedeu o tempo limite. Tente novamente.';
       }
 
       setTranscriptionError(errorMessage);

@@ -608,18 +608,30 @@ export async function mergeTopics(articles) {
  * }>}
  */
 export async function transcribeVideo(params, options = {}) {
+  const TIMEOUT_MS = 60000; // 60s — backend tries multiple YouTube strategies
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 30000);
+  const timeoutId = setTimeout(() => controller.abort(), TIMEOUT_MS);
+
+  // Combine caller signal with timeout: if either fires, abort the request
+  if (options.signal) {
+    options.signal.addEventListener('abort', () => controller.abort(), { once: true });
+  }
 
   try {
     const response = await fetchApi('/transcribe', {
       method: 'POST',
       body: JSON.stringify(params),
-      signal: options.signal || controller.signal,
+      signal: controller.signal,
     });
     return response;
   } catch (error) {
-    if (error.name === 'AbortError') {
+    if (error.name === 'AbortError' || error?.message?.includes('aborted')) {
+      // Distinguish user cancel from timeout
+      if (options.signal?.aborted) {
+        const err = new Error('AbortError');
+        err.name = 'AbortError';
+        throw err;
+      }
       throw new Error('A transcrição excedeu o tempo limite. Tente novamente.');
     }
     throw error;

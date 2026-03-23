@@ -13,6 +13,8 @@ import asyncio
 import logging
 import os
 import re
+import xml.etree.ElementTree as ET
+from html import unescape
 from typing import Optional
 
 import httpx
@@ -616,6 +618,93 @@ class YouTubeService:
         return segments
 
     @staticmethod
+    def _parse_xml_captions(xml_text: str) -> list[dict]:
+        """
+        Parse YouTube's XML caption format into normalized segments.
+
+        YouTube now returns XML instead of JSON3 from timedtext endpoints:
+        <timedtext format="3">
+          <body>
+            <p t="1360" d="1680">caption text</p>
+          </body>
+        </timedtext>
+
+        where t=start time in ms, d=duration in ms.
+        """
+        segments = []
+        try:
+            root = ET.fromstring(xml_text)
+            body = root.find("body")
+            if body is None:
+                # Some responses have <p> directly under root
+                paragraphs = root.findall(".//p")
+            else:
+                paragraphs = body.findall("p")
+
+            for p in paragraphs:
+                # Get text content including nested <s> elements
+                text_parts = []
+                if p.text:
+                    text_parts.append(p.text)
+                for child in p:
+                    if child.text:
+                        text_parts.append(child.text)
+                    if child.tail:
+                        text_parts.append(child.tail)
+
+                text = unescape("".join(text_parts)).strip()
+                if not text or text == "\n":
+                    continue
+
+                t_ms = int(p.get("t", "0"))
+                d_ms = int(p.get("d", "0"))
+
+                segments.append({
+                    "text": text,
+                    "start": t_ms / 1000.0,
+                    "duration": d_ms / 1000.0,
+                })
+        except ET.ParseError as e:
+            logger.debug(f"XML caption parse error: {e}")
+        return segments
+
+    @staticmethod
+    def _parse_caption_response(response: httpx.Response) -> list[dict]:
+        """
+        Parse a caption response, handling both JSON3 and XML formats.
+
+        YouTube recently changed timedtext to return XML even when fmt=json3
+        is requested. This method detects the format and parses accordingly.
+        """
+        content_type = response.headers.get("content-type", "")
+        text = response.text
+
+        # Try JSON3 first (legacy format)
+        if "application/json" in content_type or text.lstrip().startswith("{"):
+            try:
+                data = response.json()
+                events = data.get("events", [])
+                return YouTubeService._parse_json3_events(events)
+            except Exception:
+                pass
+
+        # Try XML (current YouTube format)
+        if "xml" in content_type or text.lstrip().startswith("<?xml") or text.lstrip().startswith("<timedtext"):
+            return YouTubeService._parse_xml_captions(text)
+
+        # Last resort: try both parsers
+        try:
+            data = response.json()
+            events = data.get("events", [])
+            segments = YouTubeService._parse_json3_events(events)
+            if segments:
+                return segments
+        except Exception:
+            pass
+
+        return YouTubeService._parse_xml_captions(text)
+
+    @staticmethod
     async def _fetch_captions_innertube(
         video_id: str,
         languages: list[str],
@@ -762,9 +851,8 @@ class YouTubeService:
                     )
                     continue
 
-                sub_data = sub_resp.json()
-                events = sub_data.get("events", [])
-                segments = YouTubeService._parse_json3_events(events)
+                # Parse response (handles both JSON3 and XML formats)
+                segments = YouTubeService._parse_caption_response(sub_resp)
 
                 if not segments:
                     logger.debug(
@@ -827,9 +915,8 @@ class YouTubeService:
                         if resp.status_code != 200:
                             continue
 
-                        data = resp.json()
-                        events = data.get("events", [])
-                        segments = YouTubeService._parse_json3_events(events)
+                        # Parse response (handles both JSON3 and XML)
+                        segments = YouTubeService._parse_caption_response(resp)
 
                         if segments:
                             logger.info(
