@@ -191,12 +191,16 @@ def _parse_iso_duration(iso_str: str) -> int:
 
 def _build_proxy_transport() -> httpx.AsyncHTTPTransport | None:
     """Build proxy transport for requests to www.youtube.com (blocked from datacenter IPs)."""
+    proxy_url = None
     if _WEBSHARE_PROXY_USER and _WEBSHARE_PROXY_PASS:
         proxy_url = f"http://{_WEBSHARE_PROXY_USER}:{_WEBSHARE_PROXY_PASS}@p.webshare.io:80"
-        return httpx.AsyncHTTPTransport(proxy=proxy_url)
-    if _YOUTUBE_PROXY_URL:
-        return httpx.AsyncHTTPTransport(proxy=_YOUTUBE_PROXY_URL)
-    return None
+    elif _YOUTUBE_PROXY_URL:
+        proxy_url = _YOUTUBE_PROXY_URL
+    if not proxy_url:
+        return None
+    # httpx 0.25 requires Proxy object, not raw string
+    proxy = httpx.Proxy(url=proxy_url)
+    return httpx.AsyncHTTPTransport(proxy=proxy)
 
 
 class YouTubeService:
