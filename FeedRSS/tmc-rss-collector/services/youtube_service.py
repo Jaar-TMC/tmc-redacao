@@ -189,6 +189,16 @@ def _parse_iso_duration(iso_str: str) -> int:
     return int(m.group(1) or 0) * 3600 + int(m.group(2) or 0) * 60 + int(m.group(3) or 0)
 
 
+def _build_proxy_transport() -> httpx.AsyncHTTPTransport | None:
+    """Build proxy transport for requests to www.youtube.com (blocked from datacenter IPs)."""
+    if _WEBSHARE_PROXY_USER and _WEBSHARE_PROXY_PASS:
+        proxy_url = f"http://{_WEBSHARE_PROXY_USER}:{_WEBSHARE_PROXY_PASS}@p.webshare.io:80"
+        return httpx.AsyncHTTPTransport(proxy=proxy_url)
+    if _YOUTUBE_PROXY_URL:
+        return httpx.AsyncHTTPTransport(proxy=_YOUTUBE_PROXY_URL)
+    return None
+
+
 class YouTubeService:
     """Service for fetching YouTube video metadata and captions."""
 
@@ -835,19 +845,56 @@ class YouTubeService:
                     )
 
                 # Fetch caption content from authenticated baseUrl
+                # The baseUrl points to www.youtube.com which may be blocked
+                # from datacenter IPs — try direct first, then with proxy
                 base_url = selected_track["baseUrl"]
                 subtitle_url = f"{base_url}&fmt=json3"
+                sub_headers = {"User-Agent": client_cfg["user_agent"]}
 
-                async with httpx.AsyncClient(timeout=15.0) as http:
-                    sub_resp = await http.get(
-                        subtitle_url,
-                        headers={"User-Agent": client_cfg["user_agent"]},
+                sub_resp = None
+                # Attempt 1: Direct (works from residential IPs)
+                try:
+                    async with httpx.AsyncClient(timeout=10.0) as http:
+                        sub_resp = await http.get(
+                            subtitle_url, headers=sub_headers
+                        )
+                    if sub_resp.status_code != 200:
+                        logger.debug(
+                            f"InnerTube direct caption fetch: "
+                            f"HTTP {sub_resp.status_code} for {video_id}"
+                        )
+                        sub_resp = None
+                except Exception as e:
+                    logger.debug(
+                        f"InnerTube direct caption fetch failed: {e}"
                     )
 
-                if sub_resp.status_code != 200:
+                # Attempt 2: With proxy (for datacenter IPs)
+                if sub_resp is None:
+                    transport = _build_proxy_transport()
+                    if transport:
+                        try:
+                            async with httpx.AsyncClient(
+                                timeout=15.0, transport=transport
+                            ) as http:
+                                sub_resp = await http.get(
+                                    subtitle_url, headers=sub_headers
+                                )
+                            if sub_resp.status_code != 200:
+                                logger.debug(
+                                    f"InnerTube proxy caption fetch: "
+                                    f"HTTP {sub_resp.status_code}"
+                                )
+                                sub_resp = None
+                        except Exception as e:
+                            logger.debug(
+                                f"InnerTube proxy caption fetch failed: {e}"
+                            )
+
+                if sub_resp is None or sub_resp.status_code != 200:
                     logger.debug(
-                        f"InnerTube caption content fetch returned "
-                        f"{sub_resp.status_code} for {video_id}"
+                        f"InnerTube caption content fetch failed "
+                        f"for {video_id} (all attempts)"
                     )
                     continue
 
@@ -887,8 +934,7 @@ class YouTubeService:
         endpoint. Uses configured proxy if available. Returns (raw_segments,
         language, caption_type) or None if all attempts fail.
         """
-        proxy_url = _YOUTUBE_PROXY_URL if _YOUTUBE_PROXY_URL else None
-        transport = httpx.AsyncHTTPTransport(proxy=proxy_url) if proxy_url else None
+        transport = _build_proxy_transport()
 
         try:
             async with httpx.AsyncClient(
