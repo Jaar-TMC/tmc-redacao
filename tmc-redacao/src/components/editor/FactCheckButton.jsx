@@ -37,7 +37,7 @@ export default function FactCheckButton({
         type="button"
         onClick={onScan}
         disabled={isButtonDisabled}
-        aria-label="Verificar Segurança"
+        aria-label="Verificação de Fatos"
         className={`flex items-center gap-2 px-3 py-1.5 bg-off-white text-dark-gray hover:bg-light-gray rounded-lg text-sm font-medium transition-colors flex-shrink-0 ${
           isScanning ? 'opacity-70 cursor-wait' : ''
         } disabled:opacity-50 disabled:cursor-not-allowed`}
@@ -50,7 +50,7 @@ export default function FactCheckButton({
         ) : (
           <>
             <ShieldCheck size={16} />
-            <span className="hidden md:inline">Verificar Segurança</span>
+            <span className="hidden md:inline">Verificação de Fatos</span>
           </>
         )}
       </button>

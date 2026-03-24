@@ -45,45 +45,37 @@ else:
 
 
 def add_cors_headers(response: func.HttpResponse, origin: str = None) -> func.HttpResponse:
-    """Add CORS headers to response."""
+    """Add CORS headers to response in-place.
+
+    Previously this recreated the HttpResponse, which could silently drop
+    Set-Cookie headers (Azure Functions treats them specially).  Mutating
+    in-place preserves all original headers including cookies.
+    """
     allowed_origin = origin if origin in ALLOWED_ORIGINS else ""
 
-    # Create new response with CORS headers
-    headers = dict(response.headers) if response.headers else {}
-    headers["Access-Control-Allow-Origin"] = allowed_origin
-    headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS"
-    headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, X-Requested-With"
-    headers["Access-Control-Allow-Credentials"] = "true"
+    response.headers["Access-Control-Allow-Origin"] = allowed_origin
+    response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS"
+    response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, X-Requested-With"
+    response.headers["Access-Control-Allow-Credentials"] = "true"
 
-    return func.HttpResponse(
-        response.get_body(),
-        status_code=response.status_code,
-        headers=headers,
-        mimetype=response.mimetype
-    )
+    return response
 
 
 def add_cache_headers(response: func.HttpResponse, max_age: int = 0, public: bool = True) -> func.HttpResponse:
-    """Add Cache-Control headers to HTTP response.
+    """Add Cache-Control headers to HTTP response in-place.
 
     Args:
         response: The HTTP response to modify
         max_age: Cache duration in seconds (0 = no-cache)
         public: If True, response can be cached by CDN/proxies
     """
-    headers = dict(response.headers) if response.headers else {}
     if max_age > 0:
         visibility = "public" if public else "private"
-        headers["Cache-Control"] = f"{visibility}, max-age={max_age}"
+        response.headers["Cache-Control"] = f"{visibility}, max-age={max_age}"
     else:
-        headers["Cache-Control"] = "no-store"
+        response.headers["Cache-Control"] = "no-store"
 
-    return func.HttpResponse(
-        response.get_body(),
-        status_code=response.status_code,
-        headers=headers,
-        mimetype=response.mimetype
-    )
+    return response
 
 
 def with_cors(handler):

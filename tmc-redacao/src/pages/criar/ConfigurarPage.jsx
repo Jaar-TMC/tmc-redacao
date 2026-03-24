@@ -184,7 +184,15 @@ const ConfigurarPage = () => {
   const [novaCitacao, setNovaCitacao] = useState('');
   const [contextoAdicional, setContextoAdicional] = useState(configuracoes.contexto || '');
   const [precisaCredito, setPrecisaCredito] = useState(!!configuracoes.creditos);
-  const [creditoSelecionado, setCreditoSelecionado] = useState(configuracoes.creditos || '');
+  const [creditosSelecionados, setCreditosSelecionados] = useState(() => {
+    if (!configuracoes.creditos) return [];
+    // Backward compat: old format stored a single ID
+    const asId = CREDITO_OPTIONS.find(o => o.id === configuracoes.creditos);
+    if (asId) return [asId.id];
+    // New format: comma-separated labels
+    const parts = configuracoes.creditos.split(',').map(s => s.trim()).filter(Boolean);
+    return CREDITO_OPTIONS.filter(o => parts.includes(o.label)).map(o => o.id);
+  });
   const [instrucoes, setInstrucoes] = useState(configuracoes.instrucoes || '');
   const [tipoMateria, setTipoMateria] = useState(configuracoes.tipoMateria || '');
 
@@ -222,9 +230,11 @@ const ConfigurarPage = () => {
     orientacaoLide,
     citacoes,
     contexto: contextoAdicional,
-    creditos: precisaCredito ? creditoSelecionado : '',
+    creditos: precisaCredito && creditosSelecionados.length > 0
+      ? creditosSelecionados.map(id => CREDITO_OPTIONS.find(o => o.id === id)?.label || id).join(', ')
+      : '',
     instrucoes,
-  }), [categoria, tom, tipoMateria, modoOpinativo, orientacaoLide, citacoes, contextoAdicional, precisaCredito, creditoSelecionado, instrucoes]);
+  }), [categoria, tom, tipoMateria, modoOpinativo, orientacaoLide, citacoes, contextoAdicional, precisaCredito, creditosSelecionados, instrucoes]);
 
   // Get source info
   const fonteInfo = useMemo(() => {
@@ -273,14 +283,16 @@ const ConfigurarPage = () => {
       orientacaoLide,
       citacoes,
       contexto: contextoAdicional,
-      creditos: precisaCredito ? creditoSelecionado : '',
+      creditos: precisaCredito && creditosSelecionados.length > 0
+        ? creditosSelecionados.map(id => CREDITO_OPTIONS.find(o => o.id === id)?.label || id).join(', ')
+        : '',
       categoria,
       tom,
       modoOpinativo,
       instrucoes,
       tipoMateria,
     });
-  }, [dataPublicacao, orientacaoLide, citacoes, contextoAdicional, precisaCredito, creditoSelecionado, categoria, tom, modoOpinativo, instrucoes, tipoMateria, setConfiguracoes]);
+  }, [dataPublicacao, orientacaoLide, citacoes, contextoAdicional, precisaCredito, creditosSelecionados, categoria, tom, modoOpinativo, instrucoes, tipoMateria, setConfiguracoes]);
 
   // Handlers
   const handleAddCitacao = useCallback(() => {
@@ -292,6 +304,12 @@ const ConfigurarPage = () => {
 
   const handleRemoveCitacao = useCallback((id) => {
     setCitacoes(prev => prev.filter(c => c.id !== id));
+  }, []);
+
+  const handleToggleCredito = useCallback((id) => {
+    setCreditosSelecionados(prev =>
+      prev.includes(id) ? prev.filter(c => c !== id) : [...prev, id]
+    );
   }, []);
 
   const handleStepClick = useCallback((stepIndex) => {
@@ -353,7 +371,7 @@ const ConfigurarPage = () => {
         />
 
         {/* Category Selector - Full Width */}
-        <div className="bg-white border border-light-gray rounded-xl p-6 mb-6">
+        <div className="bg-white rounded-xl p-6 mb-6">
           <ConfigField
             label="Estilo Editorial"
             icon={<Layers size={18} />}
@@ -559,7 +577,10 @@ const ConfigurarPage = () => {
                         type="radio"
                         name="credito"
                         checked={!precisaCredito}
-                        onChange={() => setPrecisaCredito(false)}
+                        onChange={() => {
+                          setPrecisaCredito(false);
+                          setCreditosSelecionados([]);
+                        }}
                         className="w-4 h-4 text-tmc-orange focus:ring-tmc-orange"
                       />
                       <span className="text-sm text-dark-gray">Não precisa</span>
@@ -576,16 +597,31 @@ const ConfigurarPage = () => {
                     </label>
                   </div>
                   {precisaCredito && (
-                    <select
-                      value={creditoSelecionado}
-                      onChange={(e) => setCreditoSelecionado(e.target.value)}
-                      className="w-full px-4 py-2.5 border border-light-gray rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-tmc-orange/50 focus:border-tmc-orange"
-                    >
-                      <option value="">Selecione a instituição...</option>
+                    <div className="space-y-2">
                       {CREDITO_OPTIONS.map(opt => (
-                        <option key={opt.id} value={opt.id}>{opt.label}</option>
+                        <label
+                          key={opt.id}
+                          className={`flex items-center gap-3 p-3 rounded-lg cursor-pointer transition-colors ${
+                            creditosSelecionados.includes(opt.id)
+                              ? 'bg-orange-50 border border-tmc-orange'
+                              : 'bg-off-white hover:bg-gray-100 border border-transparent'
+                          }`}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={creditosSelecionados.includes(opt.id)}
+                            onChange={() => handleToggleCredito(opt.id)}
+                            className="w-4 h-4 text-tmc-orange focus:ring-tmc-orange rounded"
+                          />
+                          <span className="text-sm text-dark-gray">{opt.label}</span>
+                        </label>
                       ))}
-                    </select>
+                      {creditosSelecionados.length > 0 && (
+                        <p className="text-xs text-medium-gray mt-1">
+                          {creditosSelecionados.length} instituição{creditosSelecionados.length !== 1 ? 'ões' : ''} selecionada{creditosSelecionados.length !== 1 ? 's' : ''}
+                        </p>
+                      )}
+                    </div>
                   )}
                 </div>
               </ConfigField>

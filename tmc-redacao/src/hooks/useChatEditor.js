@@ -75,27 +75,7 @@ function validateSEOCompliance(result) {
     }
   }
 
-  // Linha fina validation: 120-155 characters is ideal for SEO
-  if (result.linha_fina) {
-    const linhaFinaLen = result.linha_fina.length;
-    if (linhaFinaLen < 120) {
-      warnings.push({
-        field: 'linha_fina',
-        message: `Linha fina com ${linhaFinaLen} caracteres (ideal: 120-155)`,
-        severity: 'warning',
-        suggestion: 'Linha fina curta. Adicione mais contexto para melhor SEO.'
-      });
-      isCompliant = false;
-    } else if (linhaFinaLen > 155) {
-      warnings.push({
-        field: 'linha_fina',
-        message: `Linha fina com ${linhaFinaLen} caracteres (ideal: 120-155)`,
-        severity: linhaFinaLen > 170 ? 'error' : 'warning',
-        suggestion: 'Linha fina pode ser truncada. Considere encurtar.'
-      });
-      isCompliant = false;
-    }
-  }
+
 
   return { warnings, isCompliant };
 }
