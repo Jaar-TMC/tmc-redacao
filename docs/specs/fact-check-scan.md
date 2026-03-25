@@ -93,7 +93,7 @@ The "Verificar" button lives in the editor's right sidebar (Assistente tab), abo
 
 ```
 ┌───────────────────────────────────┐
-│  🛡️ Verificação de Segurança     │
+│  🛡️ Verificação de Fatos         │
 │                                    │
 │       ┌─────┐                     │
 │       │  82 │  Confiável          │

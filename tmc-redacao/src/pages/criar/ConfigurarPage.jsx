@@ -18,7 +18,6 @@ import { RequirePermission } from '../../components/auth';
 import { PERMISSIONS } from '../../constants/permissions';
 import {
   CATEGORIAS_EDITORIAIS,
-  TIPO_MATERIA_OPTIONS,
   CREDITO_OPTIONS,
   getTonesForCategory,
   getDefaultToneForCategory,
@@ -141,17 +140,11 @@ const tooltips = {
     )
   },
   tipoMateria: {
-    title: 'Tipo de Matéria',
+    title: 'Tipo de Conteúdo',
     content: (
       <div className="space-y-2">
-        <p>Define a posição e formato da matéria no site:</p>
-        <ul className="list-disc list-inside space-y-1 text-medium-gray">
-          <li><strong>Destaque Principal:</strong> Manchete da home</li>
-          <li><strong>Principal da Seção:</strong> Destaque em editoria</li>
-          <li><strong>Coluna:</strong> Texto opinativo (ativa modo opinião)</li>
-          <li><strong>Serviço:</strong> Informação útil ao leitor</li>
-        </ul>
-        <p className="text-tmc-orange">O tipo influencia o tamanho e estrutura sugeridos.</p>
+        <p>Define o tipo de conteúdo a ser gerado.</p>
+        <p className="text-tmc-orange">Atualmente disponível: Matéria editorial para publicação no site.</p>
       </div>
     )
   }
@@ -194,7 +187,7 @@ const ConfigurarPage = () => {
     return CREDITO_OPTIONS.filter(o => parts.includes(o.label)).map(o => o.id);
   });
   const [instrucoes, setInstrucoes] = useState(configuracoes.instrucoes || '');
-  const [tipoMateria, setTipoMateria] = useState(configuracoes.tipoMateria || '');
+  const [tipoMateria, setTipoMateria] = useState(configuracoes.tipoMateria || 'destaque');
 
   // NEW: Category-based state
   const [categoria, setCategoria] = useState(configuracoes.categoria || 'geral');
@@ -396,7 +389,6 @@ const ConfigurarPage = () => {
             categoryId={categoria}
             isEnabled={modoOpinativo}
             onToggle={setModoOpinativo}
-            tipoMateria={tipoMateria}
             className="mb-6"
           />
         )}
@@ -444,36 +436,18 @@ const ConfigurarPage = () => {
                 </div>
               </ConfigField>
 
-              {/* Tipo de Matéria */}
+              {/* Tipo de Conteúdo */}
               <ConfigField
-                label="Tipo de Matéria"
+                label="Tipo de Conteúdo"
                 icon={<Newspaper size={18} />}
                 tooltip={tooltips.tipoMateria}
               >
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                  {TIPO_MATERIA_OPTIONS.map(opt => (
-                    <label
-                      key={opt.id}
-                      className={`flex items-start gap-3 p-3 rounded-lg cursor-pointer transition-colors ${
-                        tipoMateria === opt.id
-                          ? 'bg-blue-50 border border-blue-500'
-                          : 'bg-off-white hover:bg-gray-100'
-                      }`}
-                    >
-                      <input
-                        type="radio"
-                        name="tipoMateria"
-                        value={opt.id}
-                        checked={tipoMateria === opt.id}
-                        onChange={(e) => setTipoMateria(e.target.value)}
-                        className="w-4 h-4 mt-0.5 text-blue-600 focus:ring-blue-500"
-                      />
-                      <div>
-                        <span className="text-sm font-medium text-dark-gray">{opt.label}</span>
-                        <p className="text-xs text-medium-gray">{opt.description}</p>
-                      </div>
-                    </label>
-                  ))}
+                <div className="flex items-center gap-3 p-3 rounded-lg bg-blue-50 border border-blue-500">
+                  <div className="w-2 h-2 rounded-full bg-blue-500 flex-shrink-0" />
+                  <div>
+                    <span className="text-sm font-medium text-dark-gray">Matéria para o Site</span>
+                    <p className="text-xs text-medium-gray">Conteúdo editorial</p>
+                  </div>
                 </div>
               </ConfigField>
 

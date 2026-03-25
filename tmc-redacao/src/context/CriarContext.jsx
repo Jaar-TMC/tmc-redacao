@@ -67,7 +67,7 @@ const initialState = {
     tom: 'conversacional', // Now category-dependent
     modoOpinativo: false, // NEW: Opinion mode toggle for categories that allow it
     instrucoes: '',
-    tipoMateria: '', // Article type
+    tipoMateria: 'destaque', // Article type - default to editorial content
   },
 
   // Materiais complementares

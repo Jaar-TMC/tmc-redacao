@@ -286,13 +286,7 @@ export const CATEGORIAS_ARRAY = Object.values(CATEGORIAS_EDITORIAIS);
  * Article type options (unchanged from original)
  */
 export const TIPO_MATERIA_OPTIONS = [
-  { id: 'destaque', label: 'Destaque Principal', description: 'Matéria principal da home' },
-  { id: 'principal-secao', label: 'Principal da Seção', description: 'Destaque dentro de uma editoria' },
-  { id: 'secundaria', label: 'Secundária da Seção', description: 'Matéria de apoio na editoria' },
-  { id: 'coluna', label: 'Coluna', description: 'Texto opinativo ou de colunista' },
-  { id: 'mais-lidas', label: 'Mais Lidas', description: 'Conteúdo para seção popular' },
-  { id: 'original', label: 'Conteúdo Original', description: 'Reportagem exclusiva' },
-  { id: 'servico', label: 'Serviço', description: 'Informação útil ao leitor' }
+  { id: 'destaque', label: 'Matéria para o Site', description: 'Conteúdo editorial' }
 ];
 
 /**

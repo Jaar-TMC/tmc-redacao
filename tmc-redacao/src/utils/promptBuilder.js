@@ -10,7 +10,6 @@
 import {
   CATEGORIAS_EDITORIAIS,
   TONS_POR_CATEGORIA,
-  TIPO_MATERIA_OPTIONS
 } from '../constants/editorial';
 
 // Minimum article length (TMC standard for columnists)

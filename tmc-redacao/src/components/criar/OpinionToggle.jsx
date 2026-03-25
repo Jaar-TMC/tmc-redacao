@@ -6,14 +6,13 @@
  */
 
 import PropTypes from 'prop-types';
-import { MessageSquareText, Info } from 'lucide-react';
+import { MessageSquareText } from 'lucide-react';
 import { CATEGORIAS_EDITORIAIS } from '../../constants/editorial';
 
 const OpinionToggle = ({
   categoryId,
   isEnabled,
   onToggle,
-  tipoMateria = '',
   className = ''
 }) => {
   const categoria = CATEGORIAS_EDITORIAIS[categoryId];
@@ -22,10 +21,6 @@ const OpinionToggle = ({
   if (!categoria?.allowsOpinion) {
     return null;
   }
-
-  // Auto-enabled hint for column type
-  const isColumnType = tipoMateria === 'coluna';
-  const showAutoEnabled = isColumnType && !isEnabled;
 
   return (
     <div className={`bg-orange-50 border border-orange-200 rounded-xl p-4 ${className}`}>
@@ -47,14 +42,6 @@ const OpinionToggle = ({
               Permite expressar ponto de vista e usar adjetivos valorativos.
               Ideal para colunas, analises e comentarios.
             </p>
-
-            {/* Auto-enabled notice for column type */}
-            {showAutoEnabled && (
-              <div className="flex items-center gap-1.5 mt-2 text-xs text-amber-700 bg-amber-50 px-2 py-1 rounded">
-                <Info size={12} />
-                <span>Sera ativado automaticamente para tipo "Coluna"</span>
-              </div>
-            )}
 
             {/* What changes with opinion mode */}
             {isEnabled && (
@@ -117,7 +104,6 @@ OpinionToggle.propTypes = {
   categoryId: PropTypes.string.isRequired,
   isEnabled: PropTypes.bool.isRequired,
   onToggle: PropTypes.func.isRequired,
-  tipoMateria: PropTypes.string,
   className: PropTypes.string
 };
 
