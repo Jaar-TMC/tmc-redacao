@@ -29,6 +29,8 @@ EmbeddingVector = List[float]
 
 logger = logging.getLogger(__name__)
 
+_fulltext_available = None  # Module-level cache: None=unchecked, True/False=result
+
 
 class ConnectionPool:
     """Simple connection pool for pymssql with idle-aware health checks.
@@ -444,6 +446,30 @@ class DatabaseService:
     # CREATE INDEX IX_article_themes_theme_id ON article_themes (theme_id) INCLUDE (article_id, assigned_at, similarity_score);
     # CREATE INDEX IX_article_themes_article_id ON article_themes (article_id) INCLUDE (theme_id);
 
+    def _has_fulltext_index(self) -> bool:
+        """Check if the ArticleCatalog full-text index is available.
+        Result is cached after first check — rechecked only if False (index may still be building).
+        """
+        global _fulltext_available
+        if _fulltext_available is True:
+            return True
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    SELECT 1 FROM sys.fulltext_indexes fi
+                    JOIN sys.objects o ON fi.object_id = o.object_id
+                    WHERE o.name = 'collected_articles'
+                """)
+                result = cursor.fetchone()
+                _fulltext_available = result is not None
+                if _fulltext_available:
+                    logger.info("[DatabaseService] Full-text index detected on collected_articles")
+                return _fulltext_available
+        except Exception as e:
+            logger.warning(f"[DatabaseService] Full-text check failed, using LIKE fallback: {e}")
+            return False
+
     def _build_article_filters(self,
                                category: Optional[str] = None,
                                source_id: Optional[str] = None,
@@ -493,35 +519,48 @@ class DatabaseService:
                     pass
 
         if search:
-            # Escape LIKE wildcards to prevent injection via special characters
-            search_escaped = search.replace('[', '[[]').replace('%', '[%]').replace('_', '[_]')
-            search_with_spaces = search_escaped.replace('-', ' ')
-            search_param = f"%{search_escaped}%"
-
-            if search_with_spaces != search_escaped:
-                search_param_spaces = f"%{search_with_spaces}%"
-                conditions.append("""(
-                    a.title COLLATE Latin1_General_CI_AI LIKE %s COLLATE Latin1_General_CI_AI
-                    OR a.title COLLATE Latin1_General_CI_AI LIKE %s COLLATE Latin1_General_CI_AI
-                    OR a.preview COLLATE Latin1_General_CI_AI LIKE %s COLLATE Latin1_General_CI_AI
-                    OR a.preview COLLATE Latin1_General_CI_AI LIKE %s COLLATE Latin1_General_CI_AI
-                    OR a.tags COLLATE Latin1_General_CI_AI LIKE %s COLLATE Latin1_General_CI_AI
-                )""")
-                params.extend([search_param, search_param_spaces, search_param, search_param_spaces, search_param])
+            if self._has_fulltext_index():
+                # Per D-05: Single FREETEXT predicate replaces 5 LIKE conditions
+                # Per D-06: No COLLATE needed — FREETEXT uses index language config
+                conditions.append("FREETEXT((a.title, a.preview, a.tags), %s)")
+                params.append(search)
             else:
-                conditions.append("""(
-                    a.title COLLATE Latin1_General_CI_AI LIKE %s COLLATE Latin1_General_CI_AI
-                    OR a.preview COLLATE Latin1_General_CI_AI LIKE %s COLLATE Latin1_General_CI_AI
-                    OR a.tags COLLATE Latin1_General_CI_AI LIKE %s COLLATE Latin1_General_CI_AI
-                )""")
-                params.extend([search_param, search_param, search_param])
+                # Fallback to LIKE if full-text catalog not yet built (per D-04)
+                search_escaped = search.replace('[', '[[]').replace('%', '[%]').replace('_', '[_]')
+                search_with_spaces = search_escaped.replace('-', ' ')
+                search_param = f"%{search_escaped}%"
+
+                if search_with_spaces != search_escaped:
+                    search_param_spaces = f"%{search_with_spaces}%"
+                    conditions.append("""(
+                        a.title COLLATE Latin1_General_CI_AI LIKE %s COLLATE Latin1_General_CI_AI
+                        OR a.title COLLATE Latin1_General_CI_AI LIKE %s COLLATE Latin1_General_CI_AI
+                        OR a.preview COLLATE Latin1_General_CI_AI LIKE %s COLLATE Latin1_General_CI_AI
+                        OR a.preview COLLATE Latin1_General_CI_AI LIKE %s COLLATE Latin1_General_CI_AI
+                        OR a.tags COLLATE Latin1_General_CI_AI LIKE %s COLLATE Latin1_General_CI_AI
+                    )""")
+                    params.extend([search_param, search_param_spaces, search_param, search_param_spaces, search_param])
+                else:
+                    conditions.append("""(
+                        a.title COLLATE Latin1_General_CI_AI LIKE %s COLLATE Latin1_General_CI_AI
+                        OR a.preview COLLATE Latin1_General_CI_AI LIKE %s COLLATE Latin1_General_CI_AI
+                        OR a.tags COLLATE Latin1_General_CI_AI LIKE %s COLLATE Latin1_General_CI_AI
+                    )""")
+                    params.extend([search_param, search_param, search_param])
 
         if tag:
-            conditions.append("""
-                a.tags COLLATE Latin1_General_CI_AI LIKE %s COLLATE Latin1_General_CI_AI
-            """)
-            tag_param = f'%"{tag}"%'
-            params.append(tag_param)
+            if self._has_fulltext_index():
+                # Tag search uses CONTAINS for exact tag match (FREETEXT would stem the word)
+                conditions.append("CONTAINS(a.tags, %s)")
+                # CONTAINS requires double-quoting the literal for exact phrase match
+                params.append(f'"{tag}"')
+            else:
+                # Fallback to LIKE for tag search (per D-04)
+                conditions.append("""
+                    a.tags COLLATE Latin1_General_CI_AI LIKE %s COLLATE Latin1_General_CI_AI
+                """)
+                tag_param = f'%"{tag}"%'
+                params.append(tag_param)
 
         where_clause = "WHERE " + " AND ".join(conditions) if conditions else ""
         return where_clause, params, needs_scores_join
