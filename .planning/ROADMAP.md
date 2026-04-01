@@ -27,8 +27,14 @@ Plans:
 
 ### Phase 3: Text Quality
 - **Goal:** Fix text copying from sources, add competitor filtering, fix silent hallucination pass
-- **Status:** NOT STARTED
+- **Status:** PLANNED
 - **Bugs:** P0-Qualidade (copied text, competitor mentions, fabricated data passes silently)
+- **Plans:** 2 plans (Wave 1 — parallel)
+
+Plans:
+- [ ] 03-PLAN-A-pipeline-quality.md — ANTI_COPIA constant, Haiku fact extraction, competitor filter (llm_service.py, config.py)
+- [ ] 03-PLAN-B-safety-gates.md — N-gram overlap quality criterion, fix silent claim extraction failure (fact_check_service.py, generation_api.py)
+
 - Canonical refs: `docs/plans/2026-04-01-p0-implementation-plan.md` section Phase 3
 
 ### Phase 4: Fact-Check Accuracy
