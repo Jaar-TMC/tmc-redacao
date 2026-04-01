@@ -16,7 +16,7 @@
 - **Status:** PLANNED
 - **Bugs:** P0-Performance (compound search freezes, score filter slow, costs page slow, general filter degradation)
 - **Tracks:** 3 parallel (DBA migrations, query optimization, frontend abort/debounce)
-- **Plans:** 1/3 plans executed
+- **Plans:** 2/3 plans executed
 
 Plans:
 - [ ] 02-PLAN-A-dba-migrations.md — SQL migrations for full-text index (021) + performance indexes (022)
