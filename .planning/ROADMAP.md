@@ -13,9 +13,16 @@
 
 ### Phase 2: Search/Filter Performance
 - **Goal:** Fix LIKE query freezes, add missing indexes, optimize costs page, fix facet cache thrashing
-- **Status:** NOT STARTED
+- **Status:** PLANNED
 - **Bugs:** P0-Performance (compound search freezes, score filter slow, costs page slow, general filter degradation)
 - **Tracks:** 3 parallel (DBA migrations, query optimization, frontend abort/debounce)
+- **Plans:** 3 plans (all Wave 1 — parallel)
+
+Plans:
+- [ ] 02-PLAN-A-dba-migrations.md — SQL migrations for full-text index (021) + performance indexes (022)
+- [ ] 02-PLAN-B-query-optimization.md — Replace LIKE with FREETEXT, fix CAST on JOIN, decouple facet cache
+- [ ] 02-PLAN-C-frontend-search.md — Increase search debounce from 300ms to 500ms
+
 - Canonical refs: `docs/plans/2026-04-01-p0-implementation-plan.md` section Phase 2, `docs/backlog-prioritizado-abril-2026.md`
 
 ### Phase 3: Text Quality
