@@ -24,7 +24,6 @@ _facet_cache = {
     "categories": None,
     "tags": None,
     "timestamp": 0,
-    "filter_key": None,  # cache is keyed on active filters
 }
 FACET_CACHE_TTL = 300  # seconds
 
@@ -101,14 +100,10 @@ async def list_articles_handler(req: func.HttpRequest) -> func.HttpResponse:
             logger.info("[list_articles] Skipping facet computation (skip_facets=true)")
         else:
             try:
-                # Build a cache key from the active filter combination so that
-                # different filter sets don't return stale facets.
-                filter_key = (category, tag, source, period, search, classification)
                 now = time.time()
                 cache_age = now - _facet_cache["timestamp"]
                 cache_hit = (
                     cache_age < FACET_CACHE_TTL
-                    and _facet_cache["filter_key"] == filter_key
                     and _facet_cache["categories"] is not None
                 )
 
@@ -160,13 +155,12 @@ async def list_articles_handler(req: func.HttpRequest) -> func.HttpResponse:
                     tag_items = [{"id": i + 1, "tag": t['tag'], "theme": t['theme'], "count": t['count']} for i, t in enumerate(tag_list)]
 
                     facet_ms = (time.time() - t_facet) * 1000
-                    logger.info(f"[list_articles] Facet cache MISS — computed in {facet_ms:.0f}ms (filters={filter_key})")
+                    logger.info(f"[list_articles] Facet cache MISS — computed in {facet_ms:.0f}ms")
 
                     # Store in cache
                     _facet_cache["categories"] = cat_list
                     _facet_cache["tags"] = tag_items
                     _facet_cache["timestamp"] = now
-                    _facet_cache["filter_key"] = filter_key
 
                 facets = {
                     "categories": cat_list,
