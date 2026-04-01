@@ -9,6 +9,11 @@ const isWordPress = process.env.BUILD_TARGET === 'wordpress'
 
 // https://vite.dev/config/
 export default defineConfig({
+  test: {
+    environment: 'jsdom',
+    globals: true,
+    setupFiles: ['./src/test-setup.js'],
+  },
   plugins: [
     react(),
     tailwindcss(),
