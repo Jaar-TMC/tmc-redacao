@@ -30,6 +30,7 @@ let _getAuthToken = null;
 let _onUnauthorized = null;
 let _refreshToken = null;
 let _refreshPromise = null; // Singleton to avoid concurrent refresh calls
+let _isRedirecting = false; // Guard: fire _onUnauthorized exactly once per batch of 401s
 
 /**
  * Register auth handlers for token injection and 401 handling.
@@ -42,6 +43,7 @@ export function registerAuthHandlers(getToken, onUnauth, refreshFn) {
   _getAuthToken = getToken;
   _onUnauthorized = onUnauth;
   _refreshToken = refreshFn || null;
+  _isRedirecting = false;
 }
 
 /**
@@ -151,7 +153,8 @@ async function fetchApi(endpoint, options = {}) {
             // Refresh failed silently -- fall through to _onUnauthorized
           }
         }
-        if (_onUnauthorized) {
+        if (_onUnauthorized && !_isRedirecting) {
+          _isRedirecting = true;
           _onUnauthorized();
         }
       }

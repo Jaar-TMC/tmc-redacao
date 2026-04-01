@@ -34,28 +34,53 @@ export function AuthProvider({ children }) {
     );
   }, []);
 
-  // Silent refresh on mount — fail fast if token is broken
+  // Silent refresh on mount — retry once to handle Azure cold starts
   useEffect(() => {
     const tryRefresh = async () => {
-      try {
-        const data = await authRefresh();
-        if (data?.access_token) {
-          setAuthToken(data.access_token);
-          const userData = await authGetMe();
-          setUser(userData);
-        } else {
+      const MAX_RETRIES = 1;
+      const RETRY_DELAY_MS = 1000;
+
+      // Retry loop covers only the authRefresh() call (network/cold-start failures)
+      let token = null;
+      for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+        try {
+          const data = await authRefresh();
+          if (data?.access_token) {
+            token = data.access_token;
+            break; // Got a token — exit retry loop
+          }
+          // Server responded but no token — no point retrying
           clearAuthToken();
           setUser(null);
+          return;
+        } catch (err) {
+          console.error('[Auth] Refresh attempt', attempt + 1, 'failed:', err.message || err);
+          if (attempt < MAX_RETRIES) {
+            await new Promise(r => setTimeout(r, RETRY_DELAY_MS));
+          }
         }
-      } catch {
-        // Refresh failed — clear auth state so we redirect to login immediately
+      }
+
+      if (!token) {
+        // All retries exhausted — clear auth state
         clearAuthToken();
         setUser(null);
-      } finally {
-        setIsLoading(false);
+        return;
+      }
+
+      // Token refreshed — fetch user profile (not retried, token is already valid)
+      try {
+        setAuthToken(token);
+        const userData = await authGetMe();
+        setUser(userData);
+      } catch (err) {
+        console.error('[Auth] Failed to fetch user profile:', err.message || err);
+        clearAuthToken();
+        setUser(null);
       }
     };
-    tryRefresh();
+
+    tryRefresh().finally(() => setIsLoading(false));
   }, []);
 
   const login = useCallback(async (email, password, rememberMe = false) => {
