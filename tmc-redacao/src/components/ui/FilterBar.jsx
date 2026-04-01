@@ -98,7 +98,7 @@ const FilterBar = ({ urgencyCounts, facets }) => {
     debounceTimerRef.current = setTimeout(() => {
       updateFilter('searchQuery', value);
       isUserTypingRef.current = false;
-    }, 300);
+    }, 500);
   }, [updateFilter]);
 
   const handleFilterClick = useCallback((type) => {
