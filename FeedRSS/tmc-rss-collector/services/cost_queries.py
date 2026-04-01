@@ -330,7 +330,7 @@ def get_cost_by_user(start_date, end_date) -> dict:
                     SUM(CASE WHEN l.action_type IN ('fact_check_scan', 'deep_verify') THEN 1 ELSE 0 END) as scans,
                     ISNULL(SUM(ISNULL(l.input_cost_usd, 0) + ISNULL(l.output_cost_usd, 0)), 0) as total_cost
                 FROM llm_usage_log l
-                LEFT JOIN users u ON CAST(l.user_id AS VARCHAR(36)) = CAST(u.id AS VARCHAR(36))
+                LEFT JOIN users u ON l.user_id = u.id
                 WHERE l.created_at >= %s AND l.created_at < DATEADD(day, 1, %s)
                   AND l.status = 'success'
                 GROUP BY l.user_id, u.name, u.email
