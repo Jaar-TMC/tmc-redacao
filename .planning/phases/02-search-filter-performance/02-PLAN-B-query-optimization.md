@@ -218,6 +218,7 @@ FACET_CACHE_TTL = 300  # seconds — keep as-is
 
   <verify>
     <automated>cd "FeedRSS/tmc-rss-collector" && python -c "from services.database import DatabaseService; print('import OK')" 2>&1</automated>
+    <automated>grep -n "FREETEXT\|_has_fulltext_index\|_fulltext_available" FeedRSS/tmc-rss-collector/services/database.py</automated>
   </verify>
 
   <acceptance_criteria>

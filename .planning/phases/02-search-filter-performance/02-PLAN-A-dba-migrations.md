@@ -8,7 +8,7 @@ files_modified:
   - FeedRSS/tmc-rss-collector/migrations/021_fulltext_search.sql
   - FeedRSS/tmc-rss-collector/migrations/022_cost_performance_indexes.sql
 autonomous: true
-requirements: [D-01, D-02, D-03, D-07, D-08, D-09, D-10]
+requirements: [D-01, D-02, D-03, D-07, D-08, D-09]
 
 must_haves:
   truths:
@@ -16,6 +16,7 @@ must_haves:
     - "Full-text index covers title, preview, tags columns on collected_articles"
     - "Covering index on llm_usage_log(created_at) eliminates key lookups for cost page queries"
     - "Filtered index on collected_articles(total_score) serves score-only filter without table scan"
+    - "Compound word search is enabled by this catalog — Plan B FREETEXT predicate depends on it to replace full table scans"
   artifacts:
     - path: "FeedRSS/tmc-rss-collector/migrations/021_fulltext_search.sql"
       provides: "Full-text catalog and index for Portuguese search"
@@ -176,7 +177,7 @@ From FeedRSS/tmc-rss-collector/migrations/018_api_usage_and_daily_summary.sql:
     BEGIN
         CREATE NONCLUSTERED INDEX IX_llm_usage_created
         ON llm_usage_log (created_at)
-        INCLUDE (model, task_type, input_tokens, output_tokens, cost_usd, user_id);
+        INCLUDE (model, task_type, input_tokens, output_tokens, input_cost_usd, output_cost_usd, user_id);
     END;
     GO
 
@@ -206,7 +207,9 @@ From FeedRSS/tmc-rss-collector/migrations/018_api_usage_and_daily_summary.sql:
     - All three indexes are wrapped in IF NOT EXISTS for idempotent re-runs.
     - Index names follow existing convention: `IX_{table}_{key_column}`.
     - The filtered index on collected_articles uses `WHERE is_deleted = 0` matching the soft-delete pattern.
-    - Including `input_cost_usd` and `output_cost_usd` in the llm_usage_log covering index was considered, but those columns are computed from `input_tokens * cost_per_token` at query time via `ISNULL(input_cost_usd, 0) + ISNULL(output_cost_usd, 0)`. The existing INCLUDE columns (`cost_usd`) may not match — executor should verify the actual column names by reading the CREATE TABLE in migration 009 and the SELECT list in cost_queries.py:128-137. Adjust INCLUDE columns to match.
+    - Column names verified from migration 009: `input_cost_usd DECIMAL(10,6)`, `output_cost_usd DECIMAL(10,6)`, `total_cost_usd` (computed persisted). The INCLUDE clause uses the stored columns that cost_queries.py:131 references in its SUM.
+    - Note: migration 009 already creates a basic index `IX_llm_usage_log_created ON llm_usage_log(created_at DESC)` with INCLUDE (model, input_tokens, output_tokens, total_cost_usd, latency_ms). Our new index `IX_llm_usage_created` has a broader INCLUDE set (adds task_type, user_id, input_cost_usd, output_cost_usd) to serve the cost page queries without key lookups.
+    - D-10 (IX_api_usage_created) is a discretionary addition — included because the table is small and the index is cheap, but not a locked requirement.
   </action>
 
   <verify>
@@ -215,7 +218,7 @@ From FeedRSS/tmc-rss-collector/migrations/018_api_usage_and_daily_summary.sql:
 
   <acceptance_criteria>
     - File `FeedRSS/tmc-rss-collector/migrations/022_cost_performance_indexes.sql` exists
-    - Contains `IX_llm_usage_created` index on `llm_usage_log(created_at)` with INCLUDE clause (per D-08)
+    - Contains `IX_llm_usage_created` index on `llm_usage_log(created_at)` with INCLUDE clause containing `input_cost_usd, output_cost_usd` (per D-08)
     - Contains `IX_articles_score_filter` index on `collected_articles(total_score DESC, published_at DESC)` with WHERE filter (per D-09)
     - Contains `IX_api_usage_created` index on `api_usage_log(created_at)` with INCLUDE clause (per D-10)
     - Contains `IF NOT EXISTS` guard for each CREATE INDEX (3 guards total)

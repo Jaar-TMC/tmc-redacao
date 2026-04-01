@@ -124,6 +124,8 @@ const fetchDebounceRef = useRef(null);      // line 81 — 150ms fetch coalescin
 
   <verify>
     <automated>grep -n "}, 500)" "tmc-redacao/src/components/ui/FilterBar.jsx" | head -5</automated>
+    <automated>! grep -n "debounceTimerRef.*300\|setTimeout.*}, 300)" "tmc-redacao/src/components/ui/FilterBar.jsx"</automated>
+    <automated>cd tmc-redacao && npm run lint 2>&1 | tail -5</automated>
   </verify>
 
   <acceptance_criteria>
