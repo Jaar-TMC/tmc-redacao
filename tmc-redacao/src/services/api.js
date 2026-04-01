@@ -47,6 +47,14 @@ export function registerAuthHandlers(getToken, onUnauth, refreshFn) {
 }
 
 /**
+ * Reset the redirect guard after a successful login.
+ * Called by AuthContext.login to ensure 401s are handled after re-auth.
+ */
+export function resetRedirectGuard() {
+  _isRedirecting = false;
+}
+
+/**
  * Get current auth token via registered handler.
  * Exported so AuthContext can pass it to registerAuthHandlers without circular ref.
  * @returns {string|null}

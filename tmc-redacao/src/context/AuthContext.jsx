@@ -2,7 +2,7 @@
 import { createContext, useState, useCallback, useEffect, useMemo, useContext } from 'react';
 import PropTypes from 'prop-types';
 import { authLogin, authRefresh, authLogout, authGetMe, authUpdateMe, setAuthToken, clearAuthToken, getAuthToken } from '../services/auth';
-import { registerAuthHandlers } from '../services/api';
+import { registerAuthHandlers, resetRedirectGuard } from '../services/api';
 
 const AuthContext = createContext(null);
 
@@ -88,6 +88,7 @@ export function AuthProvider({ children }) {
     const data = await authLogin(email, password, rememberMe);
     setAuthToken(data.access_token);
     setUser(data.user);
+    resetRedirectGuard(); // Allow 401 handling after re-login
     return data.user;
   }, []);
 
