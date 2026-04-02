@@ -1431,6 +1431,13 @@ async def generate_article_handler(req: func.HttpRequest) -> func.HttpResponse:
             result["publication_status"] = "draft"
         result["can_auto_publish"] = False  # Conservative default
 
+        # Phase 4 D-15: Breaking news with recent_unverifiable claims → "review"
+        verification = result.get("verification", {})
+        if verification.get("recent_unverifiable_claims", 0) > 0:
+            if result["publication_status"] not in ("blocked",):
+                result["publication_status"] = "review"
+                result["temporal_review_required"] = True
+
         # Add enrichment source URLs to result for frontend hyperlink display
         result["source_urls"] = enrichment_source_urls
 
