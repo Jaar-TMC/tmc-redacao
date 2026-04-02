@@ -165,6 +165,8 @@ class GenerateRequest(BaseModel):
     author_url: Optional[str] = Field(default=None, description="URL do perfil do jornalista")
     # Criar por Prompt support
     source_type: str = Field(default="manual", description="Source type: manual|feed|prompt")
+    # Temporal fact-check (Phase 04)
+    source_published_at: Optional[str] = Field(default=None, description="ISO datetime of source article publication (for temporal fact-check)")
 
     @field_validator('source_type')
     @classmethod
