@@ -2867,6 +2867,8 @@ Regras:
                     f"({novel_pct:.0%}) nao presentes na fonte"
                 )
 
+        # Only standard unverifiable escalates risk — recent_unverifiable (Phase 4)
+        # is excluded because breaking news claims are naturally sparse on verification
         # Override: excessive unverifiable claims
         if metadata.total_claims > 0 and metadata.unverifiable_claims >= 3:
             unverifiable_pct = metadata.unverifiable_claims / metadata.total_claims
