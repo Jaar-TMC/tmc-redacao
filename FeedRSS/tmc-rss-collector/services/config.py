@@ -62,6 +62,10 @@ class AppConfig:
     event_matching_enabled: bool = True
     cove_enabled: bool = True
     decontamination_enabled: bool = True
+    # Temporal awareness (Phase 4 — breaking news fact-check)
+    temporal_awareness_enabled: bool = True
+    temporal_breaking_hours: int = 48
+    temporal_recent_days: int = 7
     production_safety_mode: bool = True
 
     # Prompt caching (Anthropic only - reduces cost on repeated system prompts)
@@ -162,6 +166,9 @@ def load_config() -> AppConfig:
         event_matching_enabled=_bool_env("EVENT_MATCHING_ENABLED", True),
         cove_enabled=_bool_env("COVE_ENABLED", True),
         decontamination_enabled=_bool_env("DECONTAMINATION_ENABLED", True),
+        temporal_awareness_enabled=_bool_env("TEMPORAL_AWARENESS_ENABLED", True),
+        temporal_breaking_hours=_int_env("TEMPORAL_BREAKING_HOURS", 48),
+        temporal_recent_days=_int_env("TEMPORAL_RECENT_DAYS", 7),
         production_safety_mode=_bool_env("PRODUCTION_SAFETY_MODE", True),
         # Safety
         min_source_chars=_int_env("MIN_SOURCE_CHARS", 300),
