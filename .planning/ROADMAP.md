@@ -75,7 +75,7 @@
 - **Requirements:** PAG-01, PAG-02, PAG-03, PAG-04
 - **Plans:** 2 plans (1/2 complete)
   - [x] 09-01-PLAN.md — Backend: cursor encode/decode, seek predicate, dual-mode query, API response fields
-  - [ ] 09-02-PLAN.md — Frontend: cursor state in useArticlesQuery, cursor param in api.js
+  - [x] 09-02-PLAN.md — Frontend: cursor state in useArticlesQuery, cursor param in api.js
 - **Success Criteria:**
   1. `GET /api/articles?cursor=...` returns correct next page
   2. Page 50 loads in <10ms (same as page 1)
