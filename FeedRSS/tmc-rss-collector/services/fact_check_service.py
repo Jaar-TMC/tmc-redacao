@@ -803,6 +803,37 @@ class FactCheckService:
         start = datetime.utcnow() - timedelta(days=_get_exa_search_days())
         return start.strftime("%Y-%m-%dT%H:%M:%S.000Z")
 
+    def _get_temporal_tier(self, published_at_iso: str = None) -> str:
+        """Classify source article age into breaking|recente|historico."""
+        if not _get_temporal_awareness_enabled():
+            return "historico"
+        if not published_at_iso:
+            return "breaking"
+        from datetime import datetime, timezone
+        try:
+            pub = datetime.fromisoformat(published_at_iso.replace("Z", "+00:00"))
+            age_hours = (datetime.now(timezone.utc) - pub).total_seconds() / 3600
+            if age_hours <= _get_temporal_breaking_hours():
+                return "breaking"
+            elif age_hours <= _get_temporal_recent_days() * 24:
+                return "recente"
+            else:
+                return "historico"
+        except Exception:
+            return "breaking"
+
+    def _get_tier_date_range(self, tier: str) -> str:
+        """Return Exa startPublishedDate for a given temporal tier."""
+        from datetime import datetime, timedelta
+        if tier == "breaking":
+            delta = timedelta(hours=_get_temporal_breaking_hours())
+        elif tier == "recente":
+            delta = timedelta(days=_get_temporal_recent_days())
+        else:
+            delta = timedelta(days=_get_exa_search_days())
+        start = datetime.utcnow() - delta
+        return start.strftime("%Y-%m-%dT%H:%M:%S.000Z")
+
     async def verify_claim_with_exa(
         self,
         claim: ExtractedClaim,
