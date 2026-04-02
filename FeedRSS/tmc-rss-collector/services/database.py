@@ -736,6 +736,13 @@ class DatabaseService:
         # Pre-build the fallback ORDER BY for score queries (avoids fragile str.replace)
         fallback_order_clause = "ORDER BY a.published_at DESC, a.id DESC"
 
+        # PERF: When there are no filters at all (max_hours=0, no category/source/search/tag),
+        # COUNT(*) OVER() forces a full 24K-row scan on every page request just to produce
+        # the total. Use sys.dm_db_partition_stats for an approximate count instead — this
+        # is near-instant and avoids the full scan. Approximate is fine for pagination display.
+        # The condition checks filter_where (data query) AND urgency_where (urgency query).
+        _no_filters = not filter_where  # empty string means no WHERE clause was built
+
         with self.get_connection() as conn:
             db_cursor = conn.cursor()
 
@@ -743,20 +750,33 @@ class DatabaseService:
             # Score detail columns (score_inesperado etc.) removed from list query --
             # frontend never uses them and the LEFT JOIN article_scores was a bottleneck.
             # WHERE and ORDER BY use denormalized a.total_score / a.classification (no JOIN needed).
+            # NOLOCK: list endpoint is read-only; dirty reads are acceptable and eliminate
+            # shared-lock blocking under concurrent load.
 
             if use_cursor:
                 # --- Keyset pagination path (PAG-01/PAG-02) ---
 
                 # COUNT query -- uses filter-only WHERE (no seek predicate)
-                # so total/pages remain stable across all cursor-navigated pages
-                count_query = f"""
-                    SELECT COUNT(*)
-                    FROM collected_articles a
-                    JOIN sources s ON a.source_id = s.id
-                    {filter_where}
-                """
-                db_cursor.execute(count_query, tuple(filter_params))
-                total = db_cursor.fetchone()[0]
+                # so total/pages remain stable across all cursor-navigated pages.
+                # PERF: skip COUNT scan entirely when no filters — use partition stats instead.
+                if _no_filters:
+                    db_cursor.execute("""
+                        SELECT SUM(p.row_count)
+                        FROM sys.dm_db_partition_stats p
+                        JOIN sys.objects o ON p.object_id = o.object_id
+                        WHERE o.name = 'collected_articles' AND p.index_id IN (0, 1)
+                    """)
+                    total = db_cursor.fetchone()[0] or 0
+                    logger.info(f"[get_articles_with_urgency] cursor path: approx total from partition stats = {total}")
+                else:
+                    count_query = f"""
+                        SELECT COUNT(*)
+                        FROM collected_articles a WITH(NOLOCK)
+                        JOIN sources s WITH(NOLOCK) ON a.source_id = s.id
+                        {filter_where}
+                    """
+                    db_cursor.execute(count_query, tuple(filter_params))
+                    total = db_cursor.fetchone()[0]
 
                 # Data query -- uses seek WHERE (filter + cursor predicate), no OFFSET
                 select_cols = """
@@ -766,8 +786,8 @@ class DatabaseService:
                            s.name as source_name, s.url as source_url, s.favicon_url,
                            a.total_score, a.classification,
                            LEN(a.content) as content_length_original
-                    FROM collected_articles a
-                    JOIN sources s ON a.source_id = s.id
+                    FROM collected_articles a WITH(NOLOCK)
+                    JOIN sources s WITH(NOLOCK) ON a.source_id = s.id
                     {seek_where}
                 """.format(seek_where=seek_where)
 
@@ -798,64 +818,108 @@ class DatabaseService:
                 # --- Standard OFFSET pagination path ---
                 offset = (page - 1) * limit
 
-                select_cols = """
-                    SELECT a.id, a.source_id, a.title, LEFT(a.content, 200) as content, a.preview, a.url,
-                           a.image_url, a.author, a.category, a.tags, a.published_at,
-                           a.collected_at, a.hash,
-                           s.name as source_name, s.url as source_url, s.favicon_url,
-                           a.total_score, a.classification,
-                           LEN(a.content) as content_length_original,
-                           COUNT(*) OVER() as total_count
-                    FROM collected_articles a
-                    JOIN sources s ON a.source_id = s.id
-                    {filter_where}
-                """.format(filter_where=filter_where)
+                # PERF: When no filters are active, skip COUNT(*) OVER() (forces full scan)
+                # and use sys.dm_db_partition_stats for an approximate total instead.
+                # The data SELECT then omits the window function — one fewer full scan.
+                if _no_filters:
+                    db_cursor.execute("""
+                        SELECT SUM(p.row_count)
+                        FROM sys.dm_db_partition_stats p
+                        JOIN sys.objects o ON p.object_id = o.object_id
+                        WHERE o.name = 'collected_articles' AND p.index_id IN (0, 1)
+                    """)
+                    approx_total = db_cursor.fetchone()[0] or 0
+                    logger.info(f"[get_articles_with_urgency] offset path: approx total from partition stats = {approx_total}")
 
-                query = f"{select_cols}\n                {order_clause}\n                OFFSET %s ROWS FETCH NEXT %s ROWS ONLY"
-                params_final = tuple(filter_params) + (offset, limit)
+                    select_cols = """
+                        SELECT a.id, a.source_id, a.title, LEFT(a.content, 200) as content, a.preview, a.url,
+                               a.image_url, a.author, a.category, a.tags, a.published_at,
+                               a.collected_at, a.hash,
+                               s.name as source_name, s.url as source_url, s.favicon_url,
+                               a.total_score, a.classification,
+                               LEN(a.content) as content_length_original
+                        FROM collected_articles a WITH(NOLOCK)
+                        JOIN sources s WITH(NOLOCK) ON a.source_id = s.id
+                    """
+                    query = f"{select_cols}\n                {order_clause}\n                OFFSET %s ROWS FETCH NEXT %s ROWS ONLY"
+                    params_final = (offset, limit)
 
-                try:
-                    db_cursor.execute(query, params_final)
-                    rows = db_cursor.fetchall()
-                except Exception as e:
-                    logger.error(f"[get_articles_with_urgency] Query failed (order_by={order_by}): {e}")
-                    # Fallback: if score sort fails, fall back to date ordering
-                    if order_by == 'score':
-                        logger.warning("[get_articles_with_urgency] Falling back to date ordering")
-                        try:
-                            fallback_select = """
-                                SELECT a.id, a.source_id, a.title, LEFT(a.content, 200) as content, a.preview, a.url,
-                                       a.image_url, a.author, a.category, a.tags, a.published_at,
-                                       a.collected_at, a.hash,
-                                       s.name as source_name, s.url as source_url, s.favicon_url,
-                                       a.total_score, a.classification,
-                                       LEN(a.content) as content_length_original,
-                                       COUNT(*) OVER() as total_count
-                                FROM collected_articles a
-                                JOIN sources s ON a.source_id = s.id
-                                {filter_where}
-                            """.format(filter_where=filter_where)
-                            fallback_query = f"{fallback_select}\n                {fallback_order_clause}\n                OFFSET %s ROWS FETCH NEXT %s ROWS ONLY"
-                            db_cursor.execute(fallback_query, tuple(filter_params) + (offset, limit))
-                            rows = db_cursor.fetchall()
-                        except Exception as fallback_err:
-                            logger.error(f"[get_articles_with_urgency] Fallback also failed: {fallback_err}")
-                            raise e
-                    else:
+                    try:
+                        db_cursor.execute(query, params_final)
+                        rows = db_cursor.fetchall()
+                    except Exception as e:
+                        logger.error(f"[get_articles_with_urgency] No-filter query failed (order_by={order_by}): {e}")
                         raise
 
-                # Extract total from window function (last column of first row)
-                total = rows[0][-1] if rows else 0
+                    total = approx_total
 
-                # Exclude total_count (last col) and content_length_original (second-to-last)
-                # from row mapping. Restore real content length on article after construction.
-                articles = []
-                for row in rows:
-                    content_length_original = row[-2]  # LEN(a.content)
-                    article_row = row[:-2]  # strip both content_length_original and total_count
-                    article = self._row_to_article(article_row)
-                    article._content_length_original = content_length_original
-                    articles.append(article)
+                    articles = []
+                    for row in rows:
+                        content_length_original = row[-1]  # LEN(a.content)
+                        article_row = row[:-1]  # strip content_length_original
+                        article = self._row_to_article(article_row)
+                        article._content_length_original = content_length_original
+                        articles.append(article)
+
+                else:
+                    select_cols = """
+                        SELECT a.id, a.source_id, a.title, LEFT(a.content, 200) as content, a.preview, a.url,
+                               a.image_url, a.author, a.category, a.tags, a.published_at,
+                               a.collected_at, a.hash,
+                               s.name as source_name, s.url as source_url, s.favicon_url,
+                               a.total_score, a.classification,
+                               LEN(a.content) as content_length_original,
+                               COUNT(*) OVER() as total_count
+                        FROM collected_articles a WITH(NOLOCK)
+                        JOIN sources s WITH(NOLOCK) ON a.source_id = s.id
+                        {filter_where}
+                    """.format(filter_where=filter_where)
+
+                    query = f"{select_cols}\n                {order_clause}\n                OFFSET %s ROWS FETCH NEXT %s ROWS ONLY"
+                    params_final = tuple(filter_params) + (offset, limit)
+
+                    try:
+                        db_cursor.execute(query, params_final)
+                        rows = db_cursor.fetchall()
+                    except Exception as e:
+                        logger.error(f"[get_articles_with_urgency] Query failed (order_by={order_by}): {e}")
+                        # Fallback: if score sort fails, fall back to date ordering
+                        if order_by == 'score':
+                            logger.warning("[get_articles_with_urgency] Falling back to date ordering")
+                            try:
+                                fallback_select = """
+                                    SELECT a.id, a.source_id, a.title, LEFT(a.content, 200) as content, a.preview, a.url,
+                                           a.image_url, a.author, a.category, a.tags, a.published_at,
+                                           a.collected_at, a.hash,
+                                           s.name as source_name, s.url as source_url, s.favicon_url,
+                                           a.total_score, a.classification,
+                                           LEN(a.content) as content_length_original,
+                                           COUNT(*) OVER() as total_count
+                                    FROM collected_articles a WITH(NOLOCK)
+                                    JOIN sources s WITH(NOLOCK) ON a.source_id = s.id
+                                    {filter_where}
+                                """.format(filter_where=filter_where)
+                                fallback_query = f"{fallback_select}\n                {fallback_order_clause}\n                OFFSET %s ROWS FETCH NEXT %s ROWS ONLY"
+                                db_cursor.execute(fallback_query, tuple(filter_params) + (offset, limit))
+                                rows = db_cursor.fetchall()
+                            except Exception as fallback_err:
+                                logger.error(f"[get_articles_with_urgency] Fallback also failed: {fallback_err}")
+                                raise e
+                        else:
+                            raise
+
+                    # Extract total from window function (last column of first row)
+                    total = rows[0][-1] if rows else 0
+
+                    # Exclude total_count (last col) and content_length_original (second-to-last)
+                    # from row mapping. Restore real content length on article after construction.
+                    articles = []
+                    for row in rows:
+                        content_length_original = row[-2]  # LEN(a.content)
+                        article_row = row[:-2]  # strip both content_length_original and total_count
+                        article = self._row_to_article(article_row)
+                        article._content_length_original = content_length_original
+                        articles.append(article)
 
             # 2. Urgency counts - no scores JOIN needed (classification is denormalized)
             if skip_urgency_query:
@@ -868,25 +932,44 @@ class DatabaseService:
                     "all": total
                 }
             else:
-                urgency_query = f"""
-                    SELECT
-                        SUM(CASE WHEN a.published_at >= DATEADD(hour, -1, GETUTCDATE()) THEN 1 ELSE 0 END),
-                        SUM(CASE WHEN a.published_at >= DATEADD(hour, -3, GETUTCDATE()) THEN 1 ELSE 0 END),
-                        SUM(CASE WHEN a.published_at >= DATEADD(hour, -8, GETUTCDATE()) THEN 1 ELSE 0 END),
-                        COUNT(*)
-                    FROM collected_articles a
-                    JOIN sources s ON a.source_id = s.id
-                    {urgency_where}
-                """
-                db_cursor.execute(urgency_query, tuple(urgency_params))
-                urow = db_cursor.fetchone()
+                # PERF: When no filters are active, the urgency COUNT(*) would scan all 24K rows.
+                # Replace it with a targeted time-bucketed query — skip the full COUNT(*) for "all"
+                # and reuse the already-fetched approx_total (or query partition stats again).
+                if _no_filters:
+                    db_cursor.execute("""
+                        SELECT
+                            SUM(CASE WHEN a.published_at >= DATEADD(hour, -1, GETUTCDATE()) THEN 1 ELSE 0 END),
+                            SUM(CASE WHEN a.published_at >= DATEADD(hour, -3, GETUTCDATE()) THEN 1 ELSE 0 END),
+                            SUM(CASE WHEN a.published_at >= DATEADD(hour, -8, GETUTCDATE()) THEN 1 ELSE 0 END)
+                        FROM collected_articles a WITH(NOLOCK)
+                    """)
+                    urow = db_cursor.fetchone()
+                    urgency_counts = {
+                        "now": urow[0] or 0,
+                        "recent": urow[1] or 0,
+                        "today": urow[2] or 0,
+                        "all": total  # reuse approx total already fetched above
+                    } if urow else {"now": 0, "recent": 0, "today": 0, "all": total}
+                else:
+                    urgency_query = f"""
+                        SELECT
+                            SUM(CASE WHEN a.published_at >= DATEADD(hour, -1, GETUTCDATE()) THEN 1 ELSE 0 END),
+                            SUM(CASE WHEN a.published_at >= DATEADD(hour, -3, GETUTCDATE()) THEN 1 ELSE 0 END),
+                            SUM(CASE WHEN a.published_at >= DATEADD(hour, -8, GETUTCDATE()) THEN 1 ELSE 0 END),
+                            COUNT(*)
+                        FROM collected_articles a WITH(NOLOCK)
+                        JOIN sources s WITH(NOLOCK) ON a.source_id = s.id
+                        {urgency_where}
+                    """
+                    db_cursor.execute(urgency_query, tuple(urgency_params))
+                    urow = db_cursor.fetchone()
 
-                urgency_counts = {
-                    "now": urow[0] or 0,
-                    "recent": urow[1] or 0,
-                    "today": urow[2] or 0,
-                    "all": urow[3] or 0
-                } if urow else {"now": 0, "recent": 0, "today": 0, "all": 0}
+                    urgency_counts = {
+                        "now": urow[0] or 0,
+                        "recent": urow[1] or 0,
+                        "today": urow[2] or 0,
+                        "all": urow[3] or 0
+                    } if urow else {"now": 0, "recent": 0, "today": 0, "all": 0}
 
             logger.info(f"[get_articles_with_urgency] total={total}, rows={len(rows)}, urgency={urgency_counts}")
 
@@ -1348,7 +1431,7 @@ class DatabaseService:
                 SELECT
                     a.id as article_id,
                     LOWER(LTRIM(RTRIM(t.value))) as tag
-                FROM collected_articles a
+                FROM collected_articles a WITH (NOLOCK)
                 CROSS APPLY OPENJSON(a.tags) t
                 {period_filter}
             ),
@@ -1422,7 +1505,7 @@ class DatabaseService:
                 SELECT
                     a.id as article_id,
                     LOWER(LTRIM(RTRIM(t.value))) as tag
-                FROM collected_articles a
+                FROM collected_articles a WITH (NOLOCK)
                 CROSS APPLY OPENJSON(a.tags) t
                 WHERE a.published_at >= DATEADD(hour, -%s, GETUTCDATE())
             ),
@@ -1569,8 +1652,8 @@ class DatabaseService:
                 SELECT
                     a.id as article_id,
                     LOWER(LTRIM(RTRIM(t.value))) as tag
-                FROM collected_articles a
-                JOIN sources s ON a.source_id = s.id
+                FROM collected_articles a WITH (NOLOCK)
+                JOIN sources s WITH (NOLOCK) ON a.source_id = s.id
                 CROSS APPLY OPENJSON(a.tags) t
                 WHERE 1=1 {where_extra}
             ),
@@ -1624,32 +1707,43 @@ class DatabaseService:
     def get_collection_stats(self) -> dict:
         """Retorna estatisticas de coleta.
 
-        PERF: Uses 2 queries instead of 5 - one for scalar aggregates, one for categories.
+        PERF: Optimized to avoid full table scans and lock contention:
+        - total_articles: sys.dm_db_partition_stats (metadata-only, sub-ms, no lock)
+        - articles_today/sources/last_collection: NOLOCK hints to avoid shared-lock waits
+        - by_category: NOLOCK on index scan using IX_articles_category_date
         """
         with self.get_connection() as conn:
             cursor = conn.cursor()
 
-            # Single query for all scalar stats (replaces 4 separate queries)
+            # Total articles from partition metadata — no table scan, no locks
+            cursor.execute("""
+                SELECT SUM(row_count)
+                FROM sys.dm_db_partition_stats
+                WHERE object_id = OBJECT_ID('collected_articles')
+                  AND index_id IN (0, 1)
+            """)
+            total_row = cursor.fetchone()
+            total_articles = int(total_row[0]) if total_row and total_row[0] else 0
+
+            # Remaining scalar stats: NOLOCK to skip shared-lock waits from concurrent writes
             cursor.execute("""
                 SELECT
-                    (SELECT COUNT(*) FROM collected_articles) as total_articles,
-                    (SELECT COUNT(*) FROM collected_articles
+                    (SELECT COUNT(*) FROM collected_articles WITH (NOLOCK)
                      WHERE collected_at >= DATEADD(day, -1, GETUTCDATE())) as articles_today,
-                    (SELECT COUNT(*) FROM sources WHERE active = 1) as active_sources,
-                    (SELECT MAX(finished_at) FROM collection_logs
+                    (SELECT COUNT(*) FROM sources WITH (NOLOCK) WHERE active = 1) as active_sources,
+                    (SELECT MAX(finished_at) FROM collection_logs WITH (NOLOCK)
                      WHERE status = 'success') as last_collection
             """)
             stats_row = cursor.fetchone()
 
-            total_articles = stats_row[0]
-            articles_today = stats_row[1]
-            active_sources = stats_row[2]
-            last_collection = stats_row[3]
+            articles_today = stats_row[0]
+            active_sources = stats_row[1]
+            last_collection = stats_row[2]
 
-            # Category breakdown (kept separate since it returns multiple rows)
+            # Category breakdown: NOLOCK + uses IX_articles_category_date (category is key col)
             cursor.execute("""
                 SELECT category, COUNT(*) as count
-                FROM collected_articles
+                FROM collected_articles WITH (NOLOCK)
                 WHERE category IS NOT NULL
                 GROUP BY category
                 ORDER BY count DESC

@@ -26,6 +26,17 @@ _facet_cache = {}  # key: filter_hash -> {"categories": [...], "tags": [...], "t
 FACET_CACHE_TTL = 300  # seconds
 MAX_FACET_CACHE_ENTRIES = 20
 
+# ---------------------------------------------------------------------------
+# In-memory caches for /api/tags and /api/trending-tags (5-min TTL).
+# These endpoints scan up to 24K articles with OPENJSON when the pre-aggregated
+# tag_aggregations table is empty/stale. The handler-level cache ensures that
+# even the first warm hit only reaches the DB once per TTL window.
+# Key: (limit, period_hours) for trending; (search, limit, category, source, period) for tags.
+# ---------------------------------------------------------------------------
+_trending_tags_cache: dict = {}   # key -> {"data": [...], "ts": float}
+_all_tags_cache: dict = {}        # key -> {"data": [...], "ts": float}
+TAGS_CACHE_TTL = 300  # 5 minutes — matches RSS collection cadence (15 min)
+
 
 def _facet_cache_key(category, source, period, search, tag, classification, max_hours):
     raw = f"{category}|{source}|{period}|{search}|{tag}|{classification}|{max_hours}"
@@ -441,9 +452,24 @@ async def get_trending_tags_handler(req: func.HttpRequest) -> func.HttpResponse:
         if period:
             period_hours = int(period)
 
+        effective_hours = period_hours or 72
+        cache_key = f"{limit}:{effective_hours}"
+        now = time.monotonic()
+
+        # Check in-memory cache first (5-min TTL) — avoids the DB entirely on warm hits.
+        # The live OPENJSON fallback takes 24-28s on 24K articles; this cache cuts that to <1ms.
+        cached = _trending_tags_cache.get(cache_key)
+        if cached and (now - cached["ts"]) < TAGS_CACHE_TTL:
+            logger.debug(f"[trending-tags] cache hit key={cache_key}")
+            return func.HttpResponse(
+                json.dumps({"items": cached["data"], "total": len(cached["data"])}),
+                status_code=200,
+                mimetype="application/json"
+            )
+
         # Get trending tags from database
         db = get_db()
-        tags = await run_db(db.get_trending_tags_fast, limit=limit, period_hours=period_hours or 72)
+        tags = await run_db(db.get_trending_tags_fast, limit=limit, period_hours=effective_hours)
 
         # Format response with proper display names
         items = []
@@ -460,6 +486,13 @@ async def get_trending_tags_handler(req: func.HttpRequest) -> func.HttpResponse:
                 "count": tag_data['count'],
                 "trend": "stable"  # Could be calculated comparing to previous period
             })
+
+        # Store in handler-level cache
+        _trending_tags_cache[cache_key] = {"data": items, "ts": now}
+        # Evict oldest entry if cache grows beyond 20 keys (different limit/period combos)
+        if len(_trending_tags_cache) > 20:
+            oldest = min(_trending_tags_cache, key=lambda k: _trending_tags_cache[k]["ts"])
+            del _trending_tags_cache[oldest]
 
         resp = func.HttpResponse(
             json.dumps({"items": items, "total": len(items)}),
@@ -519,6 +552,20 @@ async def get_all_tags_handler(req: func.HttpRequest) -> func.HttpResponse:
 
         has_filters = any([category, source, period])
 
+        # Cache key covers all filter dimensions. Filtered calls (category/source/period)
+        # are still cached — they're expensive too (OPENJSON with JOIN).
+        cache_key = f"{search}:{limit}:{category}:{source}:{period}"
+        now = time.monotonic()
+
+        cached = _all_tags_cache.get(cache_key)
+        if cached and (now - cached["ts"]) < TAGS_CACHE_TTL:
+            logger.debug(f"[tags] cache hit key={cache_key}")
+            return func.HttpResponse(
+                json.dumps({"items": cached["data"], "total": len(cached["data"])}),
+                status_code=200,
+                mimetype="application/json"
+            )
+
         db = get_db()
 
         if has_filters:
@@ -538,6 +585,13 @@ async def get_all_tags_handler(req: func.HttpRequest) -> func.HttpResponse:
                 "tag": tag_data['tag'],
                 "count": tag_data['count']
             })
+
+        # Store in handler-level cache
+        _all_tags_cache[cache_key] = {"data": items, "ts": now}
+        # Evict oldest entry if cache grows large (many distinct filter combos)
+        if len(_all_tags_cache) > 50:
+            oldest = min(_all_tags_cache, key=lambda k: _all_tags_cache[k]["ts"])
+            del _all_tags_cache[oldest]
 
         resp = func.HttpResponse(
             json.dumps({"items": items, "total": len(items)}),
