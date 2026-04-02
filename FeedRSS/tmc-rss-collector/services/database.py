@@ -771,7 +771,7 @@ class DatabaseService:
                     {seek_where}
                 """.format(seek_where=seek_where)
 
-                query = f"{select_cols}\n                {order_clause}\nFETCH NEXT %s ROWS ONLY"
+                query = f"{select_cols}\n                {order_clause}\n                OFFSET 0 ROWS FETCH NEXT %s ROWS ONLY"
                 params_final = tuple(seek_params) + (limit,)
 
                 try:
