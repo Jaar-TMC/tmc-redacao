@@ -174,6 +174,18 @@ async def list_articles_handler(req: func.HttpRequest) -> func.HttpResponse:
 
         if skip_facets:
             logger.info("[list_articles] Skipping facet computation (skip_facets=true)")
+        elif max_hours == '0':
+            # PERF: "todas as matérias" (no time filter) scans 24K+ rows for facets.
+            # Return cached facets instead of recomputing to avoid 504 timeouts.
+            any_cached = next(iter(_facet_cache.values()), None) if _facet_cache else None
+            if any_cached:
+                facets = {
+                    "categories": any_cached["categories"],
+                    "tags": any_cached["tags"]
+                }
+                logger.info("[list_articles] max_hours=0 — returning cached facets to avoid timeout")
+            else:
+                logger.info("[list_articles] max_hours=0 — no cached facets, skipping to avoid timeout")
         elif search:
             # Return any cached facets when available; skip computation during search
             any_cached = next(iter(_facet_cache.values()), None) if _facet_cache else None
