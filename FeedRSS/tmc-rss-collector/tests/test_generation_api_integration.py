@@ -90,9 +90,9 @@ class TestHandlerHappyPath:
     @patch("services.fact_check_service.FactCheckService.enrich_context", new_callable=AsyncMock)
     @patch("services.llm_service.LLMService.generate_article", new_callable=AsyncMock)
     @patch("services.llm_service.LLMService.__init__", return_value=None)
-    @patch("services.fact_check_service.FACT_CHECK_ENABLED", True)
-    @patch("services.fact_check_service.ENRICHMENT_ENABLED", True)
-    @patch("services.fact_check_service.VERIFICATION_ENABLED", True)
+    @patch("services.fact_check_service.is_fact_check_enabled", new=lambda: True)
+    @patch("services.fact_check_service._get_enrichment_enabled", new=lambda: True)
+    @patch("services.fact_check_service._get_verification_enabled", new=lambda: True)
     async def test_full_pipeline_returns_200(
         self, mock_llm_init, mock_generate, mock_enrich, mock_verify, mock_audit
     ):
@@ -119,9 +119,9 @@ class TestHandlerHappyPath:
     @patch("services.fact_check_service.FactCheckService.enrich_context", new_callable=AsyncMock)
     @patch("services.llm_service.LLMService.generate_article", new_callable=AsyncMock)
     @patch("services.llm_service.LLMService.__init__", return_value=None)
-    @patch("services.fact_check_service.FACT_CHECK_ENABLED", True)
-    @patch("services.fact_check_service.ENRICHMENT_ENABLED", True)
-    @patch("services.fact_check_service.VERIFICATION_ENABLED", True)
+    @patch("services.fact_check_service.is_fact_check_enabled", new=lambda: True)
+    @patch("services.fact_check_service._get_enrichment_enabled", new=lambda: True)
+    @patch("services.fact_check_service._get_verification_enabled", new=lambda: True)
     async def test_response_contains_all_fields(
         self, mock_llm_init, mock_generate, mock_enrich, mock_verify, mock_audit
     ):
@@ -152,9 +152,9 @@ class TestHandlerHappyPath:
     @patch("services.fact_check_service.FactCheckService.enrich_context", new_callable=AsyncMock)
     @patch("services.llm_service.LLMService.generate_article", new_callable=AsyncMock)
     @patch("services.llm_service.LLMService.__init__", return_value=None)
-    @patch("services.fact_check_service.FACT_CHECK_ENABLED", True)
-    @patch("services.fact_check_service.ENRICHMENT_ENABLED", True)
-    @patch("services.fact_check_service.VERIFICATION_ENABLED", True)
+    @patch("services.fact_check_service.is_fact_check_enabled", new=lambda: True)
+    @patch("services.fact_check_service._get_enrichment_enabled", new=lambda: True)
+    @patch("services.fact_check_service._get_verification_enabled", new=lambda: True)
     async def test_correlation_id_in_response(
         self, mock_llm_init, mock_generate, mock_enrich, mock_verify, mock_audit
     ):
@@ -187,9 +187,9 @@ class TestHandlerPhaseFailures:
     @patch("services.fact_check_service.FactCheckService.enrich_context", new_callable=AsyncMock)
     @patch("services.llm_service.LLMService.generate_article", new_callable=AsyncMock)
     @patch("services.llm_service.LLMService.__init__", return_value=None)
-    @patch("services.fact_check_service.FACT_CHECK_ENABLED", True)
-    @patch("services.fact_check_service.ENRICHMENT_ENABLED", True)
-    @patch("services.fact_check_service.VERIFICATION_ENABLED", True)
+    @patch("services.fact_check_service.is_fact_check_enabled", new=lambda: True)
+    @patch("services.fact_check_service._get_enrichment_enabled", new=lambda: True)
+    @patch("services.fact_check_service._get_verification_enabled", new=lambda: True)
     async def test_enrichment_failure_still_generates(
         self, mock_llm_init, mock_generate, mock_enrich, mock_verify, mock_audit
     ):
@@ -214,9 +214,9 @@ class TestHandlerPhaseFailures:
     @patch("services.fact_check_service.FactCheckService.enrich_context", new_callable=AsyncMock)
     @patch("services.llm_service.LLMService.generate_article", new_callable=AsyncMock)
     @patch("services.llm_service.LLMService.__init__", return_value=None)
-    @patch("services.fact_check_service.FACT_CHECK_ENABLED", True)
-    @patch("services.fact_check_service.ENRICHMENT_ENABLED", True)
-    @patch("services.fact_check_service.VERIFICATION_ENABLED", True)
+    @patch("services.fact_check_service.is_fact_check_enabled", new=lambda: True)
+    @patch("services.fact_check_service._get_enrichment_enabled", new=lambda: True)
+    @patch("services.fact_check_service._get_verification_enabled", new=lambda: True)
     async def test_verification_failure_flags_review(
         self, mock_llm_init, mock_generate, mock_enrich, mock_verify, mock_audit
     ):
@@ -238,7 +238,7 @@ class TestHandlerPhaseFailures:
     @pytest.mark.asyncio
     @patch("services.llm_service.LLMService.generate_article", new_callable=AsyncMock)
     @patch("services.llm_service.LLMService.__init__", return_value=None)
-    @patch("services.fact_check_service.FACT_CHECK_ENABLED", False)
+    @patch("services.fact_check_service.is_fact_check_enabled", new=lambda: False)
     async def test_generation_failure_returns_502(
         self, mock_llm_init, mock_generate
     ):
@@ -303,9 +303,9 @@ class TestHandlerSafetyIntegration:
     @patch("services.fact_check_service.FactCheckService.enrich_context", new_callable=AsyncMock)
     @patch("services.llm_service.LLMService.generate_article", new_callable=AsyncMock)
     @patch("services.llm_service.LLMService.__init__", return_value=None)
-    @patch("services.fact_check_service.FACT_CHECK_ENABLED", True)
-    @patch("services.fact_check_service.ENRICHMENT_ENABLED", True)
-    @patch("services.fact_check_service.VERIFICATION_ENABLED", True)
+    @patch("services.fact_check_service.is_fact_check_enabled", new=lambda: True)
+    @patch("services.fact_check_service._get_enrichment_enabled", new=lambda: True)
+    @patch("services.fact_check_service._get_verification_enabled", new=lambda: True)
     async def test_critical_risk_blocks_in_response(
         self, mock_llm_init, mock_generate, mock_enrich, mock_verify, mock_audit
     ):
@@ -335,9 +335,9 @@ class TestHandlerSafetyIntegration:
     @patch("services.fact_check_service.FactCheckService.enrich_context", new_callable=AsyncMock)
     @patch("services.llm_service.LLMService.generate_article", new_callable=AsyncMock)
     @patch("services.llm_service.LLMService.__init__", return_value=None)
-    @patch("services.fact_check_service.FACT_CHECK_ENABLED", True)
-    @patch("services.fact_check_service.ENRICHMENT_ENABLED", True)
-    @patch("services.fact_check_service.VERIFICATION_ENABLED", True)
+    @patch("services.fact_check_service.is_fact_check_enabled", new=lambda: True)
+    @patch("services.fact_check_service._get_enrichment_enabled", new=lambda: True)
+    @patch("services.fact_check_service._get_verification_enabled", new=lambda: True)
     async def test_entity_tags_merged_in_response(
         self, mock_llm_init, mock_generate, mock_enrich, mock_verify, mock_audit
     ):
@@ -366,9 +366,9 @@ class TestHandlerSafetyIntegration:
     @patch("services.fact_check_service.FactCheckService.enrich_context", new_callable=AsyncMock)
     @patch("services.llm_service.LLMService.generate_article", new_callable=AsyncMock)
     @patch("services.llm_service.LLMService.__init__", return_value=None)
-    @patch("services.fact_check_service.FACT_CHECK_ENABLED", True)
-    @patch("services.fact_check_service.ENRICHMENT_ENABLED", True)
-    @patch("services.fact_check_service.VERIFICATION_ENABLED", True)
+    @patch("services.fact_check_service.is_fact_check_enabled", new=lambda: True)
+    @patch("services.fact_check_service._get_enrichment_enabled", new=lambda: True)
+    @patch("services.fact_check_service._get_verification_enabled", new=lambda: True)
     async def test_structured_data_in_response(
         self, mock_llm_init, mock_generate, mock_enrich, mock_verify, mock_audit
     ):
