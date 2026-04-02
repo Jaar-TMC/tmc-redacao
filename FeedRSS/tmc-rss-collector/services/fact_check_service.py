@@ -2538,7 +2538,16 @@ IMPORTANTE - REGRAS DE CLASSIFICACAO:
             "Voce e um verificador factual. Gere perguntas de verificacao "
             "e responda APENAS com base no material fornecido."
         )
+        temporal_cove_instruction = ""
+        if _get_temporal_awareness_enabled():
+            temporal_cove_instruction = (
+                "\nPergunta adicional obrigatoria: "
+                '"Quando este evento foi reportado pela primeira vez? '
+                'A informacao e atual (ultimas 48h) ou contexto historico?"'
+            )
+
         prompt_qa = f"""Gere {COVE_QUESTIONS_PER_CLAIM} perguntas de verificacao sobre a seguinte afirmacao e responda cada uma usando APENAS o material abaixo.
+{temporal_cove_instruction}
 
 AFIRMACAO:
 "{claim_text}"
@@ -2570,6 +2579,13 @@ NAO classifique. Apenas gere perguntas e respostas factuais."""
         for i, (q, a) in enumerate(zip(result.questions, result.answers), 1):
             qa_summary += f"P{i}: {q}\nR{i}: {a}\n"
 
+        temporal_verdict_rule = ""
+        if _get_temporal_awareness_enabled():
+            temporal_verdict_rule = (
+                '\n- **recent_unverifiable**: Informacao de evento recente (<48h) que nao pode ser '
+                'verificada por ser muito nova, mas NAO e incorreta nem desconexa do tema'
+            )
+
         system_verdict = (
             "Voce e um classificador factual. Re-classifique a afirmacao "
             "com base APENAS nas perguntas e respostas fornecidas."
@@ -2585,7 +2601,7 @@ PERGUNTAS E RESPOSTAS DE VERIFICACAO:
 Responda em JSON:
 ```json
 {{
-  "final_verdict": "grounded|context|opinion|unverifiable|fabricated",
+  "final_verdict": "grounded|context|opinion|unverifiable{'|recent_unverifiable' if _get_temporal_awareness_enabled() else ''}|fabricated",
   "reasoning": "Breve explicacao da decisao",
   "evidence_strength": "strong|moderate|weak"
 }}
@@ -2595,7 +2611,7 @@ Regras:
 - **grounded**: Respostas confirmam que a informacao esta nas fontes
 - **context**: Contexto factual correto que enriquece a materia (background, dados publicos)
 - **opinion**: Opiniao subjetiva, analise valorativa, previsao - nao verificavel factualmente
-- **unverifiable**: Impossivel confirmar nem negar
+- **unverifiable**: Impossivel confirmar nem negar{temporal_verdict_rule}
 - **fabricated**: Respostas confirmam que a informacao e INCORRETA ou DESCONEXA"""
 
         verdict_response = await llm.call_api(system_verdict, prompt_verdict, 512, task_type='cove_verdict')
