@@ -1338,9 +1338,9 @@ class DatabaseService:
         try:
             query = """
                 SELECT TOP %s tag, article_count
-                FROM tag_aggregations
+                FROM tag_aggregations WITH (NOLOCK)
                 WHERE period_hours = %s
-                    AND last_updated >= DATEADD(hour, -1, GETUTCDATE())
+                    AND last_updated >= DATEADD(hour, -6, GETUTCDATE())
                 ORDER BY article_count DESC
             """
             with self.get_connection() as conn:
@@ -1374,9 +1374,9 @@ class DatabaseService:
 
             query = f"""
                 SELECT TOP %s tag, article_count
-                FROM tag_aggregations
+                FROM tag_aggregations WITH (NOLOCK)
                 WHERE period_hours = %s
-                    AND last_updated >= DATEADD(hour, -1, GETUTCDATE())
+                    AND last_updated >= DATEADD(hour, -6, GETUTCDATE())
                     {search_filter}
                 ORDER BY article_count DESC, tag ASC
             """
