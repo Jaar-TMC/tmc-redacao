@@ -1967,6 +1967,72 @@ class _RateLimitError(RuntimeError):
         self.retry_after = retry_after
 
 
+def check_originality(
+    generated: str,
+    source: str,
+    n: int = 4,
+    threshold: float = 0.15,
+) -> dict:
+    """
+    Compute n-gram overlap between generated article and source text.
+
+    Pure Python implementation — no external dependencies. Word-level n-grams
+    (not character-level) because copied phrases span word boundaries.
+    Portuguese stop words are NOT removed — they are part of copied phrases.
+
+    Args:
+        generated: Generated article text
+        source: Original source text (texto_base)
+        n: N-gram size (default 4 — catches 4-word exact phrases)
+        threshold: Overlap ratio above which text is flagged as "high_copy" (default 15%)
+
+    Returns:
+        dict with keys:
+          overlap_ratio: float (0.0-1.0)
+          is_copy: bool (True when overlap_ratio > threshold)
+          overlapping_ngrams: int (count of shared n-grams)
+          total_generated_ngrams: int
+    """
+    import string
+
+    def _normalize(text: str) -> list:
+        """Lowercase, remove punctuation, split into words."""
+        # Remove punctuation (keeps accented chars intact)
+        translator = str.maketrans("", "", string.punctuation)
+        clean = text.lower().translate(translator)
+        return clean.split()
+
+    gen_words = _normalize(generated)
+    src_words = _normalize(source)
+
+    # Build n-gram sets
+    def _ngrams(words: list, size: int) -> set:
+        if len(words) < size:
+            return set()
+        return set(tuple(words[i:i+size]) for i in range(len(words) - size + 1))
+
+    gen_ngrams = _ngrams(gen_words, n)
+    src_ngrams = _ngrams(src_words, n)
+
+    if not gen_ngrams:
+        return {
+            "overlap_ratio": 0.0,
+            "is_copy": False,
+            "overlapping_ngrams": 0,
+            "total_generated_ngrams": 0,
+        }
+
+    overlap = gen_ngrams & src_ngrams
+    ratio = len(overlap) / len(gen_ngrams)
+
+    return {
+        "overlap_ratio": ratio,
+        "is_copy": ratio > threshold,
+        "overlapping_ngrams": len(overlap),
+        "total_generated_ngrams": len(gen_ngrams),
+    }
+
+
 class LLMService:
     """Service class for LLM operations using direct HTTP calls."""
 
