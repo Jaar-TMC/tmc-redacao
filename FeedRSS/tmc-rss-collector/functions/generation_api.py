@@ -416,6 +416,8 @@ def evaluate_quality_criteria(
     readability_data: dict,
     categoria: str = "",
     tipo_materia: str = "",
+    generated_text: str = "",
+    source_text: str = "",
 ) -> dict:
     """
     Evaluate all quality criteria for the Quality Loop.
@@ -427,6 +429,8 @@ def evaluate_quality_criteria(
         readability_data: From compute_readability
         categoria: Article category (for adjusting thresholds)
         tipo_materia: Article type (for adjusting thresholds)
+        generated_text: Generated article body (for n-gram overlap detection)
+        source_text: Original source text (for n-gram overlap detection)
 
     Returns:
         dict with all_passed (bool), failures (list of criterion dicts)
@@ -540,6 +544,33 @@ def evaluate_quality_criteria(
     # 7. Bold count - NO LONGER in quality loop (post-processed by _enforce_bold_limit)
     # Bold enforcement is handled programmatically after generation since LLMs
     # cannot reliably count bold instances while generating text.
+
+    # 8. Text copy check — n-gram overlap detection (D-06 to D-09)
+    if generated_text and source_text:
+        try:
+            from services.llm_service import check_originality
+            originality = check_originality(
+                generated=generated_text,
+                source=source_text,
+                n=4,
+                threshold=0.15,
+            )
+            if originality["is_copy"]:
+                overlap_pct = int(originality["overlap_ratio"] * 100)
+                failures.append({
+                    "criterion": "text_copy",
+                    "detail": f"Sobreposicao de {overlap_pct}% com texto-fonte (limite: 15%)",
+                    "instruction": (
+                        f"URGENTE - COPIA DETECTADA. {overlap_pct}% das frases sao identicas ao "
+                        f"material-fonte. REESCREVA COMPLETAMENTE usando suas proprias palavras. "
+                        f"NAO copie NENHUMA frase do material original. "
+                        f"Nunca use mais de 3 palavras consecutivas da fonte, exceto nomes proprios."
+                    ),
+                })
+        except ImportError:
+            logger.warning("check_originality not available — skipping text_copy check")
+        except Exception as e:
+            logger.warning(f"Text copy check failed: {e}")
 
     return {
         "all_passed": len(failures) == 0,
@@ -969,6 +1000,8 @@ async def generate_article_handler(req: func.HttpRequest) -> func.HttpResponse:
             quality_eval = evaluate_quality_criteria(
                 verification_data, readability,
                 categoria=request_data.categoria, tipo_materia=request_data.tipo_materia,
+                generated_text=result.get("conteudo", ""),
+                source_text=request_data.texto_base,
             )
             best_result = dict(result)
             best_failures_count = len(quality_eval["failures"])
@@ -1154,6 +1187,8 @@ async def generate_article_handler(req: func.HttpRequest) -> func.HttpResponse:
                     regen_eval = evaluate_quality_criteria(
                         regen_result["verification"], regen_readability,
                         categoria=request_data.categoria, tipo_materia=request_data.tipo_materia,
+                        generated_text=regen_result.get("conteudo", ""),
+                        source_text=request_data.texto_base,
                     )
 
                     # Accept if better (fewer failures) or all passed
