@@ -769,6 +769,7 @@ async def generate_article_handler(req: func.HttpRequest) -> func.HttpResponse:
                         titulo_fonte=request_data.titulo_fonte,
                         tags=request_data.tags,
                         correlation_id=correlation_id,
+                        source_published_at=request_data.source_published_at,
                     )
                     _set_cached_enrichment(enrichment_cache_key, enrichment)
                     if enrichment.success:
