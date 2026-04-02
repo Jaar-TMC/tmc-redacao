@@ -2671,7 +2671,14 @@ Regras:
             fabricated_count = sum(1 for c in factual_claims
                                  if (isinstance(c, ExtractedClaim) and c.verdict == "fabricated")
                                  or (isinstance(c, dict) and c.get("verdict") == "fabricated"))
-            effective_grounded = grounded_count + (context_count * 0.8)
+            # Phase 4: recent_unverifiable claims are breaking news that can't be verified yet
+            # Weight at 0.7 (between grounded=1.0 and context=0.8) to avoid penalizing fresh news
+            recent_unverifiable_count = sum(
+                1 for c in factual_claims
+                if (isinstance(c, ExtractedClaim) and c.verdict == "recent_unverifiable")
+                or (isinstance(c, dict) and c.get("verdict") == "recent_unverifiable")
+            )
+            effective_grounded = grounded_count + (context_count * 0.8) + (recent_unverifiable_count * 0.7)
             grounded_ratio = effective_grounded / num_factual
             # Phase 2.6: Non-linear fabrication penalty
             # 1 fabricated = 0.30, 2 = 0.55, 3+ = 0.80
