@@ -20,7 +20,7 @@ database.py (new query method). Does NOT touch enrichment or prompt sections.
 - New `get_recent_articles_with_embeddings(hours)` method in `database.py`
 - New `_cross_reference_with_embeddings()` method in FactCheckService (degrades gracefully on error)
 - Static `_cosine_sim()` method for pure-Python cosine similarity (no numpy dependency)
-- In `verify_article()`: breaking+unverifiable claims cross-referenced via embeddings; if 3+ sources corroborate, reclassified to `recent_unverifiable`
+- In `verify_article()`: breaking+unverifiable claims cross-referenced via embeddings; if 3+ sources corroborate, reclassified to `grounded` (D-09); if NOT corroborated, reclassified to `recent_unverifiable` (softer than standard unverifiable)
 - Separate counting: `metadata.unverifiable_claims` = standard only, `metadata.recent_unverifiable_claims` = temporal only
 - Post-CoVe recount also separates standard vs recent_unverifiable
 - CoVe prompt includes temporal question and `recent_unverifiable` verdict option (when flag ON)
@@ -170,10 +170,12 @@ Add two methods to `FactCheckService` class. Place them BEFORE `_cove_verify_cla
 - FeedRSS/tmc-rss-collector/services/fact_check_service.py (lines 1265–1400 — verify_article claim counting, post-extraction processing, CoVe trigger, post-CoVe recount, and _compute_confidence call)
 </read_first>
 <action>
-1. In `verify_article()`, after claim extraction and the existing unverifiable count (around line 1278–1285), add embedding cross-reference for breaking+unverifiable claims. The exact insertion point is AFTER claims are extracted and counted, but BEFORE `_compute_confidence()`:
+1. In `verify_article()`, after claim extraction and the existing unverifiable count (around line 1278–1285), add embedding cross-reference for breaking+unverifiable claims. The exact insertion point is AFTER claims are extracted and counted, but BEFORE `_compute_confidence()`.
+
+**D-09 implementation:** For `breaking` claims where embedding cross-reference confirms (3+ independent sources), reclassify to `grounded` (not `recent_unverifiable`). This implements D-09's intent: confirmed breaking claims are genuinely grounded by independent collected articles. Claims that are `breaking` + `unverifiable` but NOT corroborated by embeddings get reclassified to `recent_unverifiable` instead (they are too new to verify but not incorrect):
 
 ```python
-        # Phase 4: Embedding cross-reference for breaking news claims
+        # Phase 4: Embedding cross-reference for breaking news claims (D-09)
         if _get_temporal_awareness_enabled():
             for i, claim in enumerate(claims):
                 if (isinstance(claim, ExtractedClaim)
@@ -181,32 +183,62 @@ Add two methods to `FactCheckService` class. Place them BEFORE `_cove_verify_cla
                         and claim.temporalidade == "breaking"):
                     corroborated = await self._cross_reference_with_embeddings(claim.text)
                     if corroborated:
+                        # D-09: Embedding-confirmed breaking claims → grounded
                         claims[i] = ExtractedClaim(
                             text=claim.text,
-                            verdict="recent_unverifiable",
+                            verdict="grounded",
                             source_evidence=claim.source_evidence + " [embedding cross-ref: 3+ sources]",
                             source_reference=claim.source_reference,
                             category=claim.category,
                             temporalidade=claim.temporalidade,
                         )
-                        logger.info(f"Claim reclassified to recent_unverifiable via embedding cross-ref: {claim.text[:80]}")
+                        logger.info(f"Claim reclassified to grounded via embedding cross-ref (D-09): {claim.text[:80]}")
+                    else:
+                        # Breaking but not corroborated → recent_unverifiable (softer than standard unverifiable)
+                        claims[i] = ExtractedClaim(
+                            text=claim.text,
+                            verdict="recent_unverifiable",
+                            source_evidence=claim.source_evidence,
+                            source_reference=claim.source_reference,
+                            category=claim.category,
+                            temporalidade=claim.temporalidade,
+                        )
+                        logger.info(f"Breaking claim reclassified to recent_unverifiable (no cross-ref): {claim.text[:80]}")
 ```
 
-2. After the cross-reference block, update the claim counts to properly split standard vs recent_unverifiable. Find the existing `metadata.unverifiable_claims = sum(...)` line and replace the counting section:
+**Architectural note on D-09 Exa skip:** D-09 says "skip Exa for that claim" when embedding confirms. The Exa enrichment runs in `enrich_context()` BEFORE `verify_article()`, so we cannot skip Exa per-claim at the enrichment level. The Exa skip applies here at the `verify_article()` level: embedding-confirmed claims are marked `grounded` and therefore skip CoVe verification (which is the expensive per-claim LLM call). This achieves the cost/latency savings D-09 intends.
+
+2. After the cross-reference block, update the claim counts to properly split standard vs recent_unverifiable. Replace the existing counting block at lines 1278–1280 which currently reads:
 
 ```python
-        # Split unverifiable into standard vs recent (Phase 4)
-        metadata.unverifiable_claims = sum(
-            1 for c in claims
-            if (isinstance(c, ExtractedClaim) and c.verdict == "unverifiable")
-            or (isinstance(c, dict) and c.get("verdict") == "unverifiable")
-        )
-        metadata.recent_unverifiable_claims = sum(
-            1 for c in claims
-            if (isinstance(c, ExtractedClaim) and c.verdict == "recent_unverifiable")
-            or (isinstance(c, dict) and c.get("verdict") == "recent_unverifiable")
-        ) if _get_temporal_awareness_enabled() else 0
+                metadata.unverifiable_claims = sum(
+                    1 for c in claims if c.verdict == "unverifiable"
+                )
 ```
+
+Replace with:
+
+```python
+                # Split unverifiable into standard vs recent (Phase 4)
+                metadata.unverifiable_claims = sum(
+                    1 for c in claims
+                    if (isinstance(c, ExtractedClaim) and c.verdict == "unverifiable")
+                    or (isinstance(c, dict) and c.get("verdict") == "unverifiable")
+                )
+                metadata.recent_unverifiable_claims = sum(
+                    1 for c in claims
+                    if (isinstance(c, ExtractedClaim) and c.verdict == "recent_unverifiable")
+                    or (isinstance(c, dict) and c.get("verdict") == "recent_unverifiable")
+                ) if _get_temporal_awareness_enabled() else 0
+```
+
+The old_string to match for Edit tool is the 3-line block:
+```
+                metadata.unverifiable_claims = sum(
+                    1 for c in claims if c.verdict == "unverifiable"
+                )
+```
+(lines 1278–1280, indented with 16 spaces)
 
 3. In the post-CoVe recount section (around lines 1344–1364), also recount `recent_unverifiable_claims`:
 
@@ -222,9 +254,12 @@ After the existing recount of `grounded_claims`, `fabricated_claims`, `unverifia
 <acceptance_criteria>
 - `grep "recent_unverifiable" FeedRSS/tmc-rss-collector/services/fact_check_service.py` returns at least 8 matches
 - `grep "embedding cross-ref" FeedRSS/tmc-rss-collector/services/fact_check_service.py` returns at least 1 match
+- `grep 'verdict="grounded"' FeedRSS/tmc-rss-collector/services/fact_check_service.py` includes the D-09 embedding-confirmed reclassification
 - `grep "_cross_reference_with_embeddings" FeedRSS/tmc-rss-collector/services/fact_check_service.py` returns at least 2 matches (definition + call)
 - `grep "metadata.recent_unverifiable_claims = sum" FeedRSS/tmc-rss-collector/services/fact_check_service.py` returns 2 matches (initial count + post-CoVe recount)
 - The standard `metadata.unverifiable_claims` count only matches `verdict == "unverifiable"` (not "recent_unverifiable")
+- Embedding-confirmed breaking claims get `verdict="grounded"` (D-09), NOT `recent_unverifiable`
+- Non-corroborated breaking claims get `verdict="recent_unverifiable"`
 </acceptance_criteria>
 </task>
 

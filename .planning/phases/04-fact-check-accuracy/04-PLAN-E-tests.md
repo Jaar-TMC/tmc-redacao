@@ -17,7 +17,7 @@ test_generation_api.py with safety gate tests for recent_unverifiable.
 ## must_haves
 
 - `test_phase4_temporal.py` exists with at least 10 test functions
-- Tests cover: ExtractedClaim temporalidade field, temporal tier classification, cosine_sim, embedding cross-reference graceful degradation, recent_unverifiable confidence scoring, safety gate exclusion, feature flag behavior
+- Tests cover: ExtractedClaim temporalidade field, temporal tier classification, cosine_sim, embedding cross-reference graceful degradation, recent_unverifiable confidence scoring, safety gate exclusion, feature flag behavior, _determine_risk_level temporal exclusion
 - Existing `test_generation_api.py` has new tests for recent_unverifiable safety gate behavior
 - All tests pass when run with `pytest`
 
@@ -319,14 +319,113 @@ class TestTemporalAwarenessFeatureFlag:
         svc = FactCheckService()
         pub = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
         assert svc._get_temporal_tier(pub) == "historico"
+
+
+# ==========================================
+# 8. Risk level excludes recent_unverifiable
+# ==========================================
+
+class TestRiskLevelTemporalExclusion:
+    """Verify _determine_risk_level() does NOT escalate based on recent_unverifiable.
+
+    Issue 4/5: When recent_unverifiable >= 3 and standard unverifiable == 0,
+    risk level must NOT escalate to "high". The split count in C3 ensures
+    metadata.unverifiable_claims only contains standard unverifiable.
+    """
+
+    def test_recent_unverifiable_high_count_no_escalation(self):
+        """3+ recent_unverifiable + 0 standard unverifiable → risk stays low/medium."""
+        from services.fact_check_service import FactCheckService, VerificationMetadata, ExtractedClaim
+        from services.fact_check_service import EntityComparisonResult, QuoteVerificationResult
+
+        svc = FactCheckService()
+        metadata = VerificationMetadata()
+        # 10 claims: 5 grounded, 5 recent_unverifiable, 0 standard unverifiable
+        metadata.total_claims = 10
+        metadata.grounded_claims = 5
+        metadata.fabricated_claims = 0
+        metadata.unverifiable_claims = 0  # Standard unverifiable = 0
+        metadata.recent_unverifiable_claims = 5  # All temporal
+        metadata.confidence_score = 0.80
+        metadata.expansion_ratio = 3.0
+        metadata.source_sufficiency = "sufficient"
+
+        entity_result = EntityComparisonResult()
+        entity_result.overlap_score = 0.8
+        entity_result.novel_entities = []
+
+        quote_result = QuoteVerificationResult()
+
+        risk = svc._determine_risk_level(metadata, entity_result, quote_result)
+        assert risk != "high", (
+            f"Risk should NOT be 'high' when only recent_unverifiable present, got '{risk}'"
+        )
+        assert risk != "critical", (
+            f"Risk should NOT be 'critical' when only recent_unverifiable present, got '{risk}'"
+        )
+
+    def test_standard_unverifiable_still_escalates(self):
+        """3+ standard unverifiable at >40% → risk DOES escalate (regression guard)."""
+        from services.fact_check_service import FactCheckService, VerificationMetadata
+        from services.fact_check_service import EntityComparisonResult, QuoteVerificationResult
+
+        svc = FactCheckService()
+        metadata = VerificationMetadata()
+        metadata.total_claims = 6
+        metadata.grounded_claims = 2
+        metadata.fabricated_claims = 0
+        metadata.unverifiable_claims = 4  # Standard: 4/6 = 67% > 40%
+        metadata.recent_unverifiable_claims = 0
+        metadata.confidence_score = 0.50
+        metadata.expansion_ratio = 3.0
+        metadata.source_sufficiency = "sufficient"
+
+        entity_result = EntityComparisonResult()
+        entity_result.overlap_score = 0.8
+        entity_result.novel_entities = []
+
+        quote_result = QuoteVerificationResult()
+
+        risk = svc._determine_risk_level(metadata, entity_result, quote_result)
+        assert risk == "high", (
+            f"Risk should be 'high' when standard unverifiable >= 3 and > 40%, got '{risk}'"
+        )
+
+    def test_mixed_counts_only_standard_triggers(self):
+        """Mix of standard + recent: only standard count triggers escalation."""
+        from services.fact_check_service import FactCheckService, VerificationMetadata
+        from services.fact_check_service import EntityComparisonResult, QuoteVerificationResult
+
+        svc = FactCheckService()
+        metadata = VerificationMetadata()
+        metadata.total_claims = 10
+        metadata.grounded_claims = 3
+        metadata.fabricated_claims = 0
+        metadata.unverifiable_claims = 2  # Standard: 2/10 = 20% — below threshold
+        metadata.recent_unverifiable_claims = 5  # These should NOT count
+        metadata.confidence_score = 0.60
+        metadata.expansion_ratio = 3.0
+        metadata.source_sufficiency = "sufficient"
+
+        entity_result = EntityComparisonResult()
+        entity_result.overlap_score = 0.8
+        entity_result.novel_entities = []
+
+        quote_result = QuoteVerificationResult()
+
+        risk = svc._determine_risk_level(metadata, entity_result, quote_result)
+        # 2 standard unverifiable < 3 threshold, so should NOT escalate
+        assert risk != "high", (
+            f"Risk should NOT be 'high' when standard unverifiable=2 < 3 threshold, got '{risk}'"
+        )
 ```
 
-This file contains 22 test functions across 7 test classes.
+This file contains 25 test functions across 8 test classes.
 </action>
 <acceptance_criteria>
 - File `FeedRSS/tmc-rss-collector/tests/test_phase4_temporal.py` exists
-- `grep -c "def test_" FeedRSS/tmc-rss-collector/tests/test_phase4_temporal.py` returns at least 20
-- `grep -c "class Test" FeedRSS/tmc-rss-collector/tests/test_phase4_temporal.py` returns at least 7
+- `grep -c "def test_" FeedRSS/tmc-rss-collector/tests/test_phase4_temporal.py` returns at least 23
+- `grep -c "class Test" FeedRSS/tmc-rss-collector/tests/test_phase4_temporal.py` returns at least 8
 - `grep "pytest.mark.asyncio" FeedRSS/tmc-rss-collector/tests/test_phase4_temporal.py` returns at least 3 matches
 - `grep "recent_unverifiable" FeedRSS/tmc-rss-collector/tests/test_phase4_temporal.py` returns at least 10 matches
 - `cd FeedRSS/tmc-rss-collector && python -m pytest tests/test_phase4_temporal.py -v` exits 0

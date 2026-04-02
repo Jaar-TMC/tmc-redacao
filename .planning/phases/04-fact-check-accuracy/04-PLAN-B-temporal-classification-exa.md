@@ -159,6 +159,8 @@ to:
 ```
 
 5. In `enrich_context()`, pass `tier_date_range` to all `_search_exa()` calls. Find every call to `self._search_exa(` within `enrich_context()` and add `date_range_start=tier_date_range`. The calls are typically in an `asyncio.gather` list (around line 556–559).
+
+**D-06 (Recency boost) — DEFERRED:** D-06 says "prioritize Exa results closest to article publication date." This would require sorting Exa results by `publishedDate` descending within the tier window after fetching them. This is deferred to a follow-up iteration because: (a) Exa's API does not guarantee `publishedDate` in all results; (b) the date-scoped window already constrains results to the relevant period; (c) adding sort logic increases complexity for marginal benefit. If needed later, add a `results.sort(key=lambda r: r.get("publishedDate", ""), reverse=True)` after the Exa response parsing in `_search_exa()`.
 </action>
 <acceptance_criteria>
 - `grep "source_published_at: Optional\[str\] = None" FeedRSS/tmc-rss-collector/services/fact_check_service.py` matches the enrich_context signature
