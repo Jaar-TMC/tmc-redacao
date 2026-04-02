@@ -416,17 +416,12 @@ class TestCoVe:
     @pytest.mark.asyncio
     async def test_cove_disabled(self, service):
         """CoVe should be a no-op when COVE_ENABLED is False."""
-        import services.fact_check_service as module
-        original = module.COVE_ENABLED
-        module.COVE_ENABLED = False
-
-        claims = [ExtractedClaim(text="Bad", verdict="fabricated")]
-        updated, results, count = await service._cove_verify_claims(claims, "source")
+        with patch("services.fact_check_service._get_cove_enabled", return_value=False):
+            claims = [ExtractedClaim(text="Bad", verdict="fabricated")]
+            updated, results, count = await service._cove_verify_claims(claims, "source")
 
         assert count == 0
         assert updated[0].verdict == "fabricated"  # Unchanged
-
-        module.COVE_ENABLED = original
 
     @pytest.mark.asyncio
     async def test_cove_respects_max_claims(self, service):
