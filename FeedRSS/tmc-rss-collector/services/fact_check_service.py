@@ -158,6 +158,7 @@ class VerificationMetadata:
     cove_results: list = field(default_factory=list)  # List[CoVeVerification]
     truncation: dict = field(default_factory=dict)  # Truncation metadata (4A)
     claim_extraction_failed: bool = False  # Empty claims fallback (4B)
+    needs_manual_review: bool = False  # Set when claim extraction fails after retry (B-1)
 
     def to_dict(self) -> dict:
         """Convert to JSON-serializable dict."""
@@ -197,6 +198,7 @@ class VerificationMetadata:
             "cove_reclassified": self.cove_reclassified,
             "truncation": self.truncation,
             "claim_extraction_failed": self.claim_extraction_failed,
+            "needs_manual_review": self.needs_manual_review,
         }
 
 
@@ -1235,10 +1237,36 @@ Regras:
                 claims = results[0]
                 metadata.claims = claims
                 metadata.total_claims = len(claims)
-                # Empty claims fallback (4B)
+                # Empty claims fallback (4B) — retry with simplified prompt (B-1)
                 if not claims:
-                    logger.warning("Claim extraction returned 0 claims — article passes with reduced confidence")
-                    metadata.claim_extraction_failed = True
+                    logger.warning(
+                        f"Claim extraction returned 0 claims on first attempt — retrying with simplified prompt. "
+                        f"Article ID context: {getattr(metadata, 'article_id', 'unknown')}"
+                    )
+                    # Retry once with simplified prompt (D-15)
+                    try:
+                        retry_claims = await self._extract_claims_simplified(generated_article)
+                    except Exception as retry_err:
+                        logger.error(f"Claim extraction retry also failed: {retry_err}")
+                        retry_claims = []
+
+                    if retry_claims:
+                        # Retry succeeded — use retry results
+                        logger.info(f"Claim extraction retry succeeded: {len(retry_claims)} claims found")
+                        claims = retry_claims
+                        metadata.claims = claims
+                        metadata.total_claims = len(claims)
+                    else:
+                        # Both attempts returned 0 claims — flag for manual review (D-16, D-17)
+                        logger.warning(
+                            f"Claim extraction failed after retry (0 claims). "
+                            f"Setting needs_manual_review=True. Article will NOT auto-pass."
+                        )
+                        metadata.claim_extraction_failed = True
+                        metadata.needs_manual_review = True
+                        metadata.review_reasons.append(
+                            "Extracao de claims falhou - verificacao manual necessaria"
+                        )
                 # Opinion claims don't count toward factual accuracy metrics
                 # Context claims DO count (they must be factually correct)
                 metadata.grounded_claims = sum(
@@ -1571,6 +1599,66 @@ IMPORTANTE - REGRAS DE CLASSIFICACAO:
 
         except Exception as e:
             logger.error(f"Claim extraction failed: {e}")
+            return []
+
+    async def _extract_claims_simplified(self, text: str) -> list:
+        """
+        Simplified claim extraction for retry when full extraction returns 0 claims.
+
+        Uses a minimal prompt asking for 5 factual statements (D-15).
+        Async — mirrors the call_api pattern used by _extract_and_verify_claims.
+
+        Args:
+            text: Generated article text
+
+        Returns:
+            List of ExtractedClaim objects or empty list
+        """
+        if not text or len(text.strip()) < 50:
+            return []
+
+        simplified_prompt = (
+            f"Liste 5 afirmacoes factuais neste texto. "
+            f"Para cada uma, responda no formato JSON:\n"
+            f'[{{"text": "afirmacao", "verdict": "grounded", "confidence": 0.7}}]\n\n'
+            f"TEXTO:\n{text[:2000]}"
+        )
+        system = "Voce e um verificador factual. Extraia afirmacoes simples e verificaveis do texto."
+        try:
+            llm = self._get_llm()
+            response = await llm.call_api(
+                system,
+                simplified_prompt,
+                512,
+                task_type="claim_extraction_retry",
+            )
+            if not response:
+                return []
+            # Try to extract JSON array from response
+            start = response.find("[")
+            end = response.rfind("]") + 1
+            if start < 0 or end <= start:
+                return []
+            try:
+                data = json.loads(response[start:end])
+                if not isinstance(data, list):
+                    return []
+                claims = []
+                for item in data:
+                    if isinstance(item, dict) and item.get("text"):
+                        claims.append(ExtractedClaim(
+                            text=item.get("text", ""),
+                            verdict=item.get("verdict", "unverifiable"),
+                            source_evidence="",
+                            source_reference="",
+                            category="fact",
+                        ))
+                return claims
+            except json.JSONDecodeError:
+                logger.warning("Simplified claim extraction: JSON parse failed")
+                return []
+        except Exception as e:
+            logger.warning(f"Simplified claim extraction failed: {e}")
             return []
 
     # =========================================================================
