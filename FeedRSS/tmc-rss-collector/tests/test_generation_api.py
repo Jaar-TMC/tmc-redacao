@@ -1055,3 +1055,68 @@ class TestSensitiveTopicDetection:
             "permanece em menor risco no sistema federal."
         )
         assert len(instructions) == 0
+
+
+# ===========================================================================
+# Phase 4: Temporal safety gate tests
+# ===========================================================================
+
+class TestSafetyGatesTemporalPhase4:
+    """Verify evaluate_safety_gates() correctly handles recent_unverifiable (Phase 4)."""
+
+    def test_recent_unverifiable_not_blocked(self):
+        """High recent_unverifiable_claims alone should NOT block publication."""
+        decision = evaluate_safety_gates(
+            verification_data={
+                "confidence_score": 0.80,
+                "risk_level": "medium",
+                "fabricated_claims": 0,
+                "unverifiable_claims": 0,
+                "recent_unverifiable_claims": 6,
+                "total_claims": 10,
+                "grounded_claims": 4,
+                "context_claims": 0,
+                "is_verified": True,
+            },
+            content_length=2000,
+            effective_source_len=1000,
+        )
+        assert not decision.publish_blocked
+
+    def test_fabricated_still_blocks_with_recent_unverifiable(self):
+        """Fabricated claims (3+) still block even when recent_unverifiable is present."""
+        decision = evaluate_safety_gates(
+            verification_data={
+                "confidence_score": 0.80,
+                "risk_level": "medium",
+                "fabricated_claims": 3,
+                "unverifiable_claims": 0,
+                "recent_unverifiable_claims": 3,
+                "total_claims": 10,
+                "grounded_claims": 4,
+                "context_claims": 0,
+                "is_verified": True,
+            },
+            content_length=2000,
+            effective_source_len=1000,
+        )
+        assert decision.publish_blocked
+
+    def test_mixed_standard_and_recent_unverifiable(self):
+        """Standard unverifiable at >40% still blocks even with recent_unverifiable present."""
+        decision = evaluate_safety_gates(
+            verification_data={
+                "confidence_score": 0.80,
+                "risk_level": "medium",
+                "fabricated_claims": 0,
+                "unverifiable_claims": 5,
+                "recent_unverifiable_claims": 3,
+                "total_claims": 10,
+                "grounded_claims": 2,
+                "context_claims": 0,
+                "is_verified": True,
+            },
+            content_length=2000,
+            effective_source_len=1000,
+        )
+        assert decision.publish_blocked
