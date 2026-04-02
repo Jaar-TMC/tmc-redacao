@@ -949,6 +949,13 @@ async def generate_article_handler(req: func.HttpRequest) -> func.HttpResponse:
                 result["review_reasons"] = [
                     "Verificacao automatica falhou - revisao manual necessaria"
                 ]
+            # Propagate needs_manual_review from claim extraction failure
+            if result.get("verification", {}).get("needs_manual_review"):
+                result["human_review_required"] = True
+                result.setdefault("review_reasons", []).append(
+                    "Extracao de claims falhou - verificacao manual necessaria"
+                )
+
             phase_timings["verification_ms"] = int((time.time() - verification_start) * 1000)
 
         # ==============================================================
