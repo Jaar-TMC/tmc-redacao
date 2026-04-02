@@ -94,6 +94,10 @@ const RedacaoPage = () => {
   // Ref to skip redundant fetch after page reset
   const skipNextFetchRef = useRef(false);
 
+  // Cursor state for keyset pagination (PAG-04 gap closure)
+  const cursorMapRef = useRef({});
+  const prevPageRef = useRef(1);
+
   // Fetch articles from API with AbortController for request cancellation
   useEffect(() => {
     // Skip this fetch if flagged (happens after filter-triggered page reset)
@@ -123,9 +127,17 @@ const RedacaoPage = () => {
       sortOrder: filters.sortOrder,
     };
 
+    // D-08: Reset cursor map when filters change
+    if (filtersChanged) {
+      cursorMapRef.current = {};
+    }
+
     // When filters change, always fetch from page 1 (and sync state)
     // When only page changes, use the current page
     const effectivePage = filtersChanged ? 1 : currentPage;
+
+    // D-04: Use cursor for sequential navigation, OFFSET for non-sequential jumps
+    const cursor = cursorMapRef.current[effectivePage] || null;
 
     // Sync page state if filters changed and we weren't on page 1
     // Set flag to skip the next fetch triggered by setCurrentPage
@@ -173,6 +185,10 @@ const RedacaoPage = () => {
 
         try {
           const params = buildArticleParams(filters, effectivePage);
+          // Add cursor for keyset seek on sequential page navigation
+          if (cursor) {
+            params.cursor = cursor;
+          }
           const response = await getArticles(params, { signal: abortController.signal });
 
           // Only update state if request wasn't aborted
@@ -195,6 +211,14 @@ const RedacaoPage = () => {
             const total = response?.total ?? uniqueArticles.length;
             setTotalItems(total);
             setTotalPages(Math.ceil(total / ITEMS_PER_PAGE) || 1);
+
+            // Store cursors from response for next/prev page navigation
+            if (response?.nextCursor) {
+              cursorMapRef.current[effectivePage + 1] = response.nextCursor;
+            }
+            if (response?.prevCursor) {
+              cursorMapRef.current[effectivePage - 1] = response.prevCursor;
+            }
 
             // Save to cache
             setCachedData(filters, effectivePage, {
@@ -302,10 +326,11 @@ const RedacaoPage = () => {
 
   // Handle page change from Pagination component
   const handlePageChange = useCallback((page) => {
+    prevPageRef.current = currentPage;
     setCurrentPage(page);
     // Scroll to top of article grid when changing pages
     window.scrollTo({ top: 0, behavior: 'smooth' });
-  }, []);
+  }, [currentPage]);
 
   // Auto-trigger onboarding tour for first-time users
   useEffect(() => {
