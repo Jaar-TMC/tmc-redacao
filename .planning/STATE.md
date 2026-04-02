@@ -2,14 +2,14 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: P0 Backlog Resolution
-status: executing
-last_updated: "2026-04-02T13:44:03Z"
-last_activity: 2026-04-02 -- Phase 09 Plan 01 complete
+status: verifying
+last_updated: "2026-04-02T14:14:14.245Z"
+last_activity: 2026-04-02
 progress:
-  total_phases: 10
+  total_phases: 4
   completed_phases: 3
-  total_plans: 13
-  completed_plans: 11
+  total_plans: 11
+  completed_plans: 10
 ---
 
 # Project State
@@ -18,8 +18,8 @@ progress:
 
 Phase: 09 (keyset-pagination) — EXECUTING
 Plan: 2 of 2
-Status: Executing Phase 09 -- Plan 01 complete, Plan 02 pending
-Last activity: 2026-04-02 -- Completed 09-01 (backend keyset pagination)
+Status: Phase complete — ready for verification
+Last activity: 2026-04-02
 
 ## Phase Progress
 
@@ -38,12 +38,15 @@ Last activity: 2026-04-02 -- Completed 09-01 (backend keyset pagination)
 - COUNT query separated from data query in cursor path (stable total/pages)
 - Score-ordered queries always use OFFSET (score not monotonic)
 - Backward seek reverses ORDER BY to ASC then reverses result list
+- [Phase 09]: Cursor injected inline after buildArticleParams in RedacaoPage (not inside shared function) so handleRetry stays cursor-free
+- [Phase 09]: cursorMapRef reset placed before effectivePage calculation in useEffect to ensure stale cursors are cleared on filter change
 
 ## Performance Metrics
 
 | Phase-Plan | Duration | Tasks | Files |
 |------------|----------|-------|-------|
 | 09-01 | 9m8s | 2/2 | 3 |
+| Phase 09 P03 | 5 | 1 tasks | 1 files |
 
 ## Accumulated Context
 

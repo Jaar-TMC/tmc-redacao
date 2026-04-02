@@ -44,7 +44,7 @@
 - [x] **PAG-01**: `GET /api/articles` accepts a `cursor` parameter (format: `published_at,id`) for keyset seek
 - [x] **PAG-02**: When cursor is provided, `_build_article_filters` uses seek predicate (`WHERE published_at < @last AND id < @last_id`) instead of OFFSET
 - [x] **PAG-03**: OFFSET pagination retained as fallback for score-ordered queries
-- [ ] **PAG-04**: Frontend sends cursor from last article on current page when navigating forward
+- [x] **PAG-04**: Frontend sends cursor from last article on current page when navigating forward
 
 ## Infrastructure (INFRA)
 

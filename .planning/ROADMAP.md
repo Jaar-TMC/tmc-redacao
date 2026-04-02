@@ -73,10 +73,10 @@
 ### Phase 9: Keyset Pagination
 - **Goal:** Replace OFFSET pagination with cursor-based seek for O(1) deep page performance
 - **Requirements:** PAG-01, PAG-02, PAG-03, PAG-04
-- **Plans:** 3 plans (2/3 complete)
+- **Plans:** 3/3 plans complete
   - [x] 09-01-PLAN.md — Backend: cursor encode/decode, seek predicate, dual-mode query, API response fields
   - [x] 09-02-PLAN.md — Frontend: cursor state in useArticlesQuery, cursor param in api.js
-  - [ ] 09-03-PLAN.md — Gap closure: wire cursor tracking into RedacaoPage (PAG-04)
+  - [x] 09-03-PLAN.md — Gap closure: wire cursor tracking into RedacaoPage (PAG-04)
 - **Success Criteria:**
   1. `GET /api/articles?cursor=...` returns correct next page
   2. Page 50 loads in <10ms (same as page 1)
