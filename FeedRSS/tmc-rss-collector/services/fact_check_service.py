@@ -1328,9 +1328,17 @@ Regras:
                 metadata.fabricated_claims = sum(
                     1 for c in claims if c.verdict == "fabricated"
                 )
+                # Split unverifiable into standard vs recent (Phase 4)
                 metadata.unverifiable_claims = sum(
-                    1 for c in claims if c.verdict == "unverifiable"
+                    1 for c in claims
+                    if (isinstance(c, ExtractedClaim) and c.verdict == "unverifiable")
+                    or (isinstance(c, dict) and c.get("verdict") == "unverifiable")
                 )
+                metadata.recent_unverifiable_claims = sum(
+                    1 for c in claims
+                    if (isinstance(c, ExtractedClaim) and c.verdict == "recent_unverifiable")
+                    or (isinstance(c, dict) and c.get("verdict") == "recent_unverifiable")
+                ) if _get_temporal_awareness_enabled() else 0
                 opinion_count = sum(
                     1 for c in claims if c.verdict == "opinion"
                 )
@@ -1410,6 +1418,11 @@ Regras:
                             if (isinstance(c, ExtractedClaim) and c.verdict == "unverifiable")
                             or (isinstance(c, dict) and c.get("verdict") == "unverifiable")
                         )
+                        metadata.recent_unverifiable_claims = sum(
+                            1 for c in metadata.claims
+                            if (isinstance(c, ExtractedClaim) and c.verdict == "recent_unverifiable")
+                            or (isinstance(c, dict) and c.get("verdict") == "recent_unverifiable")
+                        ) if _get_temporal_awareness_enabled() else 0
                         logger.info(
                             f"Post-CoVe verdicts: grounded={metadata.grounded_claims}, "
                             f"fabricated={metadata.fabricated_claims}, "
@@ -1417,6 +1430,51 @@ Regras:
                         )
                 except Exception as e:
                     logger.warning(f"CoVe failed (non-blocking): {e}")
+
+            # Phase 4: Embedding cross-reference for breaking news claims (D-09)
+            if _get_temporal_awareness_enabled():
+                claims = metadata.claims
+                for i, claim in enumerate(claims):
+                    if (isinstance(claim, ExtractedClaim)
+                            and claim.verdict == "unverifiable"
+                            and claim.temporalidade == "breaking"):
+                        corroborated = await self._cross_reference_with_embeddings(claim.text)
+                        if corroborated:
+                            claims[i] = ExtractedClaim(
+                                text=claim.text,
+                                verdict="grounded",
+                                source_evidence=claim.source_evidence + " [embedding cross-ref: 3+ sources]",
+                                source_reference=claim.source_reference,
+                                category=claim.category,
+                                temporalidade=claim.temporalidade,
+                            )
+                            logger.info(f"Claim reclassified to grounded via embedding cross-ref (D-09): {claim.text[:80]}")
+                        else:
+                            claims[i] = ExtractedClaim(
+                                text=claim.text,
+                                verdict="recent_unverifiable",
+                                source_evidence=claim.source_evidence,
+                                source_reference=claim.source_reference,
+                                category=claim.category,
+                                temporalidade=claim.temporalidade,
+                            )
+                            logger.info(f"Breaking claim reclassified to recent_unverifiable (no cross-ref): {claim.text[:80]}")
+                # Recount after embedding cross-reference
+                metadata.grounded_claims = sum(
+                    1 for c in claims
+                    if (isinstance(c, ExtractedClaim) and c.verdict == "grounded")
+                    or (isinstance(c, dict) and c.get("verdict") == "grounded")
+                )
+                metadata.unverifiable_claims = sum(
+                    1 for c in claims
+                    if (isinstance(c, ExtractedClaim) and c.verdict == "unverifiable")
+                    or (isinstance(c, dict) and c.get("verdict") == "unverifiable")
+                )
+                metadata.recent_unverifiable_claims = sum(
+                    1 for c in claims
+                    if (isinstance(c, ExtractedClaim) and c.verdict == "recent_unverifiable")
+                    or (isinstance(c, dict) and c.get("verdict") == "recent_unverifiable")
+                )
 
             # Compute TF-IDF claim-source similarity (pure CPU, no API calls)
             claim_similarities = []
