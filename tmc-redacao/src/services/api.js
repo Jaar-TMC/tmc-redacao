@@ -233,9 +233,11 @@ export async function checkHealth() {
  * @param {number} [params.page=1] - Page number for pagination
  * @param {string} [params.search] - Search query
  * @param {string} [params.tag] - Filter by exact tag match
+ * @param {string} [params.cursor] - Opaque base64 cursor for keyset pagination (omit for OFFSET fallback)
+ * @param {string} [params.cursor_direction] - 'next' or 'prev' (default: 'next')
  * @param {Object} [options] - Fetch options
  * @param {AbortSignal} [options.signal] - AbortController signal for cancellation
- * @returns {Promise<{items: Array, total: number, page: number, pages: number}>}
+ * @returns {Promise<{items: Array, total: number, page: number, pages: number, nextCursor: string|null, prevCursor: string|null}>}
  */
 export async function getArticles(params = {}, options = {}) {
   const queryParams = new URLSearchParams();
@@ -250,6 +252,8 @@ export async function getArticles(params = {}, options = {}) {
   if (params.classification) queryParams.append('classification', params.classification);
   if (params.order_by) queryParams.append('order_by', params.order_by);
   if (params.skip_facets) queryParams.append('skip_facets', 'true');
+  if (params.cursor) queryParams.append('cursor', params.cursor);
+  if (params.cursor_direction) queryParams.append('cursor_direction', params.cursor_direction);
 
   const queryString = queryParams.toString();
   const endpoint = `/articles${queryString ? `?${queryString}` : ''}`;
