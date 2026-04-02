@@ -643,15 +643,20 @@ class DatabaseService:
             search=search, tag=tag, classification=classification
         )
 
-        # Build urgency WHERE: same content filters WITHOUT time restriction.
-        # The CASE expressions handle time bucketing (1h, 3h, 8h),
-        # and COUNT(*) gives the true "all" total for the "Todas" chip.
-        urgency_where, urgency_params, _urgency_needs_scores = self._build_article_filters(
-            category=category, source_id=source_id, period=None,
-            search=search, tag=tag, classification=classification
-        )
+        # When search is active without full-text index, the LIKE scan on the
+        # urgency query (no time restriction → full table) is the main cause of
+        # 500 timeouts.  Skip the separate urgency query and derive counts from
+        # the main query total instead.  With a full-text index the cost is low
+        # enough to keep the extra query.
+        skip_urgency_query = bool(search) and not self._has_fulltext_index()
 
-        logger.info(f"[get_articles_with_urgency] search={search}, order_by={order_by}")
+        if not skip_urgency_query:
+            urgency_where, urgency_params, _urgency_needs_scores = self._build_article_filters(
+                category=category, source_id=source_id, period=None,
+                search=search, tag=tag, classification=classification
+            )
+
+        logger.info(f"[get_articles_with_urgency] search={search}, order_by={order_by}, skip_urgency={skip_urgency_query}")
 
         # Dynamic ORDER BY - score sorts by denormalized total_score (no JOIN needed)
         if order_by == 'score':
@@ -708,25 +713,35 @@ class DatabaseService:
             articles = [self._row_to_article(row[:-1]) for row in rows]
 
             # 2. Urgency counts - no scores JOIN needed (classification is denormalized)
-            urgency_query = f"""
-                SELECT
-                    SUM(CASE WHEN a.published_at >= DATEADD(hour, -1, GETUTCDATE()) THEN 1 ELSE 0 END),
-                    SUM(CASE WHEN a.published_at >= DATEADD(hour, -3, GETUTCDATE()) THEN 1 ELSE 0 END),
-                    SUM(CASE WHEN a.published_at >= DATEADD(hour, -8, GETUTCDATE()) THEN 1 ELSE 0 END),
-                    COUNT(*)
-                FROM collected_articles a
-                JOIN sources s ON a.source_id = s.id
-                {urgency_where}
-            """
-            cursor.execute(urgency_query, tuple(urgency_params))
-            urow = cursor.fetchone()
+            if skip_urgency_query:
+                # Derive approximate counts from main query total to avoid a
+                # second full-table LIKE scan that causes timeouts.
+                urgency_counts = {
+                    "now": total,
+                    "recent": total,
+                    "today": total,
+                    "all": total
+                }
+            else:
+                urgency_query = f"""
+                    SELECT
+                        SUM(CASE WHEN a.published_at >= DATEADD(hour, -1, GETUTCDATE()) THEN 1 ELSE 0 END),
+                        SUM(CASE WHEN a.published_at >= DATEADD(hour, -3, GETUTCDATE()) THEN 1 ELSE 0 END),
+                        SUM(CASE WHEN a.published_at >= DATEADD(hour, -8, GETUTCDATE()) THEN 1 ELSE 0 END),
+                        COUNT(*)
+                    FROM collected_articles a
+                    JOIN sources s ON a.source_id = s.id
+                    {urgency_where}
+                """
+                cursor.execute(urgency_query, tuple(urgency_params))
+                urow = cursor.fetchone()
 
-            urgency_counts = {
-                "now": urow[0] or 0,
-                "recent": urow[1] or 0,
-                "today": urow[2] or 0,
-                "all": urow[3] or 0
-            } if urow else {"now": 0, "recent": 0, "today": 0, "all": 0}
+                urgency_counts = {
+                    "now": urow[0] or 0,
+                    "recent": urow[1] or 0,
+                    "today": urow[2] or 0,
+                    "all": urow[3] or 0
+                } if urow else {"now": 0, "recent": 0, "today": 0, "all": 0}
 
             logger.info(f"[get_articles_with_urgency] total={total}, rows={len(rows)}, urgency={urgency_counts}")
 
@@ -2056,6 +2071,31 @@ class DatabaseService:
         except Exception as e:
             logger.error(f"Error getting embedding for article {article_id}: {e}")
             return None
+
+    def get_recent_articles_with_embeddings(self, hours: int = 48) -> list:
+        """Fetch articles with embeddings published in the last N hours.
+        Used by Phase 4 temporal cross-reference to find corroborating articles.
+        """
+        query = """
+            SELECT a.id, a.title, e.embedding
+            FROM collected_articles a
+            JOIN article_embeddings e ON a.id = e.article_id
+            WHERE a.published_at >= DATEADD(hour, -%s, GETUTCDATE())
+              AND a.is_deleted = 0
+            ORDER BY a.published_at DESC
+        """
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(query, (hours,))
+                rows = cursor.fetchall()
+                return [
+                    {"id": row[0], "title": row[1], "embedding": row[2]}
+                    for row in rows
+                ]
+        except Exception as e:
+            logger.error(f"Error fetching recent embeddings (hours={hours}): {e}")
+            return []
 
     def get_articles_without_embedding(self, limit: int = 100) -> List[dict]:
         """
