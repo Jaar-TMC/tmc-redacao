@@ -1780,6 +1780,7 @@ def build_user_prompt(
         verified_chars: Total verified material chars (source + enrichment)
         tipo_materia: Article type key for type-aware length floors
         source_urls: List of verified source URLs from enrichment for hyperlinks
+        extracted_facts: Pre-extracted factual claims from Haiku (injected as verified facts block)
 
     Returns:
         Complete user prompt string

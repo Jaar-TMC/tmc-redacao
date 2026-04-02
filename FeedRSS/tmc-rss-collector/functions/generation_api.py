@@ -545,7 +545,7 @@ def evaluate_quality_criteria(
     # Bold enforcement is handled programmatically after generation since LLMs
     # cannot reliably count bold instances while generating text.
 
-    # 8. Text copy check — n-gram overlap detection (D-06 to D-09)
+    # 7. Text copy check — n-gram overlap detection (D-06 to D-09)
     if generated_text and source_text:
         try:
             from services.llm_service import check_originality

@@ -1620,7 +1620,7 @@ IMPORTANTE - REGRAS DE CLASSIFICACAO:
         simplified_prompt = (
             f"Liste 5 afirmacoes factuais neste texto. "
             f"Para cada uma, responda no formato JSON:\n"
-            f'[{{"text": "afirmacao", "verdict": "grounded", "confidence": 0.7}}]\n\n'
+            f'[{{"text": "afirmacao", "verdict": "unverifiable", "confidence": 0.5}}]\n\n'
             f"TEXTO:\n{text[:2000]}"
         )
         system = "Voce e um verificador factual. Extraia afirmacoes simples e verificaveis do texto."
