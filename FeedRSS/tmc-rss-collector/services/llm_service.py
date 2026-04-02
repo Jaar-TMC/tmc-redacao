@@ -208,6 +208,31 @@ Estes sao erros COMUNS que voce DEVE evitar:
 7. **Inferencias causais**: NAO adicione relacoes de causa e efeito que nao estejam explicitas nas fontes ("isso ocorreu porque", "em consequencia de").
 8. **Expansao de citacoes**: NAO parafrase citacoes adicionando palavras ou sentido que NAO estao no original."""
 
+ANTI_COPIA = """
+
+## ANTI-COPIA (OBRIGATORIO - PRIORIDADE MAXIMA)
+NUNCA copie frases do material-fonte. Use as mesmas INFORMACOES mas com palavras completamente diferentes.
+REGRA ABSOLUTA: Nunca use mais de 3 palavras consecutivas do material-fonte, EXCETO nomes proprios e citacoes entre aspas.
+
+### EXEMPLOS OBRIGATORIOS — LEIA ANTES DE ESCREVER:
+
+INACEITAVEL (copia verbatim):
+Fonte: "O governo federal anunciou nesta quarta-feira um pacote de medidas economicas para conter a inflacao."
+Gerado: "O governo federal anunciou nesta quarta-feira um pacote de medidas economicas para conter a inflacao."
+
+CORRETO (mesmos fatos, palavras proprias):
+Fonte: "O governo federal anunciou nesta quarta-feira um pacote de medidas economicas para conter a inflacao."
+Gerado: "A administracao Lula divulgou, na tarde de quarta, um conjunto de acoes visando frear o aumento de precos."
+
+INACEITAVEL (copia com pequena alteracao):
+Fonte: "A empresa registrou prejuizo de R$ 2,3 bilhoes no terceiro trimestre, impactada pela alta do dolar."
+Gerado: "A empresa registrou um prejuizo de R$ 2,3 bilhoes no terceiro trimestre, sendo impactada pela alta do dolar."
+
+CORRETO (reescrita genuina):
+Fonte: "A empresa registrou prejuizo de R$ 2,3 bilhoes no terceiro trimestre, impactada pela alta do dolar."
+Gerado: "No terceiro trimestre, o resultado da companhia foi negativo em R$ 2,3 bilhoes — reflexo da desvalorizacao cambial sobre os custos."
+"""
+
 ATRIBUICAO_INLINE = """
 ## ATRIBUICAO DE FONTES (OBRIGATORIO - SUBORDINADO A FIDELIDADE)
 Cada dado facutal (nome, numero, data, resultado, declaracao) DEVE ter atribuicao visivel:
@@ -1384,6 +1409,47 @@ def _normalize_tag_portuguese(tag: str) -> str:
     return " ".join(result)
 
 
+def _build_competitor_instruction(competitor_brands: str) -> str:
+    """Build competitor filtering instruction from comma-separated brand list."""
+    if not competitor_brands or not competitor_brands.strip():
+        return ""
+    brands = [b.strip() for b in competitor_brands.split(",") if b.strip()]
+    if not brands:
+        return ""
+    brand_list = ", ".join(brands)
+    return f"""
+## FILTRAGEM DE MARCAS CONCORRENTES (OBRIGATORIO)
+NAO mencione estes veiculos/marcas pelo nome: {brand_list}
+Em vez disso, use formulas neutras: "segundo apuracao", "de acordo com fontes", "conforme reportado", "segundo a imprensa".
+Exemplo INCORRETO: "Segundo o Globo, o presidente..."
+Exemplo CORRETO: "Segundo a imprensa, o presidente..."
+"""
+
+
+def scan_competitor_mentions(text: str, competitor_brands: str) -> list:
+    """
+    Scan generated article for competitor brand mentions.
+
+    Args:
+        text: Generated article text
+        competitor_brands: Comma-separated brand name list from COMPETITOR_BRANDS env var
+
+    Returns:
+        List of found brand name strings (empty list = clean)
+    """
+    import re as _re
+    if not competitor_brands or not competitor_brands.strip():
+        return []
+    brands = [b.strip() for b in competitor_brands.split(",") if b.strip()]
+    found = []
+    for brand in brands:
+        # Case-insensitive word-boundary search
+        pattern = r'\b' + _re.escape(brand) + r'\b'
+        if _re.search(pattern, text, _re.IGNORECASE):
+            found.append(brand)
+    return found
+
+
 def get_system_prompt(
     persona: str = "imparcial",
     tom: str = "formal",
@@ -1392,7 +1458,8 @@ def get_system_prompt(
     modo_opinativo: bool = False,
     source_len: int = 0,
     has_enrichment: bool = False,
-    verified_chars: int = 0
+    verified_chars: int = 0,
+    competitor_brands: str = "",
 ) -> str:
     """
     Build the system prompt for article generation.
@@ -1408,6 +1475,7 @@ def get_system_prompt(
         source_len: Length of source text in chars (for selecting appropriate FIDELIDADE)
         has_enrichment: Whether enrichment context is available
         verified_chars: Total verified material chars (source + enrichment)
+        competitor_brands: Comma-separated competitor brand names for filtering
 
     Returns:
         Complete system prompt string
@@ -1416,7 +1484,7 @@ def get_system_prompt(
 
     # Use category-based system if categoria is provided
     if categoria and categoria in CATEGORIAS_EDITORIAIS:
-        return _build_category_prompt(categoria, tom, tipo_materia, modo_opinativo, source_len, has_enrichment, verified_chars)
+        return _build_category_prompt(categoria, tom, tipo_materia, modo_opinativo, source_len, has_enrichment, verified_chars, competitor_brands)
 
     # Legacy persona-based system (backwards compatibility)
     persona_info = PERSONAS.get(persona, PERSONAS["imparcial"])
@@ -1489,6 +1557,8 @@ def get_system_prompt(
 {ATRIBUICAO_INLINE}
 {SEO_OTIMIZACAO}
 {LEGIBILIDADE_ALVO}
+{ANTI_COPIA}
+{_build_competitor_instruction(competitor_brands)}
 4. **Formato de Resposta:**
    Responda SEMPRE no seguinte formato JSON:
    ```json
@@ -1512,7 +1582,8 @@ def _build_category_prompt(
     modo_opinativo: bool,
     source_len: int = 0,
     has_enrichment: bool = False,
-    verified_chars: int = 0
+    verified_chars: int = 0,
+    competitor_brands: str = "",
 ) -> str:
     """
     Build the system prompt using TMC's category-based editorial guidelines.
@@ -1609,6 +1680,8 @@ Mantenha os vetos universais (sem preconceito, ataques pessoais, etc.)"""
 {opinion_section}
 {EEAT_ENFORCEMENT}
 {LEGIBILIDADE_ALVO}
+{ANTI_COPIA}
+{_build_competitor_instruction(competitor_brands)}
 
 ## REGRAS OBRIGATÓRIAS DE FORMATO
 
@@ -2234,6 +2307,7 @@ class LLMService:
         else:
             logger.info(f"Generating article with persona={persona}, tom={tom}, tipo={tipo_materia}")
 
+        _competitor_brands = _get_config().competitor_brands
         system_prompt = get_system_prompt(
             persona=persona,
             tom=tom,
@@ -2243,6 +2317,7 @@ class LLMService:
             source_len=len(texto_base.strip()),
             has_enrichment=bool(enrichment_context),
             verified_chars=verified_chars,
+            competitor_brands=_competitor_brands,
         )
         if sensitive_instructions:
             system_prompt += "\n\n## TOPICOS SENSIVEIS DETECTADOS\n" + "\n".join(sensitive_instructions)

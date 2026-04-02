@@ -78,6 +78,9 @@ class AppConfig:
     # CORS
     cors_allowed_origins: str = ""
 
+    # Editorial competitor filtering (comma-separated brand names, set by editorial team)
+    competitor_brands: str = ""
+
     # Rate limits
     rate_limit_generate: float = 0.5
     rate_limit_burst_generate: int = 3
@@ -169,6 +172,7 @@ def load_config() -> AppConfig:
         publish_max_expansion=_float_env("PUBLISH_MAX_EXPANSION", 8.0),
         # CORS
         cors_allowed_origins=os.environ.get("CORS_ALLOWED_ORIGINS", ""),
+        competitor_brands=os.environ.get("COMPETITOR_BRANDS", ""),
         # Rate limits
         rate_limit_generate=_float_env("RATE_LIMIT_GENERATE", 0.5),
         rate_limit_burst_generate=_int_env("RATE_LIMIT_BURST_GENERATE", 3),
