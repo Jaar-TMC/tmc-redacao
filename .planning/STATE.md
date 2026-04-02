@@ -1,30 +1,54 @@
 ---
 gsd_state_version: 1.0
 milestone: v1.0
-milestone_name: milestone
-status: Milestone complete
-stopped_at: Phase 4 context gathered
-last_updated: "2026-04-02T04:22:29.521Z"
+milestone_name: P0 Backlog Resolution
+status: executing
+last_updated: "2026-04-02T13:44:03Z"
+last_activity: 2026-04-02 -- Phase 09 Plan 01 complete
 progress:
-  total_phases: 4
+  total_phases: 10
   completed_phases: 3
-  total_plans: 11
-  completed_plans: 10
+  total_plans: 13
+  completed_plans: 11
 ---
 
 # Project State
 
-## Current Session
+## Current Position
 
-- **Stopped at:** Phase 4 context gathered
-- **Resume:** `.planning/phases/02-search-filter-performance/02-C-*.md`
-- **Next:** `/gsd:execute-phase 2` to complete Plan C (frontend debounce)
+Phase: 09 (keyset-pagination) — EXECUTING
+Plan: 2 of 2
+Status: Executing Phase 09 -- Plan 01 complete, Plan 02 pending
+Last activity: 2026-04-02 -- Completed 09-01 (backend keyset pagination)
 
 ## Phase Progress
 
 | Phase | Status | Notes |
 |-------|--------|-------|
-| 1 - Session Persistence | COMPLETE | Commits 020b028, 8ae94c8, c7d2d84 |
-| 2 - Search/Filter Performance | IN PROGRESS | Plans A+B complete; C (frontend debounce) remaining |
-| 3 - Text Quality | NOT STARTED | Depends on Phase 2 |
-| 4 - Fact-Check Accuracy | NOT STARTED | Depends on Phase 3 |
+| 5 - Quick Wins | COMPLETE | 7/7 QW fixes: CORS max-age, cache headers, content truncation, memo fix, timer stagger, lazy favicons, AiStatus guard |
+| 6 - DB Optimization | COMPLETE | 9/9 DB fixes: 3 covering indexes, auto-tuning, urgency cache, source_id, parallel facets, FREETEXT tags, keyed facet cache |
+| 7 - Frontend State | COMPLETE | 5/6 FE fixes: TanStack Query setup + 3 hooks, SmartEmptyState zero-API, MinhasMaterias debounce, BuscadorPage AbortController. FE-05 (FiltersContext split) deferred |
+| 8 - Redis Cache | NOT STARTED | Cache-aside pattern |
+| 9 - Keyset Pagination | IN PROGRESS | Plan 01 complete (backend cursor helpers + API). Plan 02 pending (frontend + migration). |
+| 10 - Infrastructure | NOT STARTED | Flex/Premium plan, dependency cleanup |
+
+## Decisions
+
+- Cursor format: base64url-encoded "published_at|id" (opaque to frontend)
+- COUNT query separated from data query in cursor path (stable total/pages)
+- Score-ordered queries always use OFFSET (score not monotonic)
+- Backward seek reverses ORDER BY to ASC then reverses result list
+
+## Performance Metrics
+
+| Phase-Plan | Duration | Tasks | Files |
+|------------|----------|-------|-------|
+| 09-01 | 9m8s | 2/2 | 3 |
+
+## Accumulated Context
+
+- Previous milestone (v1.0) completed phases 1-4 (P0 bugfixes)
+- 32 bottlenecks identified across backend, frontend, infrastructure
+- Full analysis: `docs/plans/2026-04-02-performance-optimization-plan.md`
+- Key bottlenecks: no caching layer, Consumption Plan cold starts, unused cache headers, FiltersContext cascades
+- Deferred: test_facet_cache_has_required_keys broken by pre-existing uncommitted changes to _facet_cache structure
