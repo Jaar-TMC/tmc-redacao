@@ -1543,6 +1543,21 @@ Regras:
                 logger.warning(f"Article truncated for verification: {len(generated_article)} -> 5000 chars ({len(generated_article)-5000} chars unverified)")
                 article_truncated_for_review = True
 
+            # Temporal schema extension for claim extraction (Phase 4)
+            temporal_schema = (
+                ',\n      "temporalidade": "breaking|recente|historico"'
+                if _get_temporal_awareness_enabled() else ''
+            )
+            temporal_rules = ""
+            if _get_temporal_awareness_enabled():
+                temporal_rules = """
+
+Classificacao temporal (para cada claim):
+- "breaking": informacao de evento ocorrido nas ultimas 48 horas, ainda em desenvolvimento
+- "recente": informacao dos ultimos 7 dias, contexto recente mas ja estabelecido
+- "historico": contexto geral ou informacao estabelecida ha mais de 7 dias
+Se nao conseguir determinar, use "historico"."""
+
             system = ("Voce e um verificador factual rigoroso de artigos "
                       "jornalisticos. Seu papel e proteger o leitor contra desinformacao, "
                       "mas tambem reconhecer informacoes legitimas de fontes verificadas.")
@@ -1567,7 +1582,7 @@ Responda em JSON:
       "verdict": "grounded|fabricated|unverifiable|inaccurate|opinion|context",
       "source_evidence": "Trecho do texto-fonte OU contexto verificado que sustenta (ou contradiz) a afirmacao",
       "source_reference": "Sentenca EXATA do material autorizado que sustenta esta afirmacao (copiar literal)",
-      "category": "fact|statistic|quote|outcome|attribution|opinion"
+      "category": "fact|statistic|quote|outcome|attribution|opinion"{temporal_schema}
     }}
   ]
 }}
@@ -1610,7 +1625,7 @@ IMPORTANTE - REGRAS DE CLASSIFICACAO:
 - NA DUVIDA entre "context" e "unverifiable": se a informacao e factualmente plausivel, tem coesao com o tema, e nao contem dados especificos inventados, prefira "context"
 - NA DUVIDA entre "opinion" e "unverifiable": se a afirmacao e subjetiva, valorativa ou de enquadramento editorial, classifique como "opinion"
 - Afirmacoes "opinion" NAO contam na avaliacao de precisao factual
-- Afirmacoes "context" CONTAM na avaliacao (devem ser factualmente corretas)"""
+- Afirmacoes "context" CONTAM na avaliacao (devem ser factualmente corretas){temporal_rules}"""
 
             response_text = await llm.call_api(system, prompt, 4096, task_type='claim_extraction')
 
@@ -1646,6 +1661,7 @@ IMPORTANTE - REGRAS DE CLASSIFICACAO:
                     source_evidence=c.get("source_evidence", ""),
                     source_reference=c.get("source_reference", ""),
                     category=c.get("category", "fact"),
+                    temporalidade=c.get("temporalidade", "historico") if _get_temporal_awareness_enabled() else "historico",
                 ))
 
             return claims
@@ -1705,6 +1721,7 @@ IMPORTANTE - REGRAS DE CLASSIFICACAO:
                             source_evidence="",
                             source_reference="",
                             category="fact",
+                            temporalidade="historico",
                         ))
                 return claims
             except json.JSONDecodeError:
@@ -2365,6 +2382,7 @@ IMPORTANTE - REGRAS DE CLASSIFICACAO:
                         verdict=result.final_verdict,
                         source_evidence=claim.source_evidence + " [CoVe reclassified]",
                         category=claim.category,
+                        temporalidade=claim.temporalidade,
                     )
                 elif isinstance(claim, dict):
                     claims[idx] = {
