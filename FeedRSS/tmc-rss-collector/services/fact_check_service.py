@@ -519,6 +519,7 @@ class FactCheckService:
         titulo_fonte: Optional[str] = None,
         tags: Optional[list] = None,
         correlation_id: str = "",
+        source_published_at: Optional[str] = None,
     ) -> EnrichmentContext:
         """
         Search for verified external context to enrich article generation.
@@ -545,6 +546,12 @@ class FactCheckService:
             logger.warning("EXA_API_KEY not set, skipping enrichment")
             return result
 
+        # Temporal tier for date-scoped Exa (Phase 4)
+        temporal_tier = self._get_temporal_tier(source_published_at)
+        tier_date_range = self._get_tier_date_range(temporal_tier) if _get_temporal_awareness_enabled() else None
+        if _get_temporal_awareness_enabled():
+            logger.info(f"[{correlation_id}] Temporal tier: {temporal_tier}, date range start: {tier_date_range}")
+
         # Aggressive mode for short sources - need more external material
         aggressive = source_len < 500
         num_queries = 3 if aggressive else 2
@@ -568,7 +575,7 @@ class FactCheckService:
 
             # Execute parallel Exa searches
             search_tasks = [
-                self._search_exa(q, num_results=num_results, max_text=max_text_chars, operation='enrichment_search')
+                self._search_exa(q, num_results=num_results, max_text=max_text_chars, operation='enrichment_search', date_range_start=tier_date_range)
                 for q in queries[:num_queries]
             ]
             search_results = await asyncio.gather(*search_tasks, return_exceptions=True)
@@ -689,7 +696,8 @@ class FactCheckService:
         query: str,
         num_results: int = None,
         max_text: int = 2000,
-        operation: str = 'enrichment_search'
+        operation: str = 'enrichment_search',
+        date_range_start: Optional[str] = None,
     ) -> list:
         """
         Execute a single Exa search with retry and circuit breaker.
@@ -729,7 +737,7 @@ class FactCheckService:
             "useAutoprompt": True,
             "numResults": num_results,
             "category": "news",
-            "startPublishedDate": self._get_date_range_start(),
+            "startPublishedDate": date_range_start if date_range_start else self._get_date_range_start(),
             "contents": {
                 "text": {"maxCharacters": max_text},
                 "highlights": {"numSentences": 3}
