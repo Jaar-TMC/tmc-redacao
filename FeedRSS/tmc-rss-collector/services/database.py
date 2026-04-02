@@ -9,6 +9,7 @@ import logging
 import queue
 import threading
 import time
+import base64
 from typing import Any, Dict, List, Optional, Set, Tuple
 from datetime import datetime, timedelta
 from uuid import UUID
@@ -30,6 +31,32 @@ EmbeddingVector = List[float]
 logger = logging.getLogger(__name__)
 
 _fulltext_available = None  # Module-level cache: None=unchecked, True/False=result
+
+
+# ---------------------------------------------------------------------------
+# Keyset pagination cursor helpers (PAG-01)
+# ---------------------------------------------------------------------------
+
+def encode_cursor(published_at: datetime, article_id) -> str:
+    """Encode cursor as opaque base64 token. Per D-01."""
+    raw = f"{published_at.isoformat()}|{str(article_id)}"
+    return base64.urlsafe_b64encode(raw.encode()).decode().rstrip("=")
+
+
+def decode_cursor(cursor_str: str) -> tuple:
+    """
+    Decode cursor. Returns (published_at: datetime, id_str: str).
+    Raises ValueError on invalid format -- caller falls back to page=1.
+    """
+    # Re-add padding stripped during encode
+    padded = cursor_str + "=" * (4 - len(cursor_str) % 4) if len(cursor_str) % 4 else cursor_str
+    raw = base64.urlsafe_b64decode(padded.encode()).decode()
+    parts = raw.split("|", 1)
+    if len(parts) != 2:
+        raise ValueError(f"Invalid cursor format: {cursor_str!r}")
+    published_at = datetime.fromisoformat(parts[0])
+    id_str = parts[1]
+    return published_at, id_str
 
 
 class ConnectionPool:
@@ -476,7 +503,10 @@ class DatabaseService:
                                period: Optional[str] = None,
                                search: Optional[str] = None,
                                tag: Optional[str] = None,
-                               classification: Optional[str] = None) -> Tuple[str, list, bool]:
+                               classification: Optional[str] = None,
+                               cursor_published_at: Optional[datetime] = None,
+                               cursor_id: Optional[str] = None,
+                               cursor_direction: str = "next") -> Tuple[str, list, bool]:
         """
         Build shared WHERE clause and params for article queries.
         Reused by get_articles and get_urgency_counts to avoid duplication.
@@ -499,7 +529,7 @@ class DatabaseService:
             params.append(category)
 
         if source_id:
-            conditions.append("s.name = %s")
+            conditions.append("a.source_id = %s")
             params.append(source_id)
 
         if period:
@@ -561,6 +591,18 @@ class DatabaseService:
                 """)
                 tag_param = f'%"{tag}"%'
                 params.append(tag_param)
+
+        # Keyset seek predicate -- appended alongside filter conditions (PAG-01)
+        if cursor_published_at is not None and cursor_id is not None:
+            if cursor_direction == "prev":
+                conditions.append(
+                    "(a.published_at > %s OR (a.published_at = %s AND a.id > %s))"
+                )
+            else:  # "next" (default)
+                conditions.append(
+                    "(a.published_at < %s OR (a.published_at = %s AND a.id < %s))"
+                )
+            params.extend([cursor_published_at, cursor_published_at, cursor_id])
 
         where_clause = "WHERE " + " AND ".join(conditions) if conditions else ""
         return where_clause, params, needs_scores_join
@@ -627,28 +669,53 @@ class DatabaseService:
                                    search: Optional[str] = None,
                                    tag: Optional[str] = None,
                                    classification: Optional[str] = None,
-                                   order_by: Optional[str] = None) -> Tuple[List[Article], int, dict]:
+                                   order_by: Optional[str] = None,
+                                   skip_urgency_query: bool = False,
+                                   cursor: Optional[dict] = None,
+                                   cursor_direction: str = "next") -> Tuple[List[Article], int, dict]:
         """
         Combined query: articles + count + urgency counts in a single DB connection.
         Avoids executing the expensive WHERE clause (especially LIKE on content) twice.
+
+        Args:
+            skip_urgency_query: If True, skip the urgency counts query entirely
+                (caller has cached counts). Returns placeholder urgency_counts.
+            cursor: If provided, dict with 'published_at' and 'id' keys for keyset seek.
+                When cursor is present and order_by != 'score', uses keyset pagination
+                instead of OFFSET. The COUNT query uses filter-only WHERE so total/pages
+                remain stable across cursor-navigated pages.
+            cursor_direction: 'next' (default) or 'prev' for bidirectional navigation.
 
         Returns:
             Tuple (articles, total_count, urgency_counts_dict)
         """
         limit = min(limit, 100)
-        offset = (page - 1) * limit
+        use_cursor = cursor is not None and order_by != 'score'
 
-        where_clause, params, _needs_scores_join = self._build_article_filters(
+        # Filter-only WHERE -- always needed (for COUNT and for OFFSET path)
+        filter_where, filter_params, _needs_scores_join = self._build_article_filters(
             category=category, source_id=source_id, period=period,
             search=search, tag=tag, classification=classification
         )
 
+        if use_cursor:
+            # Seek WHERE -- filter conditions + cursor seek predicate (for data query)
+            seek_where, seek_params, _ = self._build_article_filters(
+                category=category, source_id=source_id, period=period,
+                search=search, tag=tag, classification=classification,
+                cursor_published_at=cursor.get("published_at"),
+                cursor_id=cursor.get("id"),
+                cursor_direction=cursor_direction
+            )
+
         # When search is active without full-text index, the LIKE scan on the
-        # urgency query (no time restriction → full table) is the main cause of
+        # urgency query (no time restriction -> full table) is the main cause of
         # 500 timeouts.  Skip the separate urgency query and derive counts from
         # the main query total instead.  With a full-text index the cost is low
         # enough to keep the extra query.
-        skip_urgency_query = bool(search) and not self._has_fulltext_index()
+        # Also skip when caller signals cached urgency counts are available.
+        if not skip_urgency_query:
+            skip_urgency_query = bool(search) and not self._has_fulltext_index()
 
         if not skip_urgency_query:
             urgency_where, urgency_params, _urgency_needs_scores = self._build_article_filters(
@@ -656,61 +723,139 @@ class DatabaseService:
                 search=search, tag=tag, classification=classification
             )
 
-        logger.info(f"[get_articles_with_urgency] search={search}, order_by={order_by}, skip_urgency={skip_urgency_query}")
+        logger.info(f"[get_articles_with_urgency] search={search}, order_by={order_by}, use_cursor={use_cursor}, skip_urgency={skip_urgency_query}")
 
         # Dynamic ORDER BY - score sorts by denormalized total_score (no JOIN needed)
         if order_by == 'score':
             order_clause = "ORDER BY ISNULL(a.total_score, -1) DESC, a.published_at DESC"
+        elif use_cursor and cursor_direction == "prev":
+            order_clause = "ORDER BY a.published_at ASC, a.id ASC"
         else:
-            order_clause = "ORDER BY a.published_at DESC"
+            order_clause = "ORDER BY a.published_at DESC, a.id DESC"
 
         # Pre-build the fallback ORDER BY for score queries (avoids fragile str.replace)
-        fallback_order_clause = "ORDER BY a.published_at DESC"
+        fallback_order_clause = "ORDER BY a.published_at DESC, a.id DESC"
 
         with self.get_connection() as conn:
-            cursor = conn.cursor()
+            db_cursor = conn.cursor()
 
             # 1. Main query with COUNT(*) OVER() - replaces both count + article queries.
-            # Score detail columns (score_inesperado etc.) removed from list query —
+            # Score detail columns (score_inesperado etc.) removed from list query --
             # frontend never uses them and the LEFT JOIN article_scores was a bottleneck.
             # WHERE and ORDER BY use denormalized a.total_score / a.classification (no JOIN needed).
-            select_cols = """
-                SELECT a.id, a.source_id, a.title, a.content, a.preview, a.url,
-                       a.image_url, a.author, a.category, a.tags, a.published_at,
-                       a.collected_at, a.hash,
-                       s.name as source_name, s.url as source_url, s.favicon_url,
-                       a.total_score, a.classification,
-                       COUNT(*) OVER() as total_count
-                FROM collected_articles a
-                JOIN sources s ON a.source_id = s.id
-                {where_clause}
-            """.format(where_clause=where_clause)
 
-            query = f"{select_cols}\n                {order_clause}\n                OFFSET %s ROWS FETCH NEXT %s ROWS ONLY"
+            if use_cursor:
+                # --- Keyset pagination path (PAG-01/PAG-02) ---
 
-            try:
-                cursor.execute(query, tuple(params) + (offset, limit))
-                rows = cursor.fetchall()
-            except Exception as e:
-                logger.error(f"[get_articles_with_urgency] Query failed (order_by={order_by}): {e}")
-                # Fallback: if score sort fails, fall back to date ordering
-                if order_by == 'score':
-                    logger.warning("[get_articles_with_urgency] Falling back to date ordering")
-                    try:
-                        fallback_query = f"{select_cols}\n                {fallback_order_clause}\n                OFFSET %s ROWS FETCH NEXT %s ROWS ONLY"
-                        cursor.execute(fallback_query, tuple(params) + (offset, limit))
-                        rows = cursor.fetchall()
-                    except Exception as fallback_err:
-                        logger.error(f"[get_articles_with_urgency] Fallback also failed: {fallback_err}")
-                        raise e
-                else:
+                # COUNT query -- uses filter-only WHERE (no seek predicate)
+                # so total/pages remain stable across all cursor-navigated pages
+                count_query = f"""
+                    SELECT COUNT(*)
+                    FROM collected_articles a
+                    JOIN sources s ON a.source_id = s.id
+                    {filter_where}
+                """
+                db_cursor.execute(count_query, tuple(filter_params))
+                total = db_cursor.fetchone()[0]
+
+                # Data query -- uses seek WHERE (filter + cursor predicate), no OFFSET
+                select_cols = """
+                    SELECT a.id, a.source_id, a.title, LEFT(a.content, 200) as content, a.preview, a.url,
+                           a.image_url, a.author, a.category, a.tags, a.published_at,
+                           a.collected_at, a.hash,
+                           s.name as source_name, s.url as source_url, s.favicon_url,
+                           a.total_score, a.classification,
+                           LEN(a.content) as content_length_original
+                    FROM collected_articles a
+                    JOIN sources s ON a.source_id = s.id
+                    {seek_where}
+                """.format(seek_where=seek_where)
+
+                query = f"{select_cols}\n                {order_clause}\nFETCH NEXT %s ROWS ONLY"
+                params_final = tuple(seek_params) + (limit,)
+
+                try:
+                    db_cursor.execute(query, params_final)
+                    rows = db_cursor.fetchall()
+                except Exception as e:
+                    logger.error(f"[get_articles_with_urgency] Cursor query failed: {e}")
                     raise
 
-            # Extract total from window function (last column of first row)
-            total = rows[0][-1] if rows else 0
+                # Parse rows -- no total_count column in cursor path (already have total)
+                articles = []
+                for row in rows:
+                    content_length_original = row[-1]  # LEN(a.content)
+                    article_row = row[:-1]  # strip content_length_original only
+                    article = self._row_to_article(article_row)
+                    article._content_length_original = content_length_original
+                    articles.append(article)
 
-            # Exclude the total_count column from row mapping (slice off last col)
-            articles = [self._row_to_article(row[:-1]) for row in rows]
+                # Reverse results for backward cursor (ORDER BY ASC -> need DESC for display)
+                if cursor_direction == "prev":
+                    articles.reverse()
+
+            else:
+                # --- Standard OFFSET pagination path ---
+                offset = (page - 1) * limit
+
+                select_cols = """
+                    SELECT a.id, a.source_id, a.title, LEFT(a.content, 200) as content, a.preview, a.url,
+                           a.image_url, a.author, a.category, a.tags, a.published_at,
+                           a.collected_at, a.hash,
+                           s.name as source_name, s.url as source_url, s.favicon_url,
+                           a.total_score, a.classification,
+                           LEN(a.content) as content_length_original,
+                           COUNT(*) OVER() as total_count
+                    FROM collected_articles a
+                    JOIN sources s ON a.source_id = s.id
+                    {filter_where}
+                """.format(filter_where=filter_where)
+
+                query = f"{select_cols}\n                {order_clause}\n                OFFSET %s ROWS FETCH NEXT %s ROWS ONLY"
+                params_final = tuple(filter_params) + (offset, limit)
+
+                try:
+                    db_cursor.execute(query, params_final)
+                    rows = db_cursor.fetchall()
+                except Exception as e:
+                    logger.error(f"[get_articles_with_urgency] Query failed (order_by={order_by}): {e}")
+                    # Fallback: if score sort fails, fall back to date ordering
+                    if order_by == 'score':
+                        logger.warning("[get_articles_with_urgency] Falling back to date ordering")
+                        try:
+                            fallback_select = """
+                                SELECT a.id, a.source_id, a.title, LEFT(a.content, 200) as content, a.preview, a.url,
+                                       a.image_url, a.author, a.category, a.tags, a.published_at,
+                                       a.collected_at, a.hash,
+                                       s.name as source_name, s.url as source_url, s.favicon_url,
+                                       a.total_score, a.classification,
+                                       LEN(a.content) as content_length_original,
+                                       COUNT(*) OVER() as total_count
+                                FROM collected_articles a
+                                JOIN sources s ON a.source_id = s.id
+                                {filter_where}
+                            """.format(filter_where=filter_where)
+                            fallback_query = f"{fallback_select}\n                {fallback_order_clause}\n                OFFSET %s ROWS FETCH NEXT %s ROWS ONLY"
+                            db_cursor.execute(fallback_query, tuple(filter_params) + (offset, limit))
+                            rows = db_cursor.fetchall()
+                        except Exception as fallback_err:
+                            logger.error(f"[get_articles_with_urgency] Fallback also failed: {fallback_err}")
+                            raise e
+                    else:
+                        raise
+
+                # Extract total from window function (last column of first row)
+                total = rows[0][-1] if rows else 0
+
+                # Exclude total_count (last col) and content_length_original (second-to-last)
+                # from row mapping. Restore real content length on article after construction.
+                articles = []
+                for row in rows:
+                    content_length_original = row[-2]  # LEN(a.content)
+                    article_row = row[:-2]  # strip both content_length_original and total_count
+                    article = self._row_to_article(article_row)
+                    article._content_length_original = content_length_original
+                    articles.append(article)
 
             # 2. Urgency counts - no scores JOIN needed (classification is denormalized)
             if skip_urgency_query:
@@ -733,8 +878,8 @@ class DatabaseService:
                     JOIN sources s ON a.source_id = s.id
                     {urgency_where}
                 """
-                cursor.execute(urgency_query, tuple(urgency_params))
-                urow = cursor.fetchone()
+                db_cursor.execute(urgency_query, tuple(urgency_params))
+                urow = db_cursor.fetchone()
 
                 urgency_counts = {
                     "now": urow[0] or 0,
@@ -1402,16 +1547,20 @@ class DatabaseService:
             conditions.append("a.category = %s")
             params.append(category)
         if source_id:
-            conditions.append("s.name = %s")
+            conditions.append("a.source_id = %s")
             params.append(source_id)
         if search:
-            search_escaped = search.replace('[', '[[]').replace('%', '[%]').replace('_', '[_]')
-            search_param = f"%{search_escaped}%"
-            conditions.append("""(
-                a.title COLLATE Latin1_General_CI_AI LIKE %s COLLATE Latin1_General_CI_AI
-                OR a.preview COLLATE Latin1_General_CI_AI LIKE %s COLLATE Latin1_General_CI_AI
-            )""")
-            params.extend([search_param, search_param])
+            if self._has_fulltext_index():
+                conditions.append("FREETEXT((a.title, a.preview, a.tags), %s)")
+                params.append(search)
+            else:
+                search_escaped = search.replace('[', '[[]').replace('%', '[%]').replace('_', '[_]')
+                search_param = f"%{search_escaped}%"
+                conditions.append("""(
+                    a.title COLLATE Latin1_General_CI_AI LIKE %s COLLATE Latin1_General_CI_AI
+                    OR a.preview COLLATE Latin1_General_CI_AI LIKE %s COLLATE Latin1_General_CI_AI
+                )""")
+                params.extend([search_param, search_param])
 
         where_extra = ("AND " + " AND ".join(conditions)) if conditions else ""
 
