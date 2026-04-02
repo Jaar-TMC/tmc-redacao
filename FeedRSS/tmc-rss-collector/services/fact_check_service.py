@@ -2313,6 +2313,61 @@ IMPORTANTE - REGRAS DE CLASSIFICACAO:
         return best_ratio
 
     # =========================================================================
+    # Embedding Cross-Reference (Phase 4)
+    # =========================================================================
+
+    @staticmethod
+    def _cosine_sim(a: list, b: list) -> float:
+        """Pure-Python cosine similarity. No numpy required."""
+        import math
+        dot = sum(x * y for x, y in zip(a, b))
+        na = math.sqrt(sum(x * x for x in a))
+        nb = math.sqrt(sum(y * y for y in b))
+        return dot / (na * nb) if na and nb else 0.0
+
+    async def _cross_reference_with_embeddings(
+        self,
+        claim_text: str,
+        min_similarity: float = 0.7,
+        min_corroborating: int = 3,
+        hours_window: int = None,
+    ) -> bool:
+        """Check if a claim is corroborated by 3+ independent collected articles.
+        Uses existing article_embeddings. Returns True if corroborated, False otherwise.
+        Degrades gracefully on any error.
+        """
+        if not _get_temporal_awareness_enabled():
+            return False
+        if hours_window is None:
+            hours_window = _get_temporal_breaking_hours()
+        try:
+            from services.embedding_service import EmbeddingService
+            from services.database import get_db
+            embed_svc = EmbeddingService()
+            claim_embedding = await embed_svc.generate_embedding(claim_text)
+            db = get_db()
+            articles = db.get_recent_articles_with_embeddings(hours_window)
+            if len(articles) < min_corroborating:
+                return False
+            import json as _json
+            corroborating = 0
+            for article in articles:
+                emb = article.get("embedding")
+                if not emb:
+                    continue
+                if isinstance(emb, str):
+                    emb = _json.loads(emb)
+                sim = self._cosine_sim(claim_embedding, emb)
+                if sim >= min_similarity:
+                    corroborating += 1
+                    if corroborating >= min_corroborating:
+                        return True
+            return False
+        except Exception as e:
+            logger.warning(f"Embedding cross-reference failed (non-blocking): {e}")
+            return False
+
+    # =========================================================================
     # Chain-of-Verification (CoVe) - Phase 2
     # =========================================================================
 
