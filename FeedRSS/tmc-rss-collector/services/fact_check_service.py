@@ -98,6 +98,7 @@ class ExtractedClaim:
     source_evidence: str = ""
     source_reference: str = ""  # Best matching source sentence
     category: str = "fact"  # fact | statistic | quote | outcome | attribution | opinion
+    temporalidade: str = "historico"  # breaking | recente | historico
 
 
 @dataclass
@@ -153,6 +154,7 @@ class VerificationMetadata:
     grounded_claims: int = 0
     fabricated_claims: int = 0
     unverifiable_claims: int = 0
+    recent_unverifiable_claims: int = 0
     context_claims: int = 0
     claims: list = field(default_factory=list)
     entity_comparison: dict = field(default_factory=dict)
@@ -181,6 +183,7 @@ class VerificationMetadata:
                     "source_evidence": c.source_evidence,
                     "source_reference": c.source_reference,
                     "category": c.category,
+                    "temporalidade": c.temporalidade,
                 })
             elif isinstance(c, dict):
                 claims_list.append(c)
@@ -194,6 +197,7 @@ class VerificationMetadata:
             "grounded_claims": self.grounded_claims,
             "fabricated_claims": self.fabricated_claims,
             "unverifiable_claims": self.unverifiable_claims,
+            "recent_unverifiable_claims": self.recent_unverifiable_claims,
             "context_claims": self.context_claims,
             "claims": claims_list,
             "entity_comparison": self.entity_comparison,
