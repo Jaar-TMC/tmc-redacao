@@ -456,9 +456,10 @@ class TestLLMCircuitBreaker:
         """Create an LLMService with mocked keys via module-level patch."""
         from unittest.mock import patch
         import services.llm_service as llm_mod
-        with patch.object(llm_mod, 'ANTHROPIC_API_KEY', 'test-key'):
-            with patch.object(llm_mod, 'AZURE_AI_API_KEY', ''):
-                svc = llm_mod.LLMService()
+        with patch.object(llm_mod, '_get_anthropic_api_key', return_value='test-key'):
+            with patch.object(llm_mod, '_get_azure_ai_api_key', return_value=None):
+                with patch.object(llm_mod, '_get_generation_model', return_value='claude-haiku-4-5'):
+                    svc = llm_mod.LLMService()
         return svc
 
     def test_llm_circuit_initial_state(self):
