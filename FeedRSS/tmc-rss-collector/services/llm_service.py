@@ -2354,7 +2354,7 @@ class LLMService:
         Returns:
             Extracted facts as a formatted string, or empty string on failure
         """
-        if not texto_base or len(texto_base.strip()) < 100:
+        if not texto_base or len(texto_base.strip()) < 300:
             return ""
 
         extraction_system = (
@@ -2533,8 +2533,9 @@ class LLMService:
                 # Post-generation competitor scan (D-13, D-14)
                 _competitor_brands_cfg = _get_config().competitor_brands
                 if _competitor_brands_cfg:
+                    _article_body = result.get("conteudo", "") + " " + result.get("titulo", "")
                     _found_competitors = scan_competitor_mentions(
-                        text=response_text,
+                        text=_article_body,
                         competitor_brands=_competitor_brands_cfg,
                     )
                     if _found_competitors:
