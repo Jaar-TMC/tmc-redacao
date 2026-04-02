@@ -2,30 +2,47 @@
 API REST para artigos coletados.
 """
 
+import asyncio
 import azure.functions as func
+import hashlib
 import json
 import logging
 import time
 from math import ceil
 from uuid import UUID
 
-from services.database import get_db
+from services.database import get_db, encode_cursor, decode_cursor
 from services.async_db import run_db
 from models import ArticleListResponse
 
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
-# In-memory facet cache (5-min TTL)
+# In-memory facet cache keyed by filter combination (5-min TTL)
 # Categories and tags only change when new articles are collected (every 15 min).
 # Caching avoids expensive CROSS APPLY OPENJSON() on every /api/articles request.
 # ---------------------------------------------------------------------------
-_facet_cache = {
-    "categories": None,
-    "tags": None,
-    "timestamp": 0,
-}
+_facet_cache = {}  # key: filter_hash -> {"categories": [...], "tags": [...], "timestamp": float}
 FACET_CACHE_TTL = 300  # seconds
+MAX_FACET_CACHE_ENTRIES = 20
+
+
+def _facet_cache_key(category, source, period, search, tag, classification, max_hours):
+    raw = f"{category}|{source}|{period}|{search}|{tag}|{classification}|{max_hours}"
+    return hashlib.md5(raw.encode()).hexdigest()[:12]
+
+
+# ---------------------------------------------------------------------------
+# In-memory urgency counts cache (30-sec TTL)
+# Urgency counts (1h/3h/8h/total) change slowly; caching avoids a second
+# full-table scan on every /api/articles request.
+# ---------------------------------------------------------------------------
+_urgency_cache = {
+    "counts": None,
+    "timestamp": 0,
+    "key": None,  # filter hash to invalidate on filter change
+}
+URGENCY_CACHE_TTL = 30  # seconds
 
 
 async def list_articles_handler(req: func.HttpRequest) -> func.HttpResponse:
@@ -57,6 +74,18 @@ async def list_articles_handler(req: func.HttpRequest) -> func.HttpResponse:
         order_by = req.params.get('order_by')  # 'score' or 'newest' (default)
         skip_facets = req.params.get('skip_facets', '').lower() == 'true'
 
+        # Per PAG-01/D-01: Parse opaque base64 cursor for keyset pagination
+        cursor_str = req.params.get('cursor')
+        cursor_direction = req.params.get('cursor_direction', 'next')
+        cursor_data = None
+        if cursor_str:
+            try:
+                cursor_published_at, cursor_id = decode_cursor(cursor_str)
+                cursor_data = {"published_at": cursor_published_at, "id": cursor_id}
+            except (ValueError, Exception) as e:
+                logger.warning(f"[list_articles] Invalid cursor ignored, falling back to page=1: {e}")
+                cursor_data = None
+
         # Parse max_hours for urgency filter (1-24)
         max_hours = req.params.get('max_hours')
         if max_hours:
@@ -74,6 +103,16 @@ async def list_articles_handler(req: func.HttpRequest) -> func.HttpResponse:
         if page < 1:
             page = 1
 
+        # DB-05: Check urgency cache before querying
+        # Build a cache key from filters that affect urgency counts (exclude page/limit)
+        urgency_filter_key = _facet_cache_key(category, source, None, search, tag, classification, max_hours)
+        now = time.time()
+        urgency_cache_hit = (
+            _urgency_cache["counts"] is not None
+            and _urgency_cache["key"] == urgency_filter_key
+            and (now - _urgency_cache["timestamp"]) < URGENCY_CACHE_TTL
+        )
+
         # Fetch articles + urgency counts in single DB connection
         db = get_db()
         articles, total, urgency_counts = await run_db(
@@ -86,31 +125,78 @@ async def list_articles_handler(req: func.HttpRequest) -> func.HttpResponse:
             search=search,
             tag=tag,
             classification=classification,
-            order_by=order_by
+            order_by=order_by,
+            skip_urgency_query=urgency_cache_hit,
+            cursor=cursor_data,
+            cursor_direction=cursor_direction
         )
+
+        # DB-05: Use cached urgency counts on cache hit; update cache on miss
+        if urgency_cache_hit:
+            urgency_counts = _urgency_cache["counts"]
+            logger.info(f"[list_articles] Urgency cache HIT (age={now - _urgency_cache['timestamp']:.0f}s)")
+        else:
+            _urgency_cache["counts"] = urgency_counts
+            _urgency_cache["timestamp"] = now
+            _urgency_cache["key"] = urgency_filter_key
 
         # Calcular total de paginas
         pages = ceil(total / limit) if total > 0 else 1
 
+        # Per PAG-01/D-02/D-03: Build cursor response fields for keyset pagination
+        next_cursor = None
+        prev_cursor = None
+
+        use_cursor_mode = order_by != 'score'
+        if use_cursor_mode and articles:
+            # nextCursor from last article -- only if this page is full (more pages exist)
+            if len(articles) == limit:
+                last_art = articles[-1]
+                if last_art.published_at and last_art.id:
+                    next_cursor = encode_cursor(last_art.published_at, last_art.id)
+
+            # prevCursor from first article -- only if not on first page
+            if cursor_data is not None or page > 1:
+                first_art = articles[0]
+                if first_art.published_at and first_art.id:
+                    prev_cursor = encode_cursor(first_art.published_at, first_art.id)
+
         # Compute facets for filter dropdowns (avoids separate API calls)
         # Skip facet computation when client signals it doesn't need updated facets
         # (e.g., pagination-only requests where filters haven't changed)
+        #
+        # PERF: When search is active, facet queries also run the expensive
+        # LIKE/FREETEXT filter — this doubles+ the total query cost.  Instead,
+        # return cached unfiltered facets (or skip) so search stays fast.
         facets = None
+        # DB-09: Keyed facet cache — find any cached entry for the current filters
+        fkey = _facet_cache_key(category, source, period, search, tag, classification, max_hours)
+
         if skip_facets:
             logger.info("[list_articles] Skipping facet computation (skip_facets=true)")
+        elif search:
+            # Return any cached facets when available; skip computation during search
+            any_cached = next(iter(_facet_cache.values()), None) if _facet_cache else None
+            if any_cached:
+                facets = {
+                    "categories": any_cached["categories"],
+                    "tags": any_cached["tags"]
+                }
+                logger.info("[list_articles] Search active — returning cached unfiltered facets")
+            else:
+                logger.info("[list_articles] Search active — no cached facets, skipping")
         else:
             try:
-                now = time.time()
-                cache_age = now - _facet_cache["timestamp"]
+                cached_entry = _facet_cache.get(fkey)
                 cache_hit = (
-                    cache_age < FACET_CACHE_TTL
-                    and _facet_cache["categories"] is not None
+                    cached_entry is not None
+                    and (now - cached_entry["timestamp"]) < FACET_CACHE_TTL
                 )
 
                 if cache_hit:
-                    cat_list = _facet_cache["categories"]
-                    tag_items = _facet_cache["tags"]
-                    logger.info(f"[list_articles] Facet cache HIT (age={cache_age:.0f}s)")
+                    cat_list = cached_entry["categories"]
+                    tag_items = cached_entry["tags"]
+                    logger.info(f"[list_articles] Facet cache HIT key={fkey} (age={now - cached_entry['timestamp']:.0f}s)")
                 else:
                     t_facet = time.time()
 
@@ -122,16 +208,8 @@ async def list_articles_handler(req: func.HttpRequest) -> func.HttpResponse:
                         cat_kwargs['source_id'] = source
                     if period:
                         cat_kwargs['period'] = period
-                    if search:
-                        cat_kwargs['search'] = search
                     if classification:
                         cat_kwargs['classification'] = classification
-
-                    # PERF: Always use get_categories_filtered (even with no filters)
-                    # instead of get_collection_stats which runs 2 extra unnecessary queries
-                    # just to extract category counts.
-                    cat_list = await run_db(db.get_categories_filtered, **cat_kwargs)
-                    cat_list.sort(key=lambda x: x['count'], reverse=True)
 
                     # Tag counts (contextual: exclude tag from own filters)
                     tag_kwargs = {'limit': 100}
@@ -141,26 +219,35 @@ async def list_articles_handler(req: func.HttpRequest) -> func.HttpResponse:
                         tag_kwargs['source_id'] = source
                     if period:
                         tag_kwargs['period'] = period
-                    if search:
-                        tag_kwargs['search'] = search
                     if classification:
                         tag_kwargs['classification'] = classification
 
                     has_tag_filters = any(v for k, v in tag_kwargs.items() if k != 'limit')
+
+                    # DB-07: Parallelize category + tag facet queries
+                    cat_coro = run_db(db.get_categories_filtered, **cat_kwargs)
                     if has_tag_filters:
-                        tag_list = await run_db(db.get_all_tags_filtered, **tag_kwargs)
+                        tag_coro = run_db(db.get_all_tags_filtered, **tag_kwargs)
                     else:
-                        tag_list = await run_db(db.get_all_tags_fast, limit=100)
+                        tag_coro = run_db(db.get_all_tags_fast, limit=100)
+
+                    cat_list, tag_list = await asyncio.gather(cat_coro, tag_coro)
+                    cat_list.sort(key=lambda x: x['count'], reverse=True)
 
                     tag_items = [{"id": i + 1, "tag": t['tag'], "theme": t['theme'], "count": t['count']} for i, t in enumerate(tag_list)]
 
                     facet_ms = (time.time() - t_facet) * 1000
-                    logger.info(f"[list_articles] Facet cache MISS — computed in {facet_ms:.0f}ms")
+                    logger.info(f"[list_articles] Facet cache MISS key={fkey} — computed in {facet_ms:.0f}ms")
 
-                    # Store in cache
-                    _facet_cache["categories"] = cat_list
-                    _facet_cache["tags"] = tag_items
-                    _facet_cache["timestamp"] = now
+                    # DB-09: Store in keyed cache; evict oldest if over limit
+                    _facet_cache[fkey] = {
+                        "categories": cat_list,
+                        "tags": tag_items,
+                        "timestamp": now
+                    }
+                    if len(_facet_cache) > MAX_FACET_CACHE_ENTRIES:
+                        oldest_key = min(_facet_cache, key=lambda k: _facet_cache[k]["timestamp"])
+                        del _facet_cache[oldest_key]
 
                 facets = {
                     "categories": cat_list,
@@ -177,7 +264,9 @@ async def list_articles_handler(req: func.HttpRequest) -> func.HttpResponse:
             "page": page,
             "pages": pages,
             "urgency_counts": urgency_counts,
-            "facets": facets
+            "facets": facets,
+            "nextCursor": next_cursor,
+            "prevCursor": prev_cursor,
         }
 
         resp = func.HttpResponse(
@@ -186,7 +275,7 @@ async def list_articles_handler(req: func.HttpRequest) -> func.HttpResponse:
             mimetype="application/json"
         )
         # Cache articles list for 60 seconds (data changes every 15 min via RSS collector)
-        resp.headers["Cache-Control"] = "public, max-age=60"
+        # Cache-Control set centrally in function_app.py via add_cache_headers()
         return resp
 
     except ValueError as e:
@@ -200,6 +289,15 @@ async def list_articles_handler(req: func.HttpRequest) -> func.HttpResponse:
         import traceback
         tb = traceback.format_exc()
         logger.error(f"Error listing articles: {e}\n{tb}")
+        # Detect query timeout to return a clearer message
+        err_str = str(e).lower()
+        is_timeout = 'timeout' in err_str or 'timed out' in err_str
+        if is_timeout:
+            return func.HttpResponse(
+                json.dumps({"error": "A busca demorou demais. Tente um termo mais específico ou remova filtros."}),
+                status_code=504,
+                mimetype="application/json"
+            )
         return func.HttpResponse(
             json.dumps({"error": "Internal server error", "debug": str(e), "type": type(e).__name__, "trace": tb[-800:]}),
             status_code=500,
@@ -239,7 +337,7 @@ async def get_article_handler(req: func.HttpRequest) -> func.HttpResponse:
             mimetype="application/json"
         )
         # Cache single article for 2 minutes (content is static after collection)
-        resp.headers["Cache-Control"] = "public, max-age=120"
+        # Cache-Control set centrally in function_app.py via add_cache_headers()
         return resp
 
     except Exception as e:
@@ -298,7 +396,7 @@ async def get_categories_handler(req: func.HttpRequest) -> func.HttpResponse:
             mimetype="application/json"
         )
         # Cache categories for 5 minutes (only change when new articles are collected)
-        resp.headers["Cache-Control"] = "public, max-age=300"
+        # Cache-Control set centrally in function_app.py via add_cache_headers()
         return resp
 
     except Exception as e:
@@ -357,7 +455,7 @@ async def get_trending_tags_handler(req: func.HttpRequest) -> func.HttpResponse:
             mimetype="application/json"
         )
         # Cache trending tags for 5 minutes (recalculated periodically)
-        resp.headers["Cache-Control"] = "public, max-age=300"
+        # Cache-Control set centrally in function_app.py via add_cache_headers()
         return resp
 
     except ValueError as e:
@@ -435,7 +533,7 @@ async def get_all_tags_handler(req: func.HttpRequest) -> func.HttpResponse:
             mimetype="application/json"
         )
         # Cache tags for 5 minutes (only change when new articles are collected)
-        resp.headers["Cache-Control"] = "public, max-age=300"
+        # Cache-Control set centrally in function_app.py via add_cache_headers()
         return resp
 
     except Exception as e:

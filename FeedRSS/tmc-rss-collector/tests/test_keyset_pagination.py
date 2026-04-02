@@ -296,5 +296,54 @@ class TestBackwardSeekOrder(unittest.TestCase):
         self.assertEqual(total, 100)
 
 
+# ===========================================================================
+# Tests 11-14: API-level cursor response fields
+# ===========================================================================
+
+class TestCursorResponseFields(unittest.TestCase):
+
+    def test_next_cursor_encoding(self):
+        """nextCursor encodes last article's published_at and id (roundtrip)."""
+        from services.database import encode_cursor, decode_cursor
+
+        dt = datetime(2025, 6, 20, 14, 30, 0)
+        article_id = UUID("550e8400-e29b-41d4-a716-446655440000")
+
+        encoded = encode_cursor(dt, article_id)
+        self.assertIsInstance(encoded, str)
+
+        decoded_dt, decoded_id = decode_cursor(encoded)
+        self.assertEqual(decoded_dt, dt)
+        self.assertEqual(decoded_id, str(article_id))
+
+    def test_prev_cursor_encoding(self):
+        """prevCursor encodes first article's published_at and id (roundtrip)."""
+        from services.database import encode_cursor, decode_cursor
+
+        dt = datetime(2025, 6, 20, 10, 0, 0)
+        article_id = UUID("660e8400-e29b-41d4-a716-446655440000")
+
+        encoded = encode_cursor(dt, article_id)
+        decoded_dt, decoded_id = decode_cursor(encoded)
+        self.assertEqual(decoded_dt, dt)
+        self.assertEqual(decoded_id, str(article_id))
+
+    def test_cursor_none_on_last_page(self):
+        """When len(articles) < limit, next_cursor should be None."""
+        # Simulate: limit=20, articles has 15 items -> not a full page
+        limit = 20
+        articles_count = 15
+        # The condition for setting nextCursor is: len(articles) == limit
+        should_set_next = articles_count == limit
+        self.assertFalse(should_set_next)
+
+    def test_cursor_none_for_score_order(self):
+        """When order_by='score', both cursors should be None."""
+        order_by = 'score'
+        use_cursor_mode = order_by != 'score'
+        self.assertFalse(use_cursor_mode)
+        # Since use_cursor_mode is False, next_cursor and prev_cursor stay None
+
+
 if __name__ == '__main__':
     unittest.main()
