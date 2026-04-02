@@ -66,6 +66,16 @@ def _get_exa_search_days():
 
 EXA_TIMEOUT = int(os.environ.get("EXA_TIMEOUT_SECONDS", "15"))
 
+# Temporal awareness (Phase 4)
+def _get_temporal_awareness_enabled():
+    return get_config().temporal_awareness_enabled
+
+def _get_temporal_breaking_hours():
+    return get_config().temporal_breaking_hours
+
+def _get_temporal_recent_days():
+    return get_config().temporal_recent_days
+
 # Confidence scoring weights (calibrated for journalism safety)
 # v7: Entities 20% → 15% to reduce false positive rate (30% FP from novel entities)
 WEIGHT_CLAIM_GROUNDING = 0.45
