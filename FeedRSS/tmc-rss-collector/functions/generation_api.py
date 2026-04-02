@@ -273,6 +273,7 @@ def evaluate_safety_gates(
     confidence_score = verification_data.get("confidence_score", 0.0)
     fabricated_claims = verification_data.get("fabricated_claims", 0)
     unverifiable_claims = verification_data.get("unverifiable_claims", 0)
+    recent_unverifiable_claims = verification_data.get("recent_unverifiable_claims", 0)
     total_claims = verification_data.get("total_claims", 0)
     expansion_ratio = verification_data.get("expansion_ratio", 0.0)
 
@@ -355,6 +356,13 @@ def evaluate_safety_gates(
             decision.block_reasons.append(
                 f"{unverifiable_claims}/{total_claims} afirmacoes inverificaveis"
             )
+
+    # Phase 4: Log temporal unverifiable for monitoring (not counted toward block)
+    if recent_unverifiable_claims > 0:
+        decision.review_reasons.append(
+            f"{recent_unverifiable_claims} afirmacao(oes) inverificavel(eis) por ser noticia recente"
+        )
+        decision.human_review_required = True
 
     # Recalculate expansion ratio with effective source
     if effective_source_len > 0:
