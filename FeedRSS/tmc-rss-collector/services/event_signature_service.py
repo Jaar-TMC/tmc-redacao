@@ -341,10 +341,13 @@ class EventSignatureService:
         import asyncio
 
         try:
-            loop = asyncio.get_running_loop()
-            import nest_asyncio
-            nest_asyncio.apply()
-            return asyncio.run(self.extract(title, content, article_id, reference_date))
+            asyncio.get_running_loop()
+            from concurrent.futures import ThreadPoolExecutor
+            with ThreadPoolExecutor(max_workers=1) as executor:
+                return executor.submit(
+                    asyncio.run,
+                    self.extract(title, content, article_id, reference_date)
+                ).result()
         except RuntimeError:
             return asyncio.run(self.extract(title, content, article_id, reference_date))
 

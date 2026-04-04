@@ -2571,11 +2571,11 @@ class LLMService:
 
         # Check if we're already in an event loop
         try:
-            loop = asyncio.get_running_loop()
-            # We're in an async context, need to handle differently
-            import nest_asyncio
-            nest_asyncio.apply()
-            return asyncio.run(self.generate_article(**kwargs))
+            asyncio.get_running_loop()
+            # Already in async context — run in thread with its own event loop
+            from concurrent.futures import ThreadPoolExecutor
+            with ThreadPoolExecutor(max_workers=1) as executor:
+                return executor.submit(asyncio.run, self.generate_article(**kwargs)).result()
         except RuntimeError:
             # No event loop running, safe to use asyncio.run
             return asyncio.run(self.generate_article(**kwargs))

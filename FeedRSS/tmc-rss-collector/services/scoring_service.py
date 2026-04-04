@@ -759,13 +759,14 @@ class ScoringService:
             ArticleScore with classification
         """
         try:
-            loop = asyncio.get_running_loop()
-            # We're in an async context, need to handle differently
-            import nest_asyncio
-            nest_asyncio.apply()
-            return asyncio.run(self.score_article(
-                article_id, title, content, use_heuristic_fallback, category=category
-            ))
+            asyncio.get_running_loop()
+            # Already in async context — run in thread with its own event loop
+            from concurrent.futures import ThreadPoolExecutor
+            with ThreadPoolExecutor(max_workers=1) as executor:
+                return executor.submit(
+                    asyncio.run,
+                    self.score_article(article_id, title, content, use_heuristic_fallback, category=category)
+                ).result()
         except RuntimeError:
             # No event loop running, safe to use asyncio.run
             return asyncio.run(self.score_article(

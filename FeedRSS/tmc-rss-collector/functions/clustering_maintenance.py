@@ -14,8 +14,6 @@ from datetime import datetime, timedelta
 from typing import Dict, List, Tuple, Any
 from uuid import UUID
 
-import numpy as np
-
 from services.database import get_db, DatabaseService
 from services.async_db import run_db
 from services.clustering_service import (

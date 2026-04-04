@@ -14,8 +14,6 @@ from typing import Optional, Tuple, Dict, Any, List
 from uuid import UUID
 from datetime import datetime
 
-import numpy as np
-
 from models.event_signature import (
     EventSignature, EventSignatureCreate, normalize_entity,
     entities_match, calculate_entity_similarity

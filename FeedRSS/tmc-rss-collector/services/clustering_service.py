@@ -16,8 +16,6 @@ from typing import List, Optional, Tuple, Dict, Any
 from datetime import datetime
 from uuid import UUID, uuid4
 
-import numpy as np
-
 from models.theme import Theme, ThemeCreate
 from services.config import get_config
 from services.async_db import run_db
@@ -66,20 +64,16 @@ def cosine_similarity(vec1: List[float], vec2: List[float]) -> float:
     if len(vec1) != len(vec2):
         raise ValueError(f"Vector dimensions do not match: {len(vec1)} vs {len(vec2)}")
 
-    # Convert to numpy arrays for efficient computation
-    a = np.array(vec1, dtype=np.float64)
-    b = np.array(vec2, dtype=np.float64)
-
-    # Calculate cosine similarity
-    dot_product = np.dot(a, b)
-    norm_a = np.linalg.norm(a)
-    norm_b = np.linalg.norm(b)
+    # Pure-Python computation (avoids numpy import-time penalty)
+    dot = sum(a * b for a, b in zip(vec1, vec2))
+    norm_a = math.sqrt(sum(a * a for a in vec1))
+    norm_b = math.sqrt(sum(b * b for b in vec2))
 
     # Handle zero vectors
     if norm_a == 0 or norm_b == 0:
         return 0.0
 
-    similarity = dot_product / (norm_a * norm_b)
+    similarity = dot / (norm_a * norm_b)
 
     # Clamp to [0, 1] range (can exceed due to floating point)
     return float(max(0.0, min(1.0, similarity)))
@@ -95,13 +89,12 @@ def normalize_vector(vec: List[float]) -> List[float]:
     Returns:
         Normalized vector with unit length
     """
-    a = np.array(vec, dtype=np.float64)
-    norm = np.linalg.norm(a)
+    norm = math.sqrt(sum(x * x for x in vec))
 
     if norm == 0:
         return vec
 
-    return (a / norm).tolist()
+    return [x / norm for x in vec]
 
 
 def generate_slug(name: str) -> str:
@@ -561,12 +554,12 @@ class ClusteringService:
             # First article, use embedding as centroid
             new_centroid = normalize_vector(new_embedding)
         else:
-            # Apply EMA
-            old_arr = np.array(current_centroid, dtype=np.float64)
-            new_arr = np.array(new_embedding, dtype=np.float64)
-
-            updated = self.ema_alpha * new_arr + (1 - self.ema_alpha) * old_arr
-            new_centroid = normalize_vector(updated.tolist())
+            # Apply EMA (pure Python)
+            updated = [
+                self.ema_alpha * n + (1 - self.ema_alpha) * o
+                for o, n in zip(current_centroid, new_embedding)
+            ]
+            new_centroid = normalize_vector(updated)
 
         # Persist to database using update_theme method
         if self.db:
@@ -1420,7 +1413,8 @@ Responda APENAS com o nome do tema (maximo 50 caracteres):"""
                 return None
 
             if use_sklearn:
-                # Use sklearn for efficiency
+                # Use sklearn for efficiency (lazy import — daily maintenance only)
+                import numpy as np
                 embeddings_arr = np.array(embeddings, dtype=np.float64)
                 labels_arr = np.array(theme_ids)
                 score = sklearn_silhouette(embeddings_arr, labels_arr, metric='cosine')
@@ -1493,6 +1487,9 @@ def calculate_silhouette_score_manual(
     Returns:
         Silhouette score between -1 and 1, or None if calculation not possible
     """
+    # Lazy import — this function only runs during daily 3AM maintenance
+    import numpy as np
+
     if len(embeddings) < 2:
         return None
 

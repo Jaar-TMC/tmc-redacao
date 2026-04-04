@@ -1049,13 +1049,13 @@ class TestHelperFunctions:
 
     def test_normalize_vector_creates_unit_vector(self):
         """Test that normalize_vector creates unit length vectors."""
-        import numpy as np
+        import math
 
         vec = [3.0, 4.0, 0.0]
         normalized = normalize_vector(vec)
 
         # Should have unit length
-        length = np.linalg.norm(normalized)
+        length = math.sqrt(sum(x * x for x in normalized))
         assert length == pytest.approx(1.0, abs=0.001)
 
 

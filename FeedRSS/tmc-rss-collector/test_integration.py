@@ -14,7 +14,7 @@ import pymssql
 import json
 from datetime import datetime
 from uuid import uuid4
-import numpy as np
+import math
 
 # IDs das 5 materias de teste
 ARTICLE_IDS = [
@@ -169,11 +169,9 @@ def save_score(article_id, score_result):
 
 def cosine_similarity(vec1, vec2):
     """Calcula similaridade cosseno entre dois vetores."""
-    a = np.array(vec1, dtype=np.float64)
-    b = np.array(vec2, dtype=np.float64)
-    dot = np.dot(a, b)
-    norm_a = np.linalg.norm(a)
-    norm_b = np.linalg.norm(b)
+    dot = sum(a * b for a, b in zip(vec1, vec2))
+    norm_a = math.sqrt(sum(a * a for a in vec1))
+    norm_b = math.sqrt(sum(b * b for b in vec2))
     if norm_a == 0 or norm_b == 0:
         return 0.0
     return float(dot / (norm_a * norm_b))
@@ -213,9 +211,12 @@ def cluster_articles(articles):
                 'similarity': best_similarity
             })
             # Atualizar centroid com EMA (alpha = 0.15)
-            old_c = np.array(centroids[best_cluster_idx])
-            new_c = 0.15 * np.array(embedding) + 0.85 * old_c
-            centroids[best_cluster_idx] = new_c.tolist()
+            old_c = centroids[best_cluster_idx]
+            new_c = [
+                0.15 * n + 0.85 * o
+                for o, n in zip(old_c, embedding)
+            ]
+            centroids[best_cluster_idx] = new_c
         else:
             # Criar novo cluster
             clusters.append([{

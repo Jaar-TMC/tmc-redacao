@@ -460,18 +460,17 @@ class TestFacetCacheKeys(unittest.TestCase):
             "_facet_cache must not contain 'filter_key'",
         )
 
-    def test_facet_cache_has_required_keys(self):
-        """_facet_cache must have exactly: 'categories', 'tags', 'timestamp'."""
+    def test_facet_cache_starts_empty(self):
+        """_facet_cache must start as empty dict (DB-09: keyed cache, populated per filter combo)."""
         import importlib
         import functions.articles_api as api_mod
         importlib.reload(api_mod)
 
-        expected_keys = {"categories", "tags", "timestamp"}
-        actual_keys = set(api_mod._facet_cache.keys())
+        self.assertIsInstance(api_mod._facet_cache, dict)
         self.assertEqual(
-            actual_keys,
-            expected_keys,
-            f"_facet_cache keys mismatch. Got: {actual_keys}",
+            len(api_mod._facet_cache),
+            0,
+            f"_facet_cache should start empty. Got: {set(api_mod._facet_cache.keys())}",
         )
 
 

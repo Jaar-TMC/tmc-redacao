@@ -7,7 +7,7 @@ EMA Alpha: 0.25 (era 0.1)
 import os
 import pymssql
 import json
-import numpy as np
+import math
 from datetime import datetime
 from uuid import uuid4
 import re
@@ -17,21 +17,18 @@ SIMILARITY_THRESHOLD = 0.58
 EMA_ALPHA = 0.25
 
 def cosine_similarity(vec1, vec2):
-    a = np.array(vec1, dtype=np.float64)
-    b = np.array(vec2, dtype=np.float64)
-    dot = np.dot(a, b)
-    norm_a = np.linalg.norm(a)
-    norm_b = np.linalg.norm(b)
+    dot = sum(a * b for a, b in zip(vec1, vec2))
+    norm_a = math.sqrt(sum(a * a for a in vec1))
+    norm_b = math.sqrt(sum(b * b for b in vec2))
     if norm_a == 0 or norm_b == 0:
         return 0.0
     return float(max(0.0, min(1.0, dot / (norm_a * norm_b))))
 
 def normalize_vector(vec):
-    a = np.array(vec, dtype=np.float64)
-    norm = np.linalg.norm(a)
+    norm = math.sqrt(sum(x * x for x in vec))
     if norm == 0:
         return vec
-    return (a / norm).tolist()
+    return [x / norm for x in vec]
 
 def generate_slug(name):
     slug = name.lower()
@@ -133,9 +130,12 @@ def main():
                 theme_data = themes_cache[best_theme_id]
 
                 # Atualizar centroid com EMA
-                old_centroid = np.array(theme_data['centroid'])
-                new_centroid = EMA_ALPHA * np.array(embedding) + (1 - EMA_ALPHA) * old_centroid
-                theme_data['centroid'] = normalize_vector(new_centroid.tolist())
+                old_centroid = theme_data['centroid']
+                new_centroid = [
+                    EMA_ALPHA * n + (1 - EMA_ALPHA) * o
+                    for o, n in zip(old_centroid, embedding)
+                ]
+                theme_data['centroid'] = normalize_vector(new_centroid)
                 theme_data['article_count'] += 1
 
                 # Inserir relacao

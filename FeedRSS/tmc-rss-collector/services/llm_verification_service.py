@@ -328,10 +328,13 @@ class LLMVerificationService:
         import asyncio
 
         try:
-            loop = asyncio.get_running_loop()
-            import nest_asyncio
-            nest_asyncio.apply()
-            return asyncio.run(self.verify_same_event(article1, article2))
+            asyncio.get_running_loop()
+            from concurrent.futures import ThreadPoolExecutor
+            with ThreadPoolExecutor(max_workers=1) as executor:
+                return executor.submit(
+                    asyncio.run,
+                    self.verify_same_event(article1, article2)
+                ).result()
         except RuntimeError:
             return asyncio.run(self.verify_same_event(article1, article2))
 
