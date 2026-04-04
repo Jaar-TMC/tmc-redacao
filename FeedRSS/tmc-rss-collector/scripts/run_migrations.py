@@ -41,10 +41,15 @@ def main():
         "006_token_blacklist.sql",
         "007_user_articles_add_user_id.sql",
         "008_auth_audit_log.sql",
+        "012_performance_indexes.sql",
+        "013_denormalize_scores.sql",
         "017_cost_tracking_extensions.sql",
         "018_api_usage_and_daily_summary.sql",
         "019_category_index.sql",
         "020_tag_aggregations.sql",
+        "021_fulltext_search.sql",
+        "022_cost_performance_indexes.sql",
+        "023_performance_indexes.sql",
     ]
 
     for mfile in migration_files:
@@ -53,9 +58,10 @@ def main():
         try:
             with open(path, "r", encoding="utf-8") as f:
                 sql = f.read()
-            # Split on empty lines between statements to handle batch dependencies
-            # (e.g., ALTER TABLE + CREATE INDEX on new column in same file)
+            # Split on GO batch separators (SSMS-style) or empty lines.
+            # pymssql does not understand GO natively — must split first.
             import re
+            sql = re.sub(r'^\s*GO\s*$', '\n\n', sql, flags=re.MULTILINE | re.IGNORECASE)
             statements = [s.strip() for s in re.split(r'\n\s*\n', sql) if s.strip() and not s.strip().startswith('--')]
             for stmt in statements:
                 if stmt.strip().startswith('--'):

@@ -1,7 +1,8 @@
-import { memo } from 'react';
+import { memo, useState, useEffect } from 'react';
 import { X, Search, Hash, Tag, Building2, XCircle, Award, Clock } from 'lucide-react';
 import { useFilters } from '../../context';
 import { addAccents, formatTagDisplay } from '../../utils/accentMap';
+import { getSourcesCached } from '../../services/api';
 import PropTypes from 'prop-types';
 
 /**
@@ -11,6 +12,16 @@ import PropTypes from 'prop-types';
  */
 const ActiveFiltersBar = ({ className = '' }) => {
   const { filters, updateFilter, resetFilters } = useFilters();
+  const [sources, setSources] = useState([]);
+
+  // Load sources once to resolve source IDs to display names
+  useEffect(() => {
+    let cancelled = false;
+    getSourcesCached().then(res => {
+      if (!cancelled && res?.items) setSources(res.items);
+    }).catch(() => {});
+    return () => { cancelled = true; };
+  }, []);
 
   // Build list of active filters
   const activeFilters = [];
@@ -59,7 +70,7 @@ const ActiveFiltersBar = ({ className = '' }) => {
   if (filters.source) {
     activeFilters.push({
       key: 'source',
-      label: addAccents(filters.source),
+      label: addAccents(sources.find(s => s.id === filters.source)?.name || filters.source),
       icon: Building2,
       color: 'bg-emerald-50 text-emerald-700 border-emerald-200',
       hoverColor: 'hover:bg-emerald-100',

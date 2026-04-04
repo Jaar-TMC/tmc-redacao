@@ -1,102 +1,49 @@
-import { useState, useEffect } from 'react';
+import { useMemo, useState, useEffect } from 'react';
 import { Filter, Search, Hash, Tag, Building2, ArrowRight, XCircle } from 'lucide-react';
 import { useFilters } from '../../context';
-import { getArticles } from '../../services/api';
 import { formatTagDisplay } from '../../utils/accentMap';
+import { getSourcesCached } from '../../services/api';
 import PropTypes from 'prop-types';
 
 /**
  * SmartEmptyState - Shown when filters return 0 results.
- * Shows which filters are active and suggests removing each one,
- * with live counts of how many results each removal would yield.
+ * Shows which filters are active and suggests removing each one.
+ * Suggestions are derived client-side (no API calls) to avoid N+1 requests.
  */
 const SmartEmptyState = ({ totalWithoutFilters = 0 }) => {
   const { filters, updateFilter, resetFilters } = useFilters();
-  const [suggestions, setSuggestions] = useState([]);
-  const [isLoadingSuggestions, setIsLoadingSuggestions] = useState(false);
+  const [sources, setSources] = useState([]);
 
-  // Build active filters list
-  const activeFilters = [];
-  if (filters.searchQuery) {
-    activeFilters.push({ key: 'searchQuery', label: `"${filters.searchQuery}"`, icon: Search });
-  }
-  if (filters.tag) {
-    activeFilters.push({ key: 'tag', label: formatTagDisplay(filters.tag), icon: Hash });
-  }
-  if (filters.category) {
-    activeFilters.push({ key: 'category', label: filters.category, icon: Tag });
-  }
-  if (filters.source) {
-    activeFilters.push({ key: 'source', label: filters.source, icon: Building2 });
-  }
-
-  // Fetch counts for each filter removal suggestion
+  // Load sources once to resolve source IDs to display names
   useEffect(() => {
-    if (activeFilters.length === 0) return;
+    let cancelled = false;
+    getSourcesCached().then(res => {
+      if (!cancelled && res?.items) setSources(res.items);
+    }).catch(() => {});
+    return () => { cancelled = true; };
+  }, []);
 
-    const controller = new AbortController();
-
-    const debounceTimer = setTimeout(() => {
-      const fetchSuggestionCounts = async () => {
-        setIsLoadingSuggestions(true);
-        const results = [];
-
-        // For each active filter, check what happens if we remove it
-        const promises = activeFilters.map(async (filter) => {
-          try {
-            const params = { limit: 1 };
-            // Add all filters EXCEPT the one being removed
-            if (filter.key !== 'searchQuery' && filters.searchQuery) {
-              params.search = filters.searchQuery;
-            }
-            if (filter.key !== 'tag' && filters.tag) {
-              params.tag = filters.tag;
-            }
-            if (filter.key !== 'category' && filters.category) {
-              params.category = filters.category;
-            }
-            if (filter.key !== 'source' && filters.source) {
-              params.source = filters.source;
-            }
-            if (filters.urgency) {
-              params.max_hours = filters.urgency;
-            }
-
-            const response = await getArticles(params, { signal: controller.signal });
-            return {
-              ...filter,
-              count: response?.total || 0,
-            };
-          } catch (err) {
-            if (err.name === 'AbortError') return null;
-            return { ...filter, count: null };
-          }
-        });
-
-        const settled = await Promise.allSettled(promises);
-        // If aborted, don't update state
-        if (controller.signal.aborted) return;
-
-        for (const result of settled) {
-          if (result.status === 'fulfilled' && result.value) {
-            results.push(result.value);
-          }
-        }
-
-        // Sort by count descending (most results first)
-        results.sort((a, b) => (b.count || 0) - (a.count || 0));
-        setSuggestions(results);
-        setIsLoadingSuggestions(false);
-      };
-
-      fetchSuggestionCounts();
-    }, 500);
-
-    return () => {
-      clearTimeout(debounceTimer);
-      controller.abort();
-    };
-  }, [filters.searchQuery, filters.tag, filters.category, filters.source, filters.urgency]);
+  // Derive suggestions statically from active filters — no API calls needed.
+  // Previously this fired N separate getArticles calls (one per active filter),
+  // causing an API explosion with 4+ filters. Now we simply list the active
+  // filters as removal suggestions without counts.
+  const suggestions = useMemo(() => {
+    const active = [];
+    if (filters.searchQuery) {
+      active.push({ key: 'searchQuery', label: `"${filters.searchQuery}"`, icon: Search });
+    }
+    if (filters.tag) {
+      active.push({ key: 'tag', label: formatTagDisplay(filters.tag), icon: Hash });
+    }
+    if (filters.category) {
+      active.push({ key: 'category', label: filters.category, icon: Tag });
+    }
+    if (filters.source) {
+      const sourceName = sources.find(s => s.id === filters.source)?.name || filters.source;
+      active.push({ key: 'source', label: sourceName, icon: Building2 });
+    }
+    return active;
+  }, [filters.searchQuery, filters.tag, filters.category, filters.source, sources]);
 
   const handleRemoveFilter = (filterKey) => {
     if (filterKey === 'searchQuery') {
@@ -110,7 +57,7 @@ const SmartEmptyState = ({ totalWithoutFilters = 0 }) => {
     resetFilters();
   };
 
-  const hasActiveFilters = activeFilters.length > 0;
+  const hasActiveFilters = suggestions.length > 0;
 
   return (
     <div
@@ -132,52 +79,28 @@ const SmartEmptyState = ({ totalWithoutFilters = 0 }) => {
             A combinação de filtros ativos não retornou resultados. Tente remover um dos filtros abaixo:
           </p>
 
-          {/* Suggestions */}
+          {/* Suggestions — derived client-side, no loading state needed */}
           <div className="w-full max-w-sm space-y-2 mb-6">
-            {isLoadingSuggestions ? (
-              // Loading skeleton
-              [...Array(activeFilters.length)].map((_, i) => (
-                <div key={i} className="flex items-center justify-between px-4 py-2.5 bg-off-white rounded-lg animate-pulse">
-                  <div className="h-4 w-32 bg-light-gray rounded" />
-                  <div className="h-4 w-20 bg-light-gray rounded" />
-                </div>
-              ))
-            ) : (
-              suggestions.map((suggestion) => {
-                const Icon = suggestion.icon;
-                const hasResults = suggestion.count != null && suggestion.count > 0;
-                return (
-                  <button
-                    key={suggestion.key}
-                    type="button"
-                    onClick={() => handleRemoveFilter(suggestion.key)}
-                    className={`w-full flex items-center justify-between px-4 py-2.5 rounded-lg border transition-all text-left group ${
-                      hasResults
-                        ? 'bg-white border-light-gray hover:border-tmc-orange hover:bg-orange-50'
-                        : 'bg-off-white border-transparent text-medium-gray'
-                    }`}
-                    aria-label={`Remover filtro ${suggestion.label}${hasResults ? `, ${suggestion.count} matérias` : ''}`}
-                  >
-                    <span className="flex items-center gap-2 text-sm">
-                      <Icon size={14} className={hasResults ? 'text-tmc-orange' : 'text-medium-gray'} />
-                      <span>
-                        Remover <span className="font-medium">{suggestion.label}</span>
-                      </span>
+            {suggestions.map((suggestion) => {
+              const Icon = suggestion.icon;
+              return (
+                <button
+                  key={suggestion.key}
+                  type="button"
+                  onClick={() => handleRemoveFilter(suggestion.key)}
+                  className="w-full flex items-center justify-between px-4 py-2.5 rounded-lg border transition-all text-left group bg-white border-light-gray hover:border-tmc-orange hover:bg-orange-50"
+                  aria-label={`Remover filtro ${suggestion.label}`}
+                >
+                  <span className="flex items-center gap-2 text-sm">
+                    <Icon size={14} className="text-tmc-orange" />
+                    <span>
+                      Remover <span className="font-medium">{suggestion.label}</span>
                     </span>
-                    <span className="flex items-center gap-1.5 text-xs">
-                      {suggestion.count != null && (
-                        <span className={`font-medium ${hasResults ? 'text-tmc-orange' : 'text-medium-gray'}`}>
-                          {suggestion.count} mat.
-                        </span>
-                      )}
-                      {hasResults && (
-                        <ArrowRight size={12} className="text-tmc-orange opacity-0 group-hover:opacity-100 transition-opacity" />
-                      )}
-                    </span>
-                  </button>
-                );
-              })
-            )}
+                  </span>
+                  <ArrowRight size={12} className="text-tmc-orange opacity-0 group-hover:opacity-100 transition-opacity" />
+                </button>
+              );
+            })}
           </div>
 
           {/* Clear all */}

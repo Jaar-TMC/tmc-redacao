@@ -1,5 +1,8 @@
 import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { useEffect, lazy, Suspense } from 'react';
+import { QueryClientProvider } from '@tanstack/react-query';
+import { ReactQueryDevtools } from '@tanstack/react-query-devtools';
+import { queryClient } from './services/queryClient';
 import Header from './components/layout/Header';
 import ErrorBoundary from './components/ui/ErrorBoundary';
 import Spinner from './components/ui/Spinner';
@@ -226,13 +229,16 @@ function AppContent() {
 
 function App() {
   return (
-    <AuthProvider>
-      <ErrorBoundary>
-        <BrowserRouter>
-          <AppContent />
-        </BrowserRouter>
-      </ErrorBoundary>
-    </AuthProvider>
+    <QueryClientProvider client={queryClient}>
+      <AuthProvider>
+        <ErrorBoundary>
+          <BrowserRouter>
+            <AppContent />
+          </BrowserRouter>
+        </ErrorBoundary>
+      </AuthProvider>
+      {import.meta.env.DEV && <ReactQueryDevtools initialIsOpen={false} />}
+    </QueryClientProvider>
   );
 }
 

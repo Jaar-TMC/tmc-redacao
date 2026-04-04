@@ -92,7 +92,8 @@ function friendlyErrorMessage(status, serverMessage) {
     503: 'O servidor está em manutenção. Tente novamente em alguns instantes.',
     504: 'O servidor demorou para responder. Tente novamente.',
   };
-  return messages[status] || serverMessage || 'Erro inesperado. Tente novamente.';
+  // Prefer server-provided message when available (e.g., search timeout hints)
+  return serverMessage || messages[status] || 'Erro inesperado. Tente novamente.';
 }
 
 /**
@@ -276,10 +277,12 @@ export async function getArticle(articleId) {
 
 /**
  * Get all RSS sources
+ * @param {Object} [options] - Fetch options
+ * @param {AbortSignal} [options.signal] - AbortController signal for cancellation
  * @returns {Promise<{items: Array, total: number}>}
  */
-export async function getSources() {
-  return fetchApi('/sources');
+export async function getSources(options = {}) {
+  return fetchApi('/sources', { signal: options.signal });
 }
 
 /**
@@ -670,7 +673,7 @@ export async function transcribeVideo(params, options = {}) {
  * @param {string} [params.dateRange] - Filter by date ('24h', '7d', '30d', '3m', 'year')
  * @returns {Promise<{items: Array, total: number, page: number, pages: number}>}
  */
-export async function getUserArticles(params = {}) {
+export async function getUserArticles(params = {}, options = {}) {
   const queryParams = new URLSearchParams();
 
   if (params.page) queryParams.append('page', params.page.toString());
@@ -683,7 +686,7 @@ export async function getUserArticles(params = {}) {
   const queryString = queryParams.toString();
   const endpoint = `/user-articles${queryString ? `?${queryString}` : ''}`;
 
-  return fetchApi(endpoint);
+  return fetchApi(endpoint, { signal: options.signal });
 }
 
 /**

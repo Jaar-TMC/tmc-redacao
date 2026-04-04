@@ -95,6 +95,7 @@ def with_cors(handler):
                     "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
                     "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Requested-With",
                     "Access-Control-Allow-Credentials": "true",
+                    "Access-Control-Max-Age": "86400",
                 }
             )
 
@@ -135,7 +136,7 @@ def check_rate_limit(endpoint_name: str):
 # ========================================
 
 @app.timer_trigger(
-    schedule="0 */15 * * * *",  # A cada 15 minutos
+    schedule="2 */15 * * * *",  # A cada 15 minutos (2s offset to stagger)
     arg_name="timer",
     run_on_startup=False
 )
@@ -177,7 +178,7 @@ async def embedding_generator(timer: func.TimerRequest) -> None:
 # ========================================
 
 @app.timer_trigger(
-    schedule="0 */10 * * * *",  # A cada 10 minutos
+    schedule="7 */10 * * * *",  # A cada 10 minutos (7s offset to stagger)
     arg_name="timer",
     run_on_startup=False
 )
@@ -197,7 +198,7 @@ async def scoring_calculator(timer: func.TimerRequest) -> None:
 # ========================================
 
 @app.timer_trigger(
-    schedule="0 */30 * * * *",  # A cada 30 minutos
+    schedule="4 */30 * * * *",  # A cada 30 minutos (4s offset to stagger)
     arg_name="timer",
     run_on_startup=False
 )
@@ -370,7 +371,10 @@ async def list_articles(req: func.HttpRequest) -> func.HttpResponse:
     Response includes urgency_counts: {now, recent, today, all}
     """
     from functions.articles_api import list_articles_handler
-    return await list_articles_handler(req)
+    response = await list_articles_handler(req)
+    if response.status_code == 200:
+        add_cache_headers(response, max_age=60, public=False)
+    return response
 
 
 @app.route(route="articles/{id}", methods=["GET", "OPTIONS"])
@@ -379,7 +383,10 @@ async def list_articles(req: func.HttpRequest) -> func.HttpResponse:
 async def get_article(req: func.HttpRequest) -> func.HttpResponse:
     """GET /api/articles/{id} - Retorna um artigo específico."""
     from functions.articles_api import get_article_handler
-    return await get_article_handler(req)
+    response = await get_article_handler(req)
+    if response.status_code == 200:
+        add_cache_headers(response, max_age=3600, public=True)
+    return response
 
 
 @app.route(route="categories", methods=["GET", "OPTIONS"])
@@ -388,7 +395,10 @@ async def get_article(req: func.HttpRequest) -> func.HttpResponse:
 async def get_categories(req: func.HttpRequest) -> func.HttpResponse:
     """GET /api/categories - Lista categorias com contagem."""
     from functions.articles_api import get_categories_handler
-    return await get_categories_handler(req)
+    response = await get_categories_handler(req)
+    if response.status_code == 200:
+        add_cache_headers(response, max_age=300, public=False)
+    return response
 
 
 @app.route(route="trending-tags", methods=["GET", "OPTIONS"])
@@ -409,7 +419,10 @@ async def get_trending_tags(req: func.HttpRequest) -> func.HttpResponse:
         }
     """
     from functions.articles_api import get_trending_tags_handler
-    return await get_trending_tags_handler(req)
+    response = await get_trending_tags_handler(req)
+    if response.status_code == 200:
+        add_cache_headers(response, max_age=300, public=False)
+    return response
 
 
 @app.route(route="tags", methods=["GET", "OPTIONS"])
@@ -429,7 +442,10 @@ async def get_all_tags(req: func.HttpRequest) -> func.HttpResponse:
         }
     """
     from functions.articles_api import get_all_tags_handler
-    return await get_all_tags_handler(req)
+    response = await get_all_tags_handler(req)
+    if response.status_code == 200:
+        add_cache_headers(response, max_age=300, public=False)
+    return response
 
 
 # ========================================

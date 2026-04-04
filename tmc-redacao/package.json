@@ -13,6 +13,8 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@tanstack/react-query": "^5.96.1",
+    "@tanstack/react-query-devtools": "^5.96.1",
     "@tiptap/extension-image": "^3.15.3",
     "@tiptap/extension-link": "^3.15.3",
     "@tiptap/extension-placeholder": "^3.15.3",

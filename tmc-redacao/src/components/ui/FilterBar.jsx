@@ -158,6 +158,13 @@ const FilterBar = ({ urgencyCounts, facets }) => {
     sources.filter(s => s.active),
   [sources]);
 
+  // Resolve source ID to display name for the filter button label
+  const selectedSourceName = useMemo(() => {
+    if (!filters.source) return null;
+    const match = sources.find(s => s.id === filters.source);
+    return match ? match.name : null;
+  }, [filters.source, sources]);
+
   const filteredTags = useMemo(() => {
     const term = normalizeForSearch(tagSearch);
     return tags.filter(t =>
@@ -350,7 +357,7 @@ const FilterBar = ({ urgencyCounts, facets }) => {
               onClick={() => handleFilterClick('source')}
               aria-expanded={openDropdown === 'source'}
               aria-haspopup="listbox"
-              aria-label={`Filtrar por origem: ${filters.source || 'Todas as origens'}`}
+              aria-label={`Filtrar por origem: ${selectedSourceName || 'Todas as origens'}`}
               className={`flex items-center gap-2 px-4 py-2.5 rounded-lg font-medium transition-colors ${
                 filters.source
                   ? 'bg-tmc-orange text-white'
@@ -358,7 +365,7 @@ const FilterBar = ({ urgencyCounts, facets }) => {
               }`}
             >
               <Building2 style={{ width: '18px', height: '18px' }} aria-hidden="true" />
-              <span className="hidden xl:inline">{addAccents(filters.source) || 'Origem'}</span>
+              <span className="hidden xl:inline">{addAccents(selectedSourceName) || 'Origem'}</span>
               <ChevronDown style={{ width: '14px', height: '14px' }} aria-hidden="true" />
             </button>
 
@@ -383,10 +390,10 @@ const FilterBar = ({ urgencyCounts, facets }) => {
                       <button
                         type="button"
                         key={source.id}
-                        onClick={() => handleSelectFilter('source', source.name)}
+                        onClick={() => handleSelectFilter('source', source.id)}
                         className="w-full px-4 py-2 text-left text-sm hover:bg-off-white flex items-center gap-2"
                         role="option"
-                        aria-selected={filters.source === source.name}
+                        aria-selected={filters.source === source.id}
                       >
                         <img src={source.favicon} alt="" className="w-4 h-4 rounded" aria-hidden="true" />
                         <span>{addAccents(source.name)}</span>

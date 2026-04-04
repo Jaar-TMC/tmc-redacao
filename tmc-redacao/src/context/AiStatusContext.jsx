@@ -24,13 +24,26 @@ export function AiStatusProvider({ children }) {
   const fetchStatus = useCallback(async () => {
     try {
       const data = await getAiStatus();
-      setStatus({
+      const next = {
         aiPaused: data.paused ?? false,
         pausedBy: data.paused_by ?? null,
         pausedAt: data.paused_at ?? null,
         estimatedSavings: data.estimated_savings_usd ?? 0,
         hoursPaused: data.hours_paused ?? 0,
         avgHourlyCost: data.avg_hourly_cost_usd ?? 0,
+      };
+      setStatus(prev => {
+        if (
+          prev.aiPaused === next.aiPaused &&
+          prev.pausedBy === next.pausedBy &&
+          prev.pausedAt === next.pausedAt &&
+          prev.estimatedSavings === next.estimatedSavings &&
+          prev.hoursPaused === next.hoursPaused &&
+          prev.avgHourlyCost === next.avgHourlyCost
+        ) {
+          return prev; // same reference — skip re-render
+        }
+        return next;
       });
     } catch {
       // Silently ignore — status polling is best-effort

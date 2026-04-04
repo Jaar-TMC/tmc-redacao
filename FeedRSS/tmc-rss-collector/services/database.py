@@ -173,8 +173,17 @@ class DatabaseService:
             raise ValueError(
                 "Database not configured. Set SQL_SERVER and SQL_DATABASE environment variables."
             )
-        pool_size = int(os.environ.get('SQL_POOL_SIZE', '15'))
+        # INFRA-04: Default pool size lowered to 5 (suitable for Consumption/Flex plan)
+        pool_size = int(os.environ.get('SQL_POOL_SIZE', '5'))
         self._pool = ConnectionPool(self._create_raw_connection, max_size=pool_size)
+
+        # DB-09: In-process facet cache keyed by filter combination hash.
+        # Key: hash str -> {"categories": [...], "tags": [...], "ts": float}
+        # TTL: 60 seconds, max 20 entries (LRU eviction on overflow).
+        self._facet_cache: Dict[str, dict] = {}
+        self._facet_cache_ttl = 60  # seconds
+        self._facet_cache_max = 20
+        self._facet_cache_lock = threading.Lock()
 
         # Domain repositories (facade delegates to these)
         from services.repos import (
@@ -1556,6 +1565,94 @@ class DatabaseService:
                     "count": row[1]
                 })
             return result
+
+    # ------------------------------------------------------------------
+    # DB-09: Facet cache helpers (in-process, keyed by filter hash)
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _facet_cache_key(category: Optional[str], source_id: Optional[str],
+                         period: Optional[str], search: Optional[str],
+                         tag: Optional[str], classification: Optional[str]) -> str:
+        """Build a short hash key from active filter combination."""
+        import hashlib
+        raw = f"{category}|{source_id}|{period}|{search}|{tag}|{classification}"
+        return hashlib.md5(raw.encode()).hexdigest()[:12]
+
+    def _facet_cache_get(self, key: str) -> Optional[dict]:
+        """Return cached facet entry if within TTL, else None."""
+        with self._facet_cache_lock:
+            entry = self._facet_cache.get(key)
+            if entry and (time.monotonic() - entry["ts"]) < self._facet_cache_ttl:
+                return entry
+            # Expired — remove stale entry
+            if entry:
+                del self._facet_cache[key]
+        return None
+
+    def _facet_cache_put(self, key: str, categories: List[dict], tags: List[dict]) -> None:
+        """Store facet result; evict oldest entry when over capacity."""
+        with self._facet_cache_lock:
+            self._facet_cache[key] = {
+                "categories": categories,
+                "tags": tags,
+                "ts": time.monotonic(),
+            }
+            if len(self._facet_cache) > self._facet_cache_max:
+                oldest_key = min(self._facet_cache,
+                                 key=lambda k: self._facet_cache[k]["ts"])
+                del self._facet_cache[oldest_key]
+
+    # ------------------------------------------------------------------
+    # DB-07: Parallel facet queries (categories + tags in parallel)
+    # ------------------------------------------------------------------
+
+    def get_facets(self,
+                   category: Optional[str] = None,
+                   source_id: Optional[str] = None,
+                   period: Optional[str] = None,
+                   search: Optional[str] = None,
+                   tag: Optional[str] = None,
+                   classification: Optional[str] = None,
+                   tag_limit: int = 100) -> dict:
+        """Return category and tag facet counts, using cache when available.
+
+        DB-07: Runs category and tag queries in parallel threads (pymssql is
+        blocking, so concurrent.futures.ThreadPoolExecutor is used).
+        DB-09: Results are cached keyed by filter combination hash (60s TTL).
+
+        Returns:
+            {"categories": [...], "tags": [...]}
+        """
+        cache_key = self._facet_cache_key(category, source_id, period,
+                                           search, tag, classification)
+        cached = self._facet_cache_get(cache_key)
+        if cached:
+            logger.debug(f"[get_facets] DB-09 cache HIT key={cache_key}")
+            return {"categories": cached["categories"], "tags": cached["tags"]}
+
+        from concurrent.futures import ThreadPoolExecutor
+
+        # Category counts: contextual — exclude category from own filters
+        cat_kwargs = dict(search=search, tag=tag, source_id=source_id,
+                          period=period, classification=classification)
+        # Tag counts: contextual — exclude tag from own filters
+        tag_kwargs = dict(search=search, category=category, source_id=source_id,
+                          period=period, classification=classification, limit=tag_limit)
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            cat_future = pool.submit(self.get_categories_filtered, **cat_kwargs)
+            tag_future = pool.submit(self.get_all_tags_filtered, **tag_kwargs)
+
+            categories = cat_future.result()
+            tags = tag_future.result()
+
+        categories.sort(key=lambda x: x["count"], reverse=True)
+
+        self._facet_cache_put(cache_key, categories, tags)
+        logger.debug(f"[get_facets] DB-09 cache MISS key={cache_key} — stored")
+
+        return {"categories": categories, "tags": tags}
 
     def get_categories_filtered(self,
                                search: Optional[str] = None,

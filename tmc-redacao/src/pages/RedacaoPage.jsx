@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useRef, useMemo } from 'react';
+import { useState, useCallback, useEffect, useMemo } from 'react';
 import { TrendingUp, Sparkles, FileText, RefreshCw } from 'lucide-react';
 import TrendsSidebar from '../components/layout/TrendsSidebar';
 import ActionPanel from '../components/layout/ActionPanel';
@@ -9,10 +9,9 @@ import EmptyState from '../components/ui/EmptyState';
 import ActiveFiltersBar from '../components/ui/ActiveFiltersBar';
 import SmartEmptyState from '../components/ui/SmartEmptyState';
 import Pagination from '../components/ui/Pagination';
-import { getArticles } from '../services/api';
 import { transformArticles } from '../utils/transformers';
 import { useArticles, useFilters, useUI } from '../context';
-import { useArticlesCache } from '../context/ArticlesCacheContext';
+import { useArticlesQuery } from '../hooks/useArticles';
 import { useOnboarding, TOUR_IDS } from '../components/onboarding';
 
 // Stable function outside component - no re-creation on render
@@ -31,19 +30,18 @@ const ITEMS_PER_PAGE = 20;
 // Stable noop function - avoids creating new arrow function on each render
 const noop = () => {};
 
-// Build API params from filters and page - shared between fetch and retry
-const buildArticleParams = (filters, page) => ({
-  limit: ITEMS_PER_PAGE,
-  page,
-  ...(page > 1 && { skip_facets: true }),
-  ...(filters.searchQuery && { search: filters.searchQuery }),
-  ...(filters.tag && { tag: filters.tag }),
-  ...(filters.category && { category: filters.category }),
-  ...(filters.source && { source: filters.source }),
-  ...(filters.urgency && { max_hours: filters.urgency }),
-  ...(filters.scoreClassification && { classification: filters.scoreClassification }),
-  ...(filters.sortOrder && filters.sortOrder !== 'newest' && { order_by: filters.sortOrder }),
-});
+// Map FiltersContext values to API query param names
+const buildApiFilters = (filters) => {
+  const mapped = {};
+  if (filters.searchQuery) mapped.search = filters.searchQuery;
+  if (filters.tag) mapped.tag = filters.tag;
+  if (filters.category) mapped.category = filters.category;
+  if (filters.source) mapped.source = filters.source;
+  if (filters.urgency) mapped.max_hours = filters.urgency;
+  if (filters.scoreClassification) mapped.classification = filters.scoreClassification;
+  if (filters.sortOrder && filters.sortOrder !== 'newest') mapped.order_by = filters.sortOrder;
+  return mapped;
+};
 
 const RedacaoPage = () => {
   const { selectedArticles, addArticle, removeArticle, clearSelection } = useArticles();
@@ -57,254 +55,53 @@ const RedacaoPage = () => {
     closeActionPanel,
   } = useUI();
   const { shouldShowTour, startTour } = useOnboarding();
-  const { getCachedData, setCachedData } = useArticlesCache();
 
-  // API State
-  const [articles, setArticles] = useState([]);
-  const [isLoading, setIsLoading] = useState(false);
-  const [showSkeleton, setShowSkeleton] = useState(false);
-  const [error, setError] = useState(null);
-  const [_isInitialized, setIsInitialized] = useState(false);
-  const [urgencyCounts, setUrgencyCounts] = useState({ now: 0, recent: 0, today: 0, all: 0 });
-  const [facets, setFacets] = useState(null);
-
-  // Pagination State
+  // Pagination State (page is local; TanStack Query re-fetches on change)
   const [currentPage, setCurrentPage] = useState(1);
-  const [totalItems, setTotalItems] = useState(0);
-  const [totalPages, setTotalPages] = useState(1);
 
-  // Ref for AbortController
-  const abortControllerRef = useRef(null);
-  // Ref for skeleton grace period timer
-  const skeletonTimerRef = useRef(null);
-  // Ref for fetch debounce timer
-  const fetchDebounceRef = useRef(null);
-
-  // Ref to track previous filter values to detect filter changes vs page changes
-  const prevFiltersRef = useRef({
-    searchQuery: filters.searchQuery,
-    tag: filters.tag,
-    category: filters.category,
-    source: filters.source,
-    urgency: filters.urgency,
-    scoreClassification: filters.scoreClassification,
-    sortOrder: filters.sortOrder,
-  });
-
-  // Ref to skip redundant fetch after page reset
-  const skipNextFetchRef = useRef(false);
-
-  // Cursor state for keyset pagination (PAG-04 gap closure)
-  const cursorMapRef = useRef({});
-  const prevPageRef = useRef(1);
-
-  // Fetch articles from API with AbortController for request cancellation
-  useEffect(() => {
-    // Skip this fetch if flagged (happens after filter-triggered page reset)
-    if (skipNextFetchRef.current) {
-      skipNextFetchRef.current = false;
-      return;
-    }
-
-    // Check if filters changed (not just page)
-    const filtersChanged =
-      prevFiltersRef.current.searchQuery !== filters.searchQuery ||
-      prevFiltersRef.current.tag !== filters.tag ||
-      prevFiltersRef.current.category !== filters.category ||
-      prevFiltersRef.current.source !== filters.source ||
-      prevFiltersRef.current.urgency !== filters.urgency ||
-      prevFiltersRef.current.scoreClassification !== filters.scoreClassification ||
-      prevFiltersRef.current.sortOrder !== filters.sortOrder;
-
-    // Update prev filters ref
-    prevFiltersRef.current = {
-      searchQuery: filters.searchQuery,
-      tag: filters.tag,
-      category: filters.category,
-      source: filters.source,
-      urgency: filters.urgency,
-      scoreClassification: filters.scoreClassification,
-      sortOrder: filters.sortOrder,
-    };
-
-    // D-08: Reset cursor map when filters change
-    if (filtersChanged) {
-      cursorMapRef.current = {};
-    }
-
-    // When filters change, always fetch from page 1 (and sync state)
-    // When only page changes, use the current page
-    const effectivePage = filtersChanged ? 1 : currentPage;
-
-    // D-04: Use cursor for sequential navigation, OFFSET for non-sequential jumps
-    const cursor = cursorMapRef.current[effectivePage] || null;
-
-    // Sync page state if filters changed and we weren't on page 1
-    // Set flag to skip the next fetch triggered by setCurrentPage
-    if (filtersChanged && currentPage !== 1) {
-      skipNextFetchRef.current = true;
+  // Reset to page 1 when any filter changes
+  const filtersKey = JSON.stringify(filters);
+  const [prevFiltersKey, setPrevFiltersKey] = useState(filtersKey);
+  if (filtersKey !== prevFiltersKey) {
+    setPrevFiltersKey(filtersKey);
+    if (currentPage !== 1) {
       setCurrentPage(1);
-      // Continue with the fetch using effectivePage=1
     }
+  }
 
-    // Check cache first (synchronous, no debounce needed)
-    const cachedData = getCachedData(filters, effectivePage);
-    if (cachedData) {
-      setArticles(cachedData.articles);
-      setTotalItems(cachedData.totalItems);
-      setTotalPages(cachedData.totalPages);
-      if (cachedData.urgencyCounts) {
-        setUrgencyCounts(cachedData.urgencyCounts);
-      }
-      if (cachedData.facets) {
-        setFacets(cachedData.facets);
-      }
-      setIsLoading(false);
-      setShowSkeleton(false);
-      setIsInitialized(true);
-      return;
-    }
+  // Map frontend filter names to API param names
+  const apiFilters = useMemo(() => buildApiFilters(filters), [filters]);
 
-    // Create AbortController BEFORE debounce so cleanup can always cancel it
-    const abortController = new AbortController();
-    abortControllerRef.current = abortController;
+  // TanStack Query handles fetching, caching, abort, cursor tracking
+  const {
+    data: queryData,
+    isLoading: queryIsLoading,
+    isFetching,
+    isPlaceholderData,
+    error: queryError,
+    refetch,
+  } = useArticlesQuery(apiFilters, currentPage, ITEMS_PER_PAGE);
 
-    // Debounce API call to coalesce rapid filter changes (150ms)
-    fetchDebounceRef.current = setTimeout(() => {
-      // Don't start fetch if already aborted (cleanup ran during debounce wait)
-      if (abortController.signal.aborted) return;
+  // Derive UI state from query result
+  const articles = useMemo(() => {
+    const items = queryData?.items || [];
+    const transformed = transformArticles(items);
+    return deduplicateByTitle(transformed);
+  }, [queryData?.items]);
 
-      const fetchArticles = async () => {
-        setIsLoading(true);
-        setError(null);
+  const totalItems = queryData?.total ?? articles.length;
+  const totalPages = Math.ceil(totalItems / ITEMS_PER_PAGE) || 1;
+  const urgencyCounts = queryData?.urgency_counts || { now: 0, recent: 0, today: 0, all: 0 };
+  const facets = queryData?.facets || null;
 
-        // Show skeleton immediately — we only reach this code path when
-        // there is no cached data (cache hit returns early above), so
-        // there is no benefit to a 200ms grace period on a blank screen.
-        setShowSkeleton(true);
-
-        try {
-          const params = buildArticleParams(filters, effectivePage);
-          // Add cursor for keyset seek on sequential page navigation
-          if (cursor) {
-            params.cursor = cursor;
-          }
-          const response = await getArticles(params, { signal: abortController.signal });
-
-          // Only update state if request wasn't aborted
-          if (!abortController.signal.aborted) {
-            const transformedArticles = transformArticles(response?.items || []);
-            const uniqueArticles = deduplicateByTitle(transformedArticles);
-
-            setArticles(uniqueArticles);
-
-            // Update urgency counts from server response
-            if (response?.urgency_counts) {
-              setUrgencyCounts(response.urgency_counts);
-            }
-
-            if (response?.facets) {
-              setFacets(response.facets);
-            }
-
-            // Update pagination info from response - use nullish coalescing to handle 0 correctly
-            const total = response?.total ?? uniqueArticles.length;
-            setTotalItems(total);
-            setTotalPages(Math.ceil(total / ITEMS_PER_PAGE) || 1);
-
-            // Store cursors from response for next/prev page navigation
-            if (response?.nextCursor) {
-              cursorMapRef.current[effectivePage + 1] = response.nextCursor;
-            }
-            if (response?.prevCursor) {
-              cursorMapRef.current[effectivePage - 1] = response.prevCursor;
-            }
-
-            // Save to cache
-            setCachedData(filters, effectivePage, {
-              articles: uniqueArticles,
-              totalItems: total,
-              totalPages: Math.ceil(total / ITEMS_PER_PAGE) || 1,
-              urgencyCounts: response?.urgency_counts || null,
-              facets: response?.facets || null,
-            });
-
-            setIsInitialized(true);
-          }
-        } catch (err) {
-          // Ignore AbortError - this is expected when request is cancelled
-          if (err.name === 'AbortError') {
-            return;
-          }
-          if (!abortController.signal.aborted) {
-            setError(err.message || 'Erro ao carregar matérias');
-          }
-        } finally {
-          // Only set loading to false if not aborted
-          if (!abortController.signal.aborted) {
-            clearTimeout(skeletonTimerRef.current);
-            setIsLoading(false);
-            setShowSkeleton(false);
-          }
-        }
-      };
-
-      fetchArticles();
-    }, 150);
-
-    // Cleanup: abort request and clear timers when dependencies change or component unmounts
-    return () => {
-      clearTimeout(fetchDebounceRef.current);
-      clearTimeout(skeletonTimerRef.current);
-      abortController.abort();
-    };
-  }, [filters.searchQuery, filters.tag, filters.category, filters.source, filters.urgency, filters.scoreClassification, filters.sortOrder, currentPage, getCachedData, setCachedData]);
+  // Show skeleton when truly loading (no previous data to show)
+  const showSkeleton = queryIsLoading && !isPlaceholderData;
+  const error = queryError?.message || (queryError ? 'Erro ao carregar matérias' : null);
 
   // Retry fetch after error
-  const handleRetry = useCallback(async () => {
-    setIsLoading(true);
-    setError(null);
-    try {
-      const params = buildArticleParams(filters, currentPage);
-      const response = await getArticles(params);
-      const transformedArticles = transformArticles(response?.items);
-      const uniqueArticles = deduplicateByTitle(transformedArticles);
-      setArticles(uniqueArticles);
-
-      // Update urgency counts from response, or calculate from article timestamps as fallback
-      if (response?.urgency_counts) {
-        setUrgencyCounts(response.urgency_counts);
-      }
-
-      if (response?.facets) {
-        setFacets(response.facets);
-      }
-
-      // Update pagination info from response - use nullish coalescing to handle 0 correctly
-      const total = response?.total ?? uniqueArticles.length;
-      setTotalItems(total);
-      setTotalPages(Math.ceil(total / ITEMS_PER_PAGE) || 1);
-
-      // Save to cache
-      setCachedData(filters, currentPage, {
-        articles: uniqueArticles,
-        totalItems: total,
-        totalPages: Math.ceil(total / ITEMS_PER_PAGE) || 1,
-        urgencyCounts: response?.urgency_counts || null,
-        facets: response?.facets || null,
-      });
-
-      setIsInitialized(true);
-    } catch (err) {
-      if (err.name === 'AbortError') {
-        setError('A requisição expirou. Tente novamente.');
-      } else {
-        setError(err.message || 'Erro ao carregar matérias');
-      }
-    } finally {
-      setIsLoading(false);
-    }
-  }, [filters, currentPage, setCachedData]);
+  const handleRetry = useCallback(() => {
+    refetch();
+  }, [refetch]);
 
   const handleSelectArticle = useCallback((article) => {
     addArticle(article);
@@ -326,22 +123,21 @@ const RedacaoPage = () => {
 
   // Handle page change from Pagination component
   const handlePageChange = useCallback((page) => {
-    prevPageRef.current = currentPage;
     setCurrentPage(page);
     // Scroll to top of article grid when changing pages
     window.scrollTo({ top: 0, behavior: 'smooth' });
-  }, [currentPage]);
+  }, []);
 
   // Auto-trigger onboarding tour for first-time users
   useEffect(() => {
-    if (shouldShowTour(TOUR_IDS.HOME) && !isLoading && articles.length > 0) {
+    if (shouldShowTour(TOUR_IDS.HOME) && !isFetching && articles.length > 0) {
       // Delay to ensure page is fully loaded
       const timeoutId = setTimeout(() => {
         startTour(TOUR_IDS.HOME);
       }, 800);
       return () => clearTimeout(timeoutId);
     }
-  }, [shouldShowTour, startTour, isLoading, articles.length]);
+  }, [shouldShowTour, startTour, isFetching, articles.length]);
 
   return (
     <div className="min-h-screen pt-16 bg-off-white">

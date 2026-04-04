@@ -61,84 +61,133 @@ const MinhasMaterias = () => {
   // Ref for skeleton grace period timer
   const skeletonTimerRef = useRef(null);
 
-  // Fetch articles from API - stale-while-revalidate pattern:
+  // Ref for debounce timer
+  const fetchDebounceRef = useRef(null);
+
+  // Fetch articles from API - stale-while-revalidate pattern with 150ms debounce:
   // First load: full skeleton. Subsequent fetches: keep stale data visible with subtle indicator.
-  const fetchArticles = useCallback(async (options = {}) => {
-    if (hasDataRef.current) {
-      // Subsequent fetch: keep existing data visible, show subtle refresh indicator
-      setIsRefreshing(true);
-    } else {
-      // First fetch: show full loading state
-      setIsLoading(true);
-    }
+  // Debounce coalesces rapid filter changes. AbortController cancels in-flight requests.
+  useEffect(() => {
+    const abortController = new AbortController();
+
+    // Debounce API call to coalesce rapid filter changes (150ms)
+    fetchDebounceRef.current = setTimeout(() => {
+      // Don't start fetch if already aborted (cleanup ran during debounce wait)
+      if (abortController.signal.aborted) return;
+
+      const fetchArticles = async () => {
+        if (hasDataRef.current) {
+          // Subsequent fetch: keep existing data visible, show subtle refresh indicator
+          setIsRefreshing(true);
+        } else {
+          // First fetch: show full loading state
+          setIsLoading(true);
+        }
+        setError(null);
+
+        // Grace period: only show skeleton on first load if fetch takes >200ms
+        clearTimeout(skeletonTimerRef.current);
+        if (!hasDataRef.current) {
+          skeletonTimerRef.current = setTimeout(() => {
+            setShowSkeleton(true);
+          }, 200);
+        }
+
+        try {
+          const params = {
+            page: currentPage,
+            limit: ITEMS_PER_PAGE,
+          };
+
+          // Add filters to params (server-side filtering)
+          if (filters.searchQuery) {
+            params.search = filters.searchQuery;
+          }
+          if (filters.status) {
+            params.status = filters.status;
+          }
+          if (filters.category) {
+            params.category = filters.category;
+          }
+          if (filters.dateRange) {
+            params.dateRange = filters.dateRange;
+          }
+
+          const response = await getUserArticles(params, { signal: abortController.signal });
+
+          // If aborted, don't update state
+          if (abortController.signal.aborted) return;
+
+          // Convert dates from ISO strings to Date objects for compatibility
+          const articlesWithDates = response.items.map(article => ({
+            ...article,
+            createdAt: article.createdAt ? new Date(article.createdAt) : null,
+            updatedAt: article.updatedAt ? new Date(article.updatedAt) : null,
+            publishedAt: article.publishedAt ? new Date(article.publishedAt) : null
+          }));
+
+          setArticles(articlesWithDates);
+          setTotalArticles(response.total);
+          setTotalPages(response.pages);
+          hasDataRef.current = true;
+        } catch (err) {
+          if (err.name === 'AbortError') return;
+          if (!abortController.signal.aborted) {
+            setError(err.message || 'Erro ao carregar matérias');
+          }
+        } finally {
+          if (!abortController.signal.aborted) {
+            clearTimeout(skeletonTimerRef.current);
+            setIsLoading(false);
+            setIsRefreshing(false);
+            setShowSkeleton(false);
+          }
+        }
+      };
+
+      fetchArticles();
+    }, 150);
+
+    // Cleanup: abort request and clear timers when dependencies change or component unmounts
+    return () => {
+      clearTimeout(fetchDebounceRef.current);
+      clearTimeout(skeletonTimerRef.current);
+      abortController.abort();
+    };
+  }, [currentPage, filters]);
+
+  // Standalone fetchArticles for manual refresh (e.g., after delete)
+  const fetchArticles = useCallback(async () => {
+    setIsRefreshing(true);
     setError(null);
-
-    // Grace period: only show skeleton on first load if fetch takes >200ms
-    clearTimeout(skeletonTimerRef.current);
-    if (!hasDataRef.current) {
-      skeletonTimerRef.current = setTimeout(() => {
-        setShowSkeleton(true);
-      }, 200);
-    }
-
     try {
       const params = {
         page: currentPage,
         limit: ITEMS_PER_PAGE,
       };
-
-      // Add filters to params (server-side filtering)
-      if (filters.searchQuery) {
-        params.search = filters.searchQuery;
-      }
-      if (filters.status) {
-        params.status = filters.status;
-      }
-      if (filters.category) {
-        params.category = filters.category;
-      }
-      if (filters.dateRange) {
-        params.dateRange = filters.dateRange;
-      }
+      if (filters.searchQuery) params.search = filters.searchQuery;
+      if (filters.status) params.status = filters.status;
+      if (filters.category) params.category = filters.category;
+      if (filters.dateRange) params.dateRange = filters.dateRange;
 
       const response = await getUserArticles(params);
-
-      // If aborted, don't update state
-      if (options.signal?.aborted) return;
-
-      // Convert dates from ISO strings to Date objects for compatibility
       const articlesWithDates = response.items.map(article => ({
         ...article,
         createdAt: article.createdAt ? new Date(article.createdAt) : null,
         updatedAt: article.updatedAt ? new Date(article.updatedAt) : null,
         publishedAt: article.publishedAt ? new Date(article.publishedAt) : null
       }));
-
       setArticles(articlesWithDates);
       setTotalArticles(response.total);
       setTotalPages(response.pages);
-      hasDataRef.current = true;
     } catch (err) {
-      if (err.name === 'AbortError') return;
       setError(err.message || 'Erro ao carregar matérias');
     } finally {
-      if (!options.signal?.aborted) {
-        clearTimeout(skeletonTimerRef.current);
-        setIsLoading(false);
-        setIsRefreshing(false);
-        setShowSkeleton(false);
-      }
+      setIsLoading(false);
+      setIsRefreshing(false);
+      setShowSkeleton(false);
     }
   }, [currentPage, filters]);
-
-  // Fetch articles when page or filters change, with AbortController cleanup
-  useEffect(() => {
-    const controller = new AbortController();
-    fetchArticles({ signal: controller.signal });
-    return () => {
-      controller.abort();
-    };
-  }, [fetchArticles]);
 
   // Reset to page 1 when filters change
   const handleFilterChange = useCallback((newFilters) => {

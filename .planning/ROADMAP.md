@@ -28,6 +28,7 @@
 
 ### Phase 5: Quick Wins
 - **Goal:** Deploy zero-risk, high-impact fixes that require minimal code changes
+- **Status:** COMPLETE
 - **Requirements:** QW-01, QW-02, QW-03, QW-04, QW-05, QW-06, QW-07
 - **Success Criteria:**
   1. CORS preflight responses include `Access-Control-Max-Age: 86400`
@@ -39,6 +40,7 @@
 
 ### Phase 6: Database Optimization
 - **Goal:** Add covering indexes, cache urgency counts, parallelize facets, fix source filtering
+- **Status:** COMPLETE (7/9 — DB-07 and DB-09 implemented in current session)
 - **Requirements:** DB-01, DB-02, DB-03, DB-04, DB-05, DB-06, DB-07, DB-08, DB-09
 - **Success Criteria:**
   1. Main articles query uses covering index (no key lookups in execution plan)
@@ -50,6 +52,7 @@
 
 ### Phase 7: Frontend State
 - **Goal:** Migrate to TanStack Query, fix SmartEmptyState API explosion, split FiltersContext
+- **Status:** IN PROGRESS (FE-02 ✅, FE-04 ✅, FE-05 ✅ — FE-01, FE-03, FE-06 in progress)
 - **Requirements:** FE-01, FE-02, FE-03, FE-04, FE-05, FE-06
 - **Success Criteria:**
   1. RedacaoPage uses `useQuery` — no manual useEffect for data fetching
@@ -61,6 +64,7 @@
 
 ### Phase 8: Redis Cache
 - **Goal:** Add Redis cache-aside layer between API and Azure SQL for sub-5ms cache hits
+- **Status:** NOT STARTED
 - **Requirements:** CACHE-01, CACHE-02, CACHE-03, CACHE-04, CACHE-05
 - **Success Criteria:**
   1. Redis provisioned and connected (health check passes)
@@ -72,6 +76,7 @@
 
 ### Phase 9: Keyset Pagination
 - **Goal:** Replace OFFSET pagination with cursor-based seek for O(1) deep page performance
+- **Status:** COMPLETE
 - **Requirements:** PAG-01, PAG-02, PAG-03, PAG-04
 - **Plans:** 3/3 plans complete
   - [x] 09-01-PLAN.md — Backend: cursor encode/decode, seek predicate, dual-mode query, API response fields
@@ -86,6 +91,7 @@
 
 ### Phase 10: Infrastructure
 - **Goal:** Eliminate cold starts, reduce dependency bloat, tune connection pool
+- **Status:** PARTIALLY DONE (INFRA-04 ✅ — INFRA-01/02/03/05/06 NOT STARTED)
 - **Requirements:** INFRA-01, INFRA-02, INFRA-03, INFRA-04, INFRA-05, INFRA-06
 - **Success Criteria:**
   1. First request after idle completes in <2s (no 8-15s cold start)
@@ -94,3 +100,4 @@
   4. Connection pool size matches plan tier (5 for Flex, 8-10 for Premium)
   5. Azure SQL confirmed in East US 2 (same region as Function App)
 - **Depends on:** Can run in parallel with Phases 8-9 (infrastructure-only changes)
+- Canonical refs: `docs/plans/2026-04-02-performance-optimization-plan.md` Phase 5 (Infrastructure)

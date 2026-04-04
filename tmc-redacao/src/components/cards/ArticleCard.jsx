@@ -25,7 +25,9 @@ const categoryColors = {
   'Seguranca': 'bg-[#6B5B4E]',
 };
 
-const ArticleCard = ({ article, isSelected, onSelect, selectedTags = new Set(), onTagSelect }) => {
+const EMPTY_SET = new Set();
+
+const ArticleCard = ({ article, isSelected, onSelect, selectedTags = EMPTY_SET, onTagSelect }) => {
   const categoryColor = useMemo(
     () => categoryColors[article.category] || 'bg-gray-500',
     [article.category]
@@ -124,6 +126,7 @@ const ArticleCard = ({ article, isSelected, onSelect, selectedTags = new Set(), 
               src={article.favicon}
               alt=""
               className="w-4 h-4 rounded"
+              loading="lazy"
               aria-hidden="true"
             />
             <span className="text-xs font-medium text-dark-gray">{article.source}</span>
@@ -202,4 +205,8 @@ ArticleCard.propTypes = {
   onTagSelect: PropTypes.func,
 };
 
-export default memo(ArticleCard);
+export default memo(ArticleCard, (prevProps, nextProps) =>
+  prevProps.article.id === nextProps.article.id &&
+  prevProps.isSelected === nextProps.isSelected &&
+  prevProps.selectedTags === nextProps.selectedTags
+);

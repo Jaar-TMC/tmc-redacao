@@ -134,7 +134,7 @@ class Article(ArticleBase):
             "scoreImpacto": self.score_impacto,
             "scoreBuscaAgora": self.score_busca_agora,
             "scoreConversa": self.score_conversa,
-            "contentLength": len(self.content) if self.content else 0
+            "contentLength": getattr(self, '_content_length_original', None) or (len(self.content) if self.content else 0)
         }
 
 
