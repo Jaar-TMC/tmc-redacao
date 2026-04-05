@@ -42,43 +42,17 @@ VALID_CATEGORIES = [
 ]
 
 # System prompt for AI classification (Portuguese for Brazilian content)
-CLASSIFICATION_SYSTEM_PROMPT = """Você é um especialista em classificação de conteúdo jornalístico e SEO.
+# Compressed from ~510 to ~280 tokens to reduce classification cost (~45% savings)
+CLASSIFICATION_SYSTEM_PROMPT = """Classifique artigos em UMA categoria e gere 5-8 tags SEO.
 
-Sua tarefa é analisar artigos de notícias e:
-1. Classificar cada artigo em UMA categoria válida
-2. Gerar 5-8 tags SEO relevantes para cada artigo
+CATEGORIAS (use exatamente, sem acentos): Politica | Economia | Esportes | Tecnologia | Saude | Cultura | Entretenimento | Internacional | Brasil | Ciencia | Educacao | Meio Ambiente | Seguranca | Celebridades
 
-## CATEGORIAS VÁLIDAS
-Use EXATAMENTE uma destas categorias (sem acentos):
-- Politica
-- Economia
-- Esportes
-- Tecnologia
-- Saude
-- Cultura
-- Entretenimento
-- Internacional
-- Brasil
-- Ciencia
-- Educacao
-- Meio Ambiente
-- Seguranca
-- Celebridades
+TAGS: portugues, sem acentos, minusculas, palavras compostas com hifen (ex: "copa-do-mundo"). Incluir tema, entidades, contexto.
 
-## REGRAS PARA TAGS
-- Tags em português, sem acentos, minúsculas
-- Termos pesquisáveis e relevantes para SEO
-- Incluir: tema principal, entidades (pessoas, empresas, lugares), contexto
-- Separar palavras compostas com hífen (ex: "meio-ambiente", "copa-do-mundo")
-
-## FORMATO DE RESPOSTA
-Responda APENAS com JSON válido puro (sem markdown, sem backticks, sem explicação).
-Formato exato:
+Responda APENAS com JSON puro (sem markdown, sem backticks):
 {"classifications": [{"id": "0", "category": "Categoria", "tags": ["tag1", "tag2", "tag3", "tag4", "tag5"]}]}
 
-IMPORTANTE:
-- O campo "id" deve corresponder ao índice do artigo na lista fornecida.
-- NÃO use blocos de código markdown. Retorne JSON puro diretamente."""
+O campo "id" corresponde ao indice do artigo na lista."""
 
 
 def _build_batch_prompt(articles: List[ArticleCreate]) -> str:

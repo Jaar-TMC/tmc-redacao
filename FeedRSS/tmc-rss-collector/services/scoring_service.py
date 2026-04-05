@@ -61,60 +61,18 @@ SCORING_MAX_TOKENS = 1024
 # PROMPT TEMPLATES
 # =============================================================================
 
-SCORING_SYSTEM_PROMPT = """Voce e um editor experiente de jornalismo brasileiro, especializado em avaliar a relevancia editorial de noticias de qualquer categoria (politica, economia, esportes, cultura, tecnologia, saude, etc).
+SCORING_SYSTEM_PROMPT = """Editor de jornalismo brasileiro. Classifique artigos com 4 sinais de relevancia editorial.
 
-Sua tarefa e analisar artigos e classificar seu potencial editorial usando 4 sinais de relevancia jornalistica.
+SINAIS:
+1. inesperado - Fato surpreendente? yes=surpreendente, partial=parcialmente inesperado, no=rotineiro
+2. impacto - Afeta a vida do leitor? high=impacto direto, medium=relevante mas nao urgente, low=sem consequencia pratica
+3. busca_agora - Leitor vai buscar? yes=urgente/trending, maybe=pode interessar, no=nao vai buscar
+4. conversa - Vai gerar discussao? yes=debates e polemicas, maybe=algum comentario, no=sem conversa
 
-## OS 4 SINAIS DE RELEVANCIA
+Responda APENAS JSON puro (sem markdown, sem backticks):
+{"sinal_inesperado":"yes|partial|no","sinal_impacto":"high|medium|low","sinal_busca_agora":"yes|maybe|no","sinal_conversa":"yes|maybe|no","justificativa":"max 80 chars"}
 
-### 1. INESPERADO (Fato surpreendente?)
-Avalia se a noticia traz algo que o leitor NAO esperava ver hoje.
-- **yes**: Fato completamente inesperado, surpreendente, fora do comum
-  - Exemplos: Renuncia de ministro, falencia de banco, morte de celebridade, descoberta cientifica, golpe de estado
-- **partial**: Fato parcialmente inesperado, com elementos de surpresa
-  - Exemplos: Aumento de juros maior que esperado, resultado eleitoral apertado, declaracao polemica de autoridade
-- **no**: Fato esperado, rotineiro, previsivel
-  - Exemplos: Reuniao agendada, balanco trimestral, previsao do tempo, evento cultural anunciado
-
-### 2. IMPACTO (Afeta a vida do leitor?)
-Avalia o impacto pratico na vida do cidadao/leitor.
-- **high**: Impacto alto e direto na vida das pessoas
-  - Exemplos: Aumento de precos, mudanca em impostos, surto de doenca, corte de empregos, nova lei aprovada
-- **medium**: Impacto moderado - relevante mas nao urgente
-  - Exemplos: Mudanca em politica publica, lancamento de produto, resultado de pesquisa, acordo comercial
-- **low**: Impacto baixo - informacao interessante mas sem consequencia pratica
-  - Exemplos: Curiosidade historica, evento cultural local, estatistica sem contexto, entrevista protocolar
-
-### 3. BUSCA AGORA (Leitor vai buscar?)
-Avalia se o leitor vai ativamente buscar mais informacoes sobre este assunto.
-- **yes**: Leitor vai procurar imediatamente - noticia urgente/trending
-  - Exemplos: Acidente grave, escandalo politico, vazamento de dados, morte de famoso, resultado de eleicao
-- **maybe**: Leitor pode se interessar em saber mais
-  - Exemplos: Nova tecnologia, especulacao de mercado, boato sobre celebridade, tendencia de comportamento
-- **no**: Leitor provavelmente nao vai buscar ativamente
-  - Exemplos: Rotina administrativa, comunicado oficial padrao, evento comum, fato sem novidade
-
-### 4. CONVERSA (Leitor vai comentar?)
-Avalia se a noticia vai gerar discussao nas redes sociais, com amigos, familia.
-- **yes**: Noticia para conversar - vai gerar debates e discussoes
-  - Exemplos: Polemica politica, declaracao controversa, crime chocante, resultado surpreendente, tema divisivo
-- **maybe**: Noticia que pode gerar algum comentario ou compartilhamento, mas nao debate acalorado
-  - Exemplos: Conquista esportiva, mudanca em servico popular, curiosidade interessante, novidade tecnologica
-- **no**: Noticia que nao gera conversa - leia e siga em frente
-  - Exemplos: Informacao factual sem polemica, rotina, comunicado tecnico, estatistica neutra
-
-## FORMATO DE RESPOSTA
-
-Responda APENAS com JSON valido puro (sem markdown, sem backticks, sem explicacao).
-Formato exato:
-{"sinal_inesperado": "yes|partial|no", "sinal_impacto": "high|medium|low", "sinal_busca_agora": "yes|maybe|no", "sinal_conversa": "yes|maybe|no", "justificativa": "Breve explicacao (max 200 chars)"}
-
-IMPORTANTE:
-- Use APENAS os valores especificados para cada sinal
-- NAO inclua comentarios ou texto fora do JSON
-- NAO use blocos de codigo markdown. Retorne JSON puro diretamente
-- A justificativa deve ser concisa e em portugues
-- Considere o CONTEXTO BRASILEIRO e a relevancia para o publico geral"""
+Use APENAS os valores especificados. Considere contexto brasileiro."""
 
 
 SCORING_USER_PROMPT_TEMPLATE = """Analise o seguinte artigo e classifique usando os 4 sinais de relevancia editorial:
@@ -133,6 +91,24 @@ SCORING_USER_PROMPT_TEMPLATE = """Analise o seguinte artigo e classifique usando
 Considere a categoria ao avaliar os sinais. O que e "inesperado" em Esportes pode ser rotineiro em Politica, e vice-versa. Calibre sua avaliacao para o contexto da categoria.
 
 Classifique este artigo nos 4 sinais (inesperado, impacto, busca_agora, conversa) e retorne APENAS o JSON."""
+
+
+# Batch scoring system prompt (compressed, expects multiple articles)
+BATCH_SCORING_SYSTEM_PROMPT = """Editor de jornalismo brasileiro. Classifique MULTIPLOS artigos com 4 sinais de relevancia editorial.
+
+SINAIS:
+1. inesperado - Fato surpreendente? yes=surpreendente, partial=parcialmente inesperado, no=rotineiro
+2. impacto - Afeta a vida do leitor? high=impacto direto, medium=relevante mas nao urgente, low=sem consequencia pratica
+3. busca_agora - Leitor vai buscar? yes=urgente/trending, maybe=pode interessar, no=nao vai buscar
+4. conversa - Vai gerar discussao? yes=debates e polemicas, maybe=algum comentario, no=sem conversa
+
+Responda APENAS JSON puro (sem markdown, sem backticks):
+{"scores":[{"id":"0","sinal_inesperado":"...","sinal_impacto":"...","sinal_busca_agora":"...","sinal_conversa":"...","justificativa":"max 80 chars"},{"id":"1",...}]}
+
+Use APENAS os valores especificados. Considere contexto brasileiro. Retorne um score para CADA artigo."""
+
+# Max articles per batch scoring call
+SCORING_BATCH_SIZE = 5
 
 
 # =============================================================================
@@ -363,8 +339,8 @@ class ScoringService:
             logger.warning("LLM service not available, will use heuristic fallback")
             return None
 
-        # Truncate content if too long (keep first 5000 chars for better context)
-        truncated_content = content[:5000] if content and len(content) > 5000 else (content or '')
+        # Truncate content for scoring (2000 chars is enough for editorial signals)
+        truncated_content = content[:2000] if content and len(content) > 2000 else (content or '')
 
         user_prompt = SCORING_USER_PROMPT_TEMPLATE.format(
             title=title,
@@ -405,6 +381,109 @@ class ScoringService:
             return None
         except Exception as e:
             logger.error(f"Error calling LLM for scoring: {e}")
+            return None
+
+    def _build_batch_scoring_prompt(self, articles: List[Dict[str, Any]]) -> str:
+        """
+        Build a user prompt for batch scoring multiple articles in a single LLM call.
+
+        Args:
+            articles: List of dicts with 'title', 'content', 'category' keys
+
+        Returns:
+            Formatted user prompt string
+        """
+        parts = ["Classifique estes artigos:\n"]
+
+        for idx, article in enumerate(articles):
+            content = article.get('content', '') or ''
+            truncated = content[:2000]
+            category = article.get('category', '') or 'Nao especificada'
+            title = article.get('title', '')
+
+            parts.append(f"""ARTIGO {idx}:
+Categoria: {category}
+Titulo: {title}
+Conteudo: {truncated}
+""")
+
+        parts.append("""Responda em JSON puro:
+{"scores":[{"id":"0","sinal_inesperado":"...","sinal_impacto":"...","sinal_busca_agora":"...","sinal_conversa":"...","justificativa":"max 80 chars"},...]}\n""")
+
+        return "\n".join(parts)
+
+    async def _analyze_batch_with_llm(self, articles: List[Dict[str, Any]]) -> Optional[Dict[str, Dict[str, Any]]]:
+        """
+        Analyze a batch of articles using a single LLM call.
+
+        Args:
+            articles: List of article dicts with 'title', 'content', 'category'
+
+        Returns:
+            Dict mapping article index (str) to signal dict, or None if LLM unavailable
+        """
+        if not self.llm_service:
+            logger.warning("LLM service not available for batch scoring")
+            return None
+
+        if not articles:
+            return {}
+
+        user_prompt = self._build_batch_scoring_prompt(articles)
+
+        # Scale max_tokens by batch size (each article ~150 tokens output + overhead)
+        batch_max_tokens = min(200 * len(articles) + 100, 2048)
+
+        try:
+            response_text = await self.llm_service._call_api(
+                BATCH_SCORING_SYSTEM_PROMPT,
+                user_prompt,
+                batch_max_tokens,
+                model=get_config().scoring_model,
+                task_type='scoring'
+            )
+
+            # Extract JSON from response
+            json_start = response_text.find('{')
+            json_end = response_text.rfind('}') + 1
+
+            if json_start == -1 or json_end <= json_start:
+                logger.warning(f"No valid JSON in batch scoring response: {response_text[:200]}")
+                return None
+
+            json_str = response_text[json_start:json_end]
+            result = json.loads(json_str)
+
+            scores_list = result.get('scores', [])
+            if not scores_list:
+                logger.warning("Batch scoring response has empty 'scores' array")
+                return None
+
+            # Build mapping by article index
+            required_fields = ['sinal_inesperado', 'sinal_impacto', 'sinal_busca_agora', 'sinal_conversa']
+            mapping = {}
+
+            for item in scores_list:
+                article_id = str(item.get('id', ''))
+                if article_id and all(k in item for k in required_fields):
+                    mapping[article_id] = {
+                        'sinal_inesperado': item['sinal_inesperado'],
+                        'sinal_impacto': item['sinal_impacto'],
+                        'sinal_busca_agora': item['sinal_busca_agora'],
+                        'sinal_conversa': item['sinal_conversa'],
+                        'justificativa': item.get('justificativa', '')
+                    }
+                else:
+                    logger.warning(f"Batch scoring: article {article_id} missing required fields, will fallback")
+
+            logger.info(f"Batch scoring parsed {len(mapping)}/{len(articles)} articles successfully")
+            return mapping
+
+        except json.JSONDecodeError as e:
+            logger.error(f"Failed to parse batch scoring response as JSON: {e}")
+            return None
+        except Exception as e:
+            logger.error(f"Error calling LLM for batch scoring: {e}")
             return None
 
     async def score_article(
@@ -537,8 +616,9 @@ class ScoringService:
         """
         Score multiple articles in batch. GUARANTEED to return a score for every article.
 
-        Uses a semaphore to allow concurrent LLM calls (up to max_concurrent)
-        instead of purely sequential processing with sleeps.
+        Uses batch LLM calls (SCORING_BATCH_SIZE articles per call) to reduce API costs.
+        Falls back to individual scoring for articles that fail batch parsing,
+        and to heuristic scoring if LLM is entirely unavailable.
 
         Args:
             articles: List of dicts with 'id', 'title', 'content' keys
@@ -549,31 +629,134 @@ class ScoringService:
         Returns:
             List of ArticleScore objects (same length as input)
         """
-        logger.info(f"Scoring batch of {len(articles)} articles (concurrency={max_concurrent})")
+        logger.info(f"Scoring batch of {len(articles)} articles (batch_size={SCORING_BATCH_SIZE}, concurrency={max_concurrent})")
+
+        # Build ordered result list (same length as input)
+        results: List[Optional[ArticleScore]] = [None] * len(articles)
+
+        # Chunk articles into batches of SCORING_BATCH_SIZE
+        batches = []
+        for i in range(0, len(articles), SCORING_BATCH_SIZE):
+            batch = articles[i:i + SCORING_BATCH_SIZE]
+            batches.append((i, batch))  # (start_index, batch_articles)
 
         semaphore = asyncio.Semaphore(max_concurrent)
 
-        async def _score_one(article: Dict[str, Any]) -> ArticleScore:
-            article_id = article['id'] if isinstance(article['id'], UUID) else UUID(str(article['id']))
+        async def _score_batch(start_idx: int, batch: List[Dict[str, Any]]) -> List[Tuple[int, Optional[Dict[str, Any]]]]:
+            """
+            Score a batch via single LLM call. Returns list of (global_index, signals_or_None).
+            """
             async with semaphore:
-                try:
-                    score = await self.score_article(
-                        article_id=article_id,
-                        title=article['title'],
-                        content=article.get('content', ''),
-                        use_heuristic_fallback=use_heuristic_fallback,
-                        category=article.get('category', '')
-                    )
-                    return score
-                except Exception as e:
-                    logger.error(f"Error scoring article {article.get('id')}: {e}, using guaranteed fallback")
-                    return self._create_default_score(
-                        article_id, article.get('title', ''), article.get('content', '')
-                    )
+                batch_mapping = await self._analyze_batch_with_llm(batch)
 
-        results = await asyncio.gather(*[_score_one(a) for a in articles])
+                per_article_results = []
+                for local_idx, article in enumerate(batch):
+                    global_idx = start_idx + local_idx
+                    signals = None
 
-        logger.info(f"Batch scoring complete: {len(results)}/{len(articles)} scored")
+                    if batch_mapping and str(local_idx) in batch_mapping:
+                        signals = batch_mapping[str(local_idx)]
+
+                    per_article_results.append((global_idx, signals))
+
+                return per_article_results
+
+        # Run all batches concurrently
+        batch_results = await asyncio.gather(
+            *[_score_batch(start_idx, batch) for start_idx, batch in batches],
+            return_exceptions=True
+        )
+
+        # Collect articles that need individual fallback scoring
+        fallback_indices = []
+
+        for batch_result in batch_results:
+            if isinstance(batch_result, Exception):
+                logger.error(f"Batch scoring call failed: {batch_result}")
+                # Mark all articles in this failed batch for individual fallback
+                # We need to figure out which indices — scan batches
+                continue
+
+            for global_idx, signals in batch_result:
+                article = articles[global_idx]
+                article_id = article['id'] if isinstance(article['id'], UUID) else UUID(str(article['id']))
+
+                if signals:
+                    # Batch succeeded for this article — build ArticleScore
+                    try:
+                        scores, total_score, classification = self._calculate_scores(signals)
+                        results[global_idx] = ArticleScore(
+                            article_id=article_id,
+                            sinal_inesperado=signals['sinal_inesperado'],
+                            sinal_impacto=signals['sinal_impacto'],
+                            sinal_busca_agora=signals['sinal_busca_agora'],
+                            sinal_conversa=signals['sinal_conversa'],
+                            score_inesperado=scores['score_inesperado'],
+                            score_impacto=scores['score_impacto'],
+                            score_busca_agora=scores['score_busca_agora'],
+                            score_conversa=scores['score_conversa'],
+                            total_score=total_score,
+                            classification=classification,
+                            scored_by='ai',
+                            reasoning=signals.get('justificativa'),
+                            scored_at=datetime.utcnow()
+                        )
+                        logger.info(
+                            f"Article {article_id} classified as {classification} "
+                            f"(total={total_score}, batch)"
+                        )
+                    except Exception as e:
+                        logger.error(f"Error building score from batch result for {article_id}: {e}")
+                        fallback_indices.append(global_idx)
+                else:
+                    # Batch missed this article — needs individual fallback
+                    fallback_indices.append(global_idx)
+
+        # Also collect indices from entirely failed batches
+        for batch_result, (start_idx, batch) in zip(batch_results, batches):
+            if isinstance(batch_result, Exception):
+                for local_idx in range(len(batch)):
+                    global_idx = start_idx + local_idx
+                    if results[global_idx] is None and global_idx not in fallback_indices:
+                        fallback_indices.append(global_idx)
+
+        # Individual fallback scoring for articles that failed batch parsing
+        if fallback_indices:
+            logger.info(f"Falling back to individual scoring for {len(fallback_indices)} articles")
+
+            async def _score_one_fallback(global_idx: int) -> None:
+                article = articles[global_idx]
+                article_id = article['id'] if isinstance(article['id'], UUID) else UUID(str(article['id']))
+                async with semaphore:
+                    try:
+                        score = await self.score_article(
+                            article_id=article_id,
+                            title=article['title'],
+                            content=article.get('content', ''),
+                            use_heuristic_fallback=use_heuristic_fallback,
+                            category=article.get('category', '')
+                        )
+                        results[global_idx] = score
+                    except Exception as e:
+                        logger.error(f"Individual fallback failed for {article_id}: {e}, using guaranteed fallback")
+                        results[global_idx] = self._create_default_score(
+                            article_id, article.get('title', ''), article.get('content', '')
+                        )
+
+            await asyncio.gather(*[_score_one_fallback(idx) for idx in fallback_indices])
+
+        # Final safety: fill any remaining None slots with heuristic fallback
+        for i, result in enumerate(results):
+            if result is None:
+                article = articles[i]
+                article_id = article['id'] if isinstance(article['id'], UUID) else UUID(str(article['id']))
+                logger.warning(f"Article {article_id} still unscored after all attempts, using guaranteed fallback")
+                results[i] = self._create_default_score(
+                    article_id, article.get('title', ''), article.get('content', '')
+                )
+
+        scored_count = sum(1 for r in results if r is not None)
+        logger.info(f"Batch scoring complete: {scored_count}/{len(articles)} scored")
         return list(results)
 
     async def process_pending_articles(
@@ -637,11 +820,13 @@ class ScoringService:
         """
         # Query for articles without scores (includes category for context-aware scoring)
         # This uses raw SQL since the method might not exist in DatabaseService
+        # 2-minute buffer avoids race condition with inline scoring during RSS collection
         query = """
             SELECT TOP %s a.id, a.title, a.content, a.category
             FROM collected_articles a
             LEFT JOIN article_scores s ON a.id = s.article_id
             WHERE s.id IS NULL
+              AND a.collected_at < DATEADD(MINUTE, -2, GETUTCDATE())
             ORDER BY a.collected_at DESC
         """
 

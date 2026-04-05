@@ -17,6 +17,7 @@ from services.deduplication import deduplicate_with_db
 from services.enrichment import enrich_article_image
 from services.ai_enrichment import enrich_articles_with_ai, is_ai_enrichment_enabled
 from services.scoring_service import get_scoring_service
+from services.request_context import current_source_id
 from models import Source
 
 logger = logging.getLogger(__name__)
@@ -145,6 +146,9 @@ async def process_single_source(source: Source, db, parser: RSSParser,
     source_name = source.name
 
     logger.info(f"[{execution_id}] Processing: {source_name}")
+
+    # Set source_id in request context so llm_usage_log tracks cost per source
+    current_source_id.set(str(source.id))
 
     try:
         # 1. Parse do feed
@@ -300,6 +304,10 @@ async def process_single_source(source: Source, db, parser: RSSParser,
         )
 
         raise
+
+    finally:
+        # Reset source_id context to avoid leaking into next source
+        current_source_id.set(None)
 
 
 def _get_duration_ms(start_time: datetime) -> int:

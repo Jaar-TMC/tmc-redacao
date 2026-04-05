@@ -39,8 +39,8 @@ class AppConfig:
     scoring_model: str = "claude-haiku-4-5"
     theme_naming_model: str = "claude-haiku-4-5"
     # Heavy tasks: Sonnet 4.5 (generation, fact-check, editing, merging, extraction)
-    event_verification_model: str = "claude-sonnet-4-5"
-    event_extraction_model: str = "claude-sonnet-4-5"
+    event_verification_model: str = "claude-haiku-4-5"
+    event_extraction_model: str = "claude-haiku-4-5"
     enrichment_extraction_model: str = "claude-sonnet-4-5"
     generation_model: str = "claude-sonnet-4-5"
     fact_check_model: str = "claude-sonnet-4-5"
@@ -143,8 +143,8 @@ def load_config() -> AppConfig:
         classification_model=os.environ.get("CLASSIFICATION_MODEL", "claude-haiku-4-5"),
         scoring_model=os.environ.get("SCORING_MODEL", "claude-haiku-4-5"),
         theme_naming_model=os.environ.get("THEME_NAMING_MODEL", "claude-haiku-4-5"),
-        event_verification_model=os.environ.get("EVENT_VERIFICATION_MODEL", "claude-sonnet-4-5"),
-        event_extraction_model=os.environ.get("EVENT_EXTRACTION_MODEL", "claude-sonnet-4-5"),
+        event_verification_model=os.environ.get("EVENT_VERIFICATION_MODEL", "claude-haiku-4-5"),
+        event_extraction_model=os.environ.get("EVENT_EXTRACTION_MODEL", "claude-haiku-4-5"),
         enrichment_extraction_model=os.environ.get("ENRICHMENT_EXTRACTION_MODEL", "claude-sonnet-4-5"),
         generation_model=os.environ.get("GENERATION_MODEL", "claude-sonnet-4-5"),
         fact_check_model=os.environ.get("FACT_CHECK_MODEL", "claude-sonnet-4-5"),
