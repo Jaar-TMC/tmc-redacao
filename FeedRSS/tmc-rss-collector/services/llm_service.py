@@ -387,14 +387,14 @@ Se houver conflito entre SEO e precisao factual, SEMPRE priorize a precisao.
 - **Voz ativa**: OBRIGATORIO. "O governo aprovou" em vez de "Foi aprovado pelo governo"
 - **Densidade keyword**: A palavra-chave principal deve aparecer entre 1-2.5% do texto
 
-### LINKS EXTERNOS (OBRIGATORIO quando fontes verificadas disponiveis)
-- Inclua 2-4 hyperlinks para fontes VERIFICADAS usando markdown: [nome da fonte](url)
-- Prefira fontes autoritativas (.gov.br, .edu.br, .org.br, veiculos conhecidos)
-- O texto do link deve ser descritivo (nome da fonte ou titulo da materia)
-- OBRIGATORIO: O texto-ancora (anchor text) DEVE corresponder ao nome REAL da fonte/dominio do URL. Se o URL aponta para "cnnbrasil.com.br", o texto DEVE ser "[CNN Brasil]", NUNCA "[Barchart]" ou outro nome. Verifique CADA link antes de finalizar.
+### LINKS EXTERNOS (SOMENTE fontes oficiais/institucionais)
+- Inclua hyperlinks APENAS para fontes OFICIAIS e INSTITUCIONAIS (.gov.br, .edu.br, .org.br, .jus.br)
+- NUNCA inclua links para outros veiculos de imprensa ou portais de noticias
+- Use markdown: [nome da instituicao](url)
+- O texto do link deve ser descritivo (nome do orgao ou instituicao)
 - Distribua os links naturalmente pelo corpo do texto
 - NUNCA invente URLs. Use APENAS URLs das <verified-sources> fornecidas
-- Se nao houver fontes verificadas, NAO inclua links
+- Se nao houver fontes oficiais verificadas, NAO inclua links
 
 ### SLUG SUGERIDO
 - Gere um slug com 3-6 palavras separadas por hifen
@@ -1418,22 +1418,45 @@ def _build_competitor_instruction(competitor_brands: str) -> str:
         # Generic instruction even without a specific brand list
         return """
 ## ATRIBUICAO DE FONTES (OBRIGATORIO)
-NUNCA mencione veiculos de imprensa, portais de noticias ou marcas de midia pelo nome no texto.
-Use SEMPRE formulas neutras: "segundo apuracao", "de acordo com fontes oficiais", "conforme reportado", "segundo a imprensa".
-Exemplo INCORRETO: "Segundo o Globo, o presidente..."
-Exemplo CORRETO: "Segundo a imprensa, o presidente..."
+Voce esta escrevendo para um VEICULO DE IMPRENSA. Nos SOMOS a imprensa.
+NUNCA mencione outros veiculos de imprensa, portais de noticias ou marcas de midia pelo nome.
+NUNCA use "segundo a imprensa" ou "conforme a midia" — isso soa como se fossemos um blog citando jornais.
+NUNCA inclua links/URLs de outros veiculos de noticias no texto.
+
+Atribua SEMPRE a informacao a FONTE ORIGINAL INSTITUCIONAL:
+- "Segundo o Ministerio da Saude", "De acordo com o decreto publicado", "Conforme a regulamentacao"
+- "Segundo a pasta", "De acordo com dados oficiais", "Conforme nota divulgada pelo orgao"
+- "Segundo apuracao", "De acordo com fontes ouvidas pela reportagem"
+- Para dados estatisticos: "Dados do governo indicam que...", "Levantamento oficial aponta..."
+
+Exemplo INCORRETO: "Segundo o Globo, o presidente anunciou..."
+Exemplo INCORRETO: "Segundo a imprensa, a medida foi publicada..."
+Exemplo INCORRETO: "De acordo com o Portal XYZ, o calendario..."
+Exemplo CORRETO: "Segundo o Ministerio da Gestao, a medida foi publicada..."
+Exemplo CORRETO: "De acordo com o decreto, o calendario..."
+Exemplo CORRETO: "Conforme apurado, o presidente anunciou..."
 """
     brand_list = ", ".join(brands)
     return f"""
 ## ATRIBUICAO DE FONTES (OBRIGATORIO)
-NUNCA mencione veiculos de imprensa, portais de noticias ou marcas de midia pelo nome no texto.
+Voce esta escrevendo para um VEICULO DE IMPRENSA. Nos SOMOS a imprensa.
+NUNCA mencione outros veiculos de imprensa, portais de noticias ou marcas de midia pelo nome.
 Isto inclui, mas NAO se limita a: {brand_list}
-QUALQUER veiculo de midia deve ser substituido por formulas neutras.
-Use SEMPRE: "segundo apuracao", "de acordo com fontes oficiais", "conforme reportado", "segundo a imprensa", "de acordo com informacoes publicas".
-Exemplo INCORRETO: "Segundo o Globo, o presidente..."
-Exemplo INCORRETO: "De acordo com o Portal XYZ, a medida..."
-Exemplo CORRETO: "Segundo a imprensa, o presidente..."
-Exemplo CORRETO: "De acordo com fontes oficiais, a medida..."
+NUNCA use "segundo a imprensa" ou "conforme a midia" — isso soa como se fossemos um blog citando jornais.
+NUNCA inclua links/URLs de outros veiculos de noticias no texto.
+
+Atribua SEMPRE a informacao a FONTE ORIGINAL INSTITUCIONAL:
+- "Segundo o Ministerio da Saude", "De acordo com o decreto publicado", "Conforme a regulamentacao"
+- "Segundo a pasta", "De acordo com dados oficiais", "Conforme nota divulgada pelo orgao"
+- "Segundo apuracao", "De acordo com fontes ouvidas pela reportagem"
+- Para dados estatisticos: "Dados do governo indicam que...", "Levantamento oficial aponta..."
+
+Exemplo INCORRETO: "Segundo o Globo, o presidente anunciou..."
+Exemplo INCORRETO: "Segundo a imprensa, a medida foi publicada..."
+Exemplo INCORRETO: "De acordo com o Portal XYZ, o calendario..."
+Exemplo CORRETO: "Segundo o Ministerio da Gestao, a medida foi publicada..."
+Exemplo CORRETO: "De acordo com o decreto, o calendario..."
+Exemplo CORRETO: "Conforme apurado, o presidente anunciou..."
 """
 
 
@@ -1849,9 +1872,17 @@ ATENCAO: Este contexto pode conter imprecisoes ou dados de eventos SIMILARES mas
 </verified-facts>""")
 
     if source_urls:
-        urls_text = "\n".join([f"- {url}" for url in source_urls[:10]])
-        prompt_parts.append(f"""<verified-sources>
-URLs de fontes verificadas para usar como hyperlinks no artigo:
+        # Filter: only pass official/institutional URLs, not competitor news sites
+        from urllib.parse import urlparse as _urlparse
+        _official_suffixes = ('.gov.br', '.gov', '.edu.br', '.edu', '.org.br', '.org', '.jus.br', '.mil.br')
+        _official_urls = [
+            url for url in source_urls[:10]
+            if any(_urlparse(url).netloc.endswith(s) for s in _official_suffixes)
+        ]
+        if _official_urls:
+            urls_text = "\n".join([f"- {url}" for url in _official_urls])
+            prompt_parts.append(f"""<verified-sources>
+URLs de fontes OFICIAIS/INSTITUCIONAIS verificadas para usar como hyperlinks:
 {urls_text}
 </verified-sources>""")
 
