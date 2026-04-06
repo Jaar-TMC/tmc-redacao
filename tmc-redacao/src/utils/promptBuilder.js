@@ -283,6 +283,16 @@ ${toneDesc}
 ${typeInfo}
 ${opinionSection}
 
+## CONFORMIDADE COM FONTE - OBRIGATORIO
+- TODAS as mortes, acidentes, incidentes e vitimas mencionados na fonte DEVEM aparecer no artigo final
+- Se a fonte menciona N mortes, o artigo DEVE detalhar TODAS as N mortes (local, vitima, circunstancias)
+- Se a fonte menciona N envolvidos, o artigo DEVE mencionar todos
+- NAO substitua fatos da fonte por dicas genericas de seguranca, prevencao ou contexto educativo
+- NAO adicione secoes de "como agir", "prevencao" ou "orientacoes" que NAO estejam na fonte original
+- PRIORIDADE: Fidelidade completa aos fatos da fonte > utilidade educativa > volume de texto
+- Dados numericos da fonte (estatisticas, contagens, desdobramentos por municipio) DEVEM ser preservados
+- REGRA ANTI-COPIA: NUNCA copie frases inteiras da fonte. Reformule TODA sentenca: troque a ordem das palavras, use sinonimos, mude a estrutura gramatical. Os FATOS devem ser os mesmos, as FRASES devem ser diferentes
+
 ## REGRAS OBRIGATORIAS DE FORMATO
 
 1. **Estrutura da Materia:**
@@ -296,8 +306,7 @@ ${opinionSection}
    - Inclua subtitulos quando apropriado (use ## para subtitulos)
    - Destaque citacoes importantes
    - Mantenha fluidez entre paragrafos
-   - **CTA OBRIGATORIO**: Apos o 2o ou 3o paragrafo do corpo, insira em paragrafo proprio:
-     "Siga a TMC no WhatsApp e fique por dentro das ultimas noticias do Brasil e do mundo."
+   - NAO inclua CTAs, convites para redes sociais ou frases promocionais (ex: "Siga a TMC no WhatsApp"). O corpo deve ser 100% editorial.
 
    **NEGRITO - REGRAS DE DESTAQUE (use **texto** em markdown):**
    O negrito guia a leitura e destaca informacoes-chave. Use com moderacao (3-6 destaques por paragrafo longo).

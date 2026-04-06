@@ -36,6 +36,7 @@ from services.fact_check_service import (
     WEIGHT_QUOTE_VERIFICATION,
     WEIGHT_MATERIAL_SUFFICIENCY,
     WEIGHT_CLAIM_SIMILARITY,
+    WEIGHT_SOURCE_COVERAGE,
 )
 
 
@@ -271,13 +272,14 @@ class TestConfidenceScoring:
             + WEIGHT_QUOTE_VERIFICATION
             + WEIGHT_MATERIAL_SUFFICIENCY
             + WEIGHT_CLAIM_SIMILARITY
+            + WEIGHT_SOURCE_COVERAGE
         )
         assert abs(total - 1.0) < 0.001
 
     def test_weights_updated(self):
-        """Verify new weight values (v7: claims 0.45, entities 0.15, similarity 0.10)."""
-        assert WEIGHT_CLAIM_GROUNDING == 0.45
-        assert WEIGHT_ENTITY_OVERLAP == 0.15
+        """Verify new weight values (v8: claims 0.40, entities 0.10, coverage 0.10)."""
+        assert WEIGHT_CLAIM_GROUNDING == 0.40
+        assert WEIGHT_ENTITY_OVERLAP == 0.10
         assert WEIGHT_QUOTE_VERIFICATION == 0.10
         assert WEIGHT_CLAIM_SIMILARITY == 0.10
 
@@ -864,10 +866,12 @@ class TestClaimSourceSimilarity:
             WEIGHT_CLAIM_GROUNDING, WEIGHT_ENTITY_OVERLAP,
             WEIGHT_EXPANSION_RATIO, WEIGHT_QUOTE_VERIFICATION,
             WEIGHT_MATERIAL_SUFFICIENCY, WEIGHT_CLAIM_SIMILARITY,
+            WEIGHT_SOURCE_COVERAGE,
         )
         total = (WEIGHT_CLAIM_GROUNDING + WEIGHT_ENTITY_OVERLAP +
                  WEIGHT_EXPANSION_RATIO + WEIGHT_QUOTE_VERIFICATION +
-                 WEIGHT_MATERIAL_SUFFICIENCY + WEIGHT_CLAIM_SIMILARITY)
+                 WEIGHT_MATERIAL_SUFFICIENCY + WEIGHT_CLAIM_SIMILARITY +
+                 WEIGHT_SOURCE_COVERAGE)
         assert abs(total - 1.0) < 0.001, f"Weights sum to {total}, expected 1.0"
 
 

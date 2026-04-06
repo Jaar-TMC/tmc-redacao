@@ -78,12 +78,14 @@ def _get_temporal_recent_days():
 
 # Confidence scoring weights (calibrated for journalism safety)
 # v7: Entities 20% → 15% to reduce false positive rate (30% FP from novel entities)
-WEIGHT_CLAIM_GROUNDING = 0.45
-WEIGHT_ENTITY_OVERLAP = 0.15
+# v8: Added source coverage (0.10), redistributed from grounding (0.45→0.40) and entities (0.15→0.10)
+WEIGHT_CLAIM_GROUNDING = 0.40
+WEIGHT_ENTITY_OVERLAP = 0.10
 WEIGHT_EXPANSION_RATIO = 0.10
 WEIGHT_QUOTE_VERIFICATION = 0.10
 WEIGHT_MATERIAL_SUFFICIENCY = 0.10
 WEIGHT_CLAIM_SIMILARITY = 0.10  # v7: raised from 0.05 to absorb entity weight reduction
+WEIGHT_SOURCE_COVERAGE = 0.10  # v8: penalize omission of major source facts
 
 
 # =============================================================================
@@ -1537,10 +1539,20 @@ Regras:
                     metadata.claims, texto_base, enrichment_text
                 )
 
+            # Store source text for coverage check (v8)
+            metadata._source_text = texto_base
+            metadata._generated_article = generated_article
+
             # Compute confidence score
             metadata.confidence_score = self._compute_confidence(
                 metadata, entity_result, quote_result, claim_similarities
             )
+
+            # Clean up large strings stored for coverage check
+            if hasattr(metadata, '_source_text'):
+                del metadata._source_text
+            if hasattr(metadata, '_generated_article'):
+                del metadata._generated_article
 
             # Determine risk level
             metadata.risk_level = self._determine_risk_level(
@@ -2678,6 +2690,59 @@ Regras:
         return result
 
     # =========================================================================
+    # Source Coverage Scoring (v8)
+    # =========================================================================
+
+    def _compute_source_coverage_score(
+        self,
+        texto_base: str,
+        generated_article: str
+    ) -> float:
+        """
+        Compute how well the generated article covers key facts from the source.
+
+        Extracts numbers, proper nouns, and key entities from source text
+        and checks their presence in the generated article.
+        Returns coverage ratio (0-1).
+        """
+        if not texto_base or not generated_article:
+            return 0.5  # Neutral when unavailable
+
+        source_lower = texto_base.lower()
+        article_lower = generated_article.lower()
+
+        # Extract key markers from source
+        markers = set()
+
+        # 1. Numbers (ages, counts, times, percentages)
+        numbers = re.findall(r'\b\d+(?:[.,]\d+)?(?:\s*%|\s*anos?)?\b', source_lower)
+        for n in numbers:
+            n_clean = n.strip()
+            if len(n_clean) >= 1:  # Include single digits (e.g., "2 mortes")
+                markers.add(n_clean)
+
+        # 2. Proper nouns (capitalized words in original text, not at sentence start)
+        words = texto_base.split()
+        for i, word in enumerate(words):
+            clean = word.strip(".,;:!?\"'()[]{}—–-")
+            if (len(clean) >= 3 and clean[0].isupper() and not clean.isupper()
+                    and i > 0 and not words[i-1].endswith('.')):
+                markers.add(clean.lower())
+
+        # 3. Location names (Praia de/do/da X, cities)
+        locations = re.findall(r'(?:praia|cidade|municipio|bairro)\s+(?:d[eoa]\s+)?(\w+)', source_lower)
+        markers.update(locations)
+
+        if len(markers) < 3:
+            return 0.5  # Not enough markers to assess
+
+        # Check coverage
+        found = sum(1 for m in markers if m in article_lower)
+        coverage = found / len(markers)
+
+        return min(1.0, coverage)
+
+    # =========================================================================
     # Confidence Scoring
     # =========================================================================
 
@@ -2691,13 +2756,14 @@ Regras:
         """
         Compute composite confidence score (0-1).
 
-        Weights:
+        Weights (v8):
         - Claim grounding: 40%
-        - Entity overlap: 25%
+        - Entity overlap: 10%
         - Expansion ratio: 10%
         - Quote verification: 10%
         - Material sufficiency: 10%
-        - Claim-source similarity: 5% (TF-IDF, non-LLM signal)
+        - Claim-source similarity: 10% (TF-IDF, non-LLM signal)
+        - Source coverage: 10% (penalizes omission of major source facts)
         """
         # Claim grounding score (excluding opinion claims; context claims ARE factual)
         # Backwards compat: also exclude legacy "editorial" verdict
@@ -2793,6 +2859,23 @@ Regras:
         else:
             similarity_score = 0.5  # Neutral when unavailable
 
+        # Source coverage score — penalize if article omits major source facts
+        coverage_score = self._compute_source_coverage_score(
+            metadata._source_text if hasattr(metadata, '_source_text') else '',
+            metadata._generated_article if hasattr(metadata, '_generated_article') else ''
+        )
+        metadata.source_coverage_score = coverage_score
+
+        if coverage_score < 0.5:
+            metadata.warnings.append(
+                f"Cobertura da fonte baixa: {coverage_score:.0%} dos marcadores-chave da fonte encontrados no artigo"
+            )
+            metadata.requires_human_review = True
+            if "Low source coverage" not in metadata.review_reasons:
+                metadata.review_reasons.append(
+                    f"Low source coverage ({coverage_score:.0%}) — article may omit major source facts"
+                )
+
         # Weighted composite
         confidence = (
             WEIGHT_CLAIM_GROUNDING * claim_score
@@ -2801,6 +2884,7 @@ Regras:
             + WEIGHT_QUOTE_VERIFICATION * quote_score
             + WEIGHT_MATERIAL_SUFFICIENCY * sufficiency_score
             + WEIGHT_CLAIM_SIMILARITY * similarity_score
+            + WEIGHT_SOURCE_COVERAGE * coverage_score
         )
 
         # CoVe bonus: proportional to evidence strength of each reclassified claim

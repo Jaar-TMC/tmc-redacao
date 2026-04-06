@@ -1838,8 +1838,14 @@ FATOS VERIFICADOS EXTRAIDOS DO TEXTO-BASE (use estes como base, NAO o texto brut
 {extracted_facts}
 </extracted-facts>
 
-INSTRUCAO CRITICA: Escreva baseado APENAS nos fatos extraidos acima.
-NAO copie frases do material em <source-text>. O texto original e fornecido apenas como referencia contextual.""")
+INSTRUCAO CRITICA: Escreva baseado nos fatos extraidos acima.
+Se <source-text> contiver mortes, incidentes, vitimas ou dados numericos que NAO aparecam nos fatos extraidos, inclua-os tambem — mas SEMPRE reescritos com suas proprias palavras.
+REGRA ANTI-COPIA (OBRIGATORIO):
+- NENHUMA sentenca do artigo pode ter mais de 50%% das palavras na mesma ordem de uma sentenca da fonte
+- Para CADA fato, voce DEVE mudar: a estrutura da frase (ativa<>passiva), a ordem dos elementos, e pelo menos 2 palavras-chave por sinonimos
+- Exemplo PROIBIDO: fonte diz "Salva-vidas identificaram duas pessoas com dificuldade na agua" → artigo diz "Salva-vidas viram duas pessoas com dificuldade na agua" (so trocou 1 palavra)
+- Exemplo CORRETO: "Dois banhistas foram avistados em apuros pelos salva-vidas" (estrutura, ordem e vocabulario diferentes)
+- O texto original e referencia de FATOS, nunca de FRASES. Escreva como se voce so tivesse anotado os dados, sem acesso ao texto completo.""")
 
     # Inject enrichment context if available — stricter wording for short sources
     source_len = len(texto_base.strip())
@@ -2402,17 +2408,18 @@ class LLMService:
             "Responda SOMENTE com a lista de fatos, sem comentarios adicionais."
         )
         extraction_prompt = (
-            f"Extraia APENAS fatos verificados, entidades, numeros, datas e citacoes diretas "
-            f"do texto abaixo. NAO inclua frases completas do texto original. "
-            f"NAO parafraseie — apenas liste os fatos como itens separados.\n\n"
-            f"TEXTO:\n{texto_base[:3000]}\n\n"
-            f"Liste 5 afirmacoes factuais neste texto (uma por linha, comecando com -):"
+            f"Extraia APENAS fatos verificados do texto abaixo como DADOS ESTRUTURADOS. "
+            f"FORMATO OBRIGATORIO: liste cada fato como dados brutos (quem, o que, onde, quando, numeros). "
+            f"PROIBIDO copiar frases inteiras do texto — reduza cada fato a suas informacoes essenciais. "
+            f"Exemplo: em vez de 'O resgate mobilizou tres viaturas e seis bombeiros', escreva '- Resgate: 3 viaturas, 6 bombeiros'.\n\n"
+            f"TEXTO:\n{texto_base[:8000]}\n\n"
+            f"Liste TODAS as afirmacoes factuais principais neste texto — minimo 10, incluindo CADA morte, incidente, vitima, local, horario e dado numerico distinto (uma por linha, comecando com -):"
         )
         try:
             result = await self._call_api(
                 system=extraction_system,
                 user_content=extraction_prompt,
-                max_tokens=512,
+                max_tokens=1500,
                 correlation_id=correlation_id,
                 model="claude-haiku-4-5",
                 task_type="fact_extraction",

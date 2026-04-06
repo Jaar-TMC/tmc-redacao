@@ -789,7 +789,7 @@ class DatabaseService:
 
                 # Data query -- uses seek WHERE (filter + cursor predicate), no OFFSET
                 select_cols = """
-                    SELECT a.id, a.source_id, a.title, LEFT(a.content, 200) as content, a.preview, a.url,
+                    SELECT a.id, a.source_id, a.title, a.content, a.preview, a.url,
                            a.image_url, a.author, a.category, a.tags, a.published_at,
                            a.collected_at, a.hash,
                            s.name as source_name, s.url as source_url, s.favicon_url,
@@ -841,7 +841,7 @@ class DatabaseService:
                     logger.info(f"[get_articles_with_urgency] offset path: approx total from partition stats = {approx_total}")
 
                     select_cols = """
-                        SELECT a.id, a.source_id, a.title, LEFT(a.content, 200) as content, a.preview, a.url,
+                        SELECT a.id, a.source_id, a.title, a.content, a.preview, a.url,
                                a.image_url, a.author, a.category, a.tags, a.published_at,
                                a.collected_at, a.hash,
                                s.name as source_name, s.url as source_url, s.favicon_url,
@@ -872,7 +872,7 @@ class DatabaseService:
 
                 else:
                     select_cols = """
-                        SELECT a.id, a.source_id, a.title, LEFT(a.content, 200) as content, a.preview, a.url,
+                        SELECT a.id, a.source_id, a.title, a.content, a.preview, a.url,
                                a.image_url, a.author, a.category, a.tags, a.published_at,
                                a.collected_at, a.hash,
                                s.name as source_name, s.url as source_url, s.favicon_url,
@@ -897,7 +897,7 @@ class DatabaseService:
                             logger.warning("[get_articles_with_urgency] Falling back to date ordering")
                             try:
                                 fallback_select = """
-                                    SELECT a.id, a.source_id, a.title, LEFT(a.content, 200) as content, a.preview, a.url,
+                                    SELECT a.id, a.source_id, a.title, a.content, a.preview, a.url,
                                            a.image_url, a.author, a.category, a.tags, a.published_at,
                                            a.collected_at, a.hash,
                                            s.name as source_name, s.url as source_url, s.favicon_url,
