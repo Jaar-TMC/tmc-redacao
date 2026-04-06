@@ -2091,19 +2091,19 @@ class LLMService:
             api_key: API key (defaults to config azure_ai_api_key or anthropic_api_key)
             endpoint: API endpoint URL
         """
-        # Prioritize Azure AI Services configuration
-        azure_key = _get_azure_ai_api_key()
+        # Prioritize Anthropic API directly (Azure AI deployment unavailable)
         anthropic_key = _get_anthropic_api_key()
-        if azure_key:
-            self.api_key = api_key or azure_key
-            self.endpoint = endpoint or _get_azure_ai_endpoint()
-            self.use_azure = True
-            logger.info(f"Using Azure AI Services endpoint: {self.endpoint}")
-        elif anthropic_key:
+        azure_key = _get_azure_ai_api_key()
+        if anthropic_key:
             self.api_key = api_key or anthropic_key
             self.endpoint = ANTHROPIC_ENDPOINT
             self.use_azure = False
             logger.info("Using direct Anthropic API")
+        elif azure_key:
+            self.api_key = api_key or azure_key
+            self.endpoint = endpoint or _get_azure_ai_endpoint()
+            self.use_azure = True
+            logger.info(f"Using Azure AI Services endpoint: {self.endpoint}")
         else:
             raise ValueError("Neither AZURE_AI_API_KEY nor ANTHROPIC_API_KEY configured")
 
