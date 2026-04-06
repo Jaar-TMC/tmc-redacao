@@ -612,11 +612,46 @@ class FactCheckService:
                         if domain:
                             seen_domains.add(domain)
 
+            logger.info(f"[{correlation_id}] Exa quality filter: {len(all_urls)} quality URLs kept, {filtered_count} filtered out")
+
+            if not all_texts and _get_temporal_awareness_enabled() and not self._exa_circuit_open:
+                # Fallback: retry with wider date range when initial window found nothing
+                fallback_date_range = self._get_tier_fallback_date_range(temporal_tier)
+                logger.info(f"[{correlation_id}] Exa 0 results with {temporal_tier} window, "
+                           f"retrying with fallback range: {fallback_date_range}")
+                fallback_tasks = [
+                    self._search_exa(q, num_results=num_results, max_text=max_text_chars,
+                                    operation='enrichment_search', date_range_start=fallback_date_range)
+                    for q in queries[:num_queries]
+                ]
+                fallback_results = await asyncio.gather(*fallback_tasks, return_exceptions=True)
+                for sr in fallback_results:
+                    if isinstance(sr, Exception):
+                        continue
+                    if sr:
+                        for item in sr:
+                            text = item.get("text", "")
+                            url = item.get("url", "")
+                            title = item.get("title", "")
+                            if url in all_urls:
+                                continue
+                            domain = urlparse(url).netloc if url else ""
+                            if domain and domain in seen_domains:
+                                continue
+                            if not self._is_quality_url(url, text):
+                                filtered_count += 1
+                                continue
+                            if text and len(text.strip()) > 50:
+                                all_texts.append(f"[{title}]({url}) {text[:max_text_chars]}")
+                            if url:
+                                all_urls.add(url)
+                            if domain:
+                                seen_domains.add(domain)
+
             result.source_urls = list(all_urls)[:15]
-            logger.info(f"Exa quality filter: {len(all_urls)} quality URLs kept, {filtered_count} filtered out")
 
             if not all_texts:
-                logger.info("No enrichment results from Exa")
+                logger.info(f"[{correlation_id}] No enrichment results from Exa (including fallback)")
                 return result
 
             # Extract key facts from search results using LLM
@@ -834,11 +869,23 @@ class FactCheckService:
         """Return Exa startPublishedDate for a given temporal tier."""
         from datetime import datetime, timedelta
         if tier == "breaking":
-            delta = timedelta(hours=_get_temporal_breaking_hours())
+            delta = timedelta(days=3)
         elif tier == "recente":
-            delta = timedelta(days=_get_temporal_recent_days())
+            delta = timedelta(days=7)
         else:
-            delta = timedelta(days=_get_exa_search_days())
+            delta = timedelta(days=14)
+        start = datetime.utcnow() - delta
+        return start.strftime("%Y-%m-%dT%H:%M:%S.000Z")
+
+    def _get_tier_fallback_date_range(self, tier: str) -> str:
+        """Return wider Exa date range for fallback when initial search returns 0 results."""
+        from datetime import datetime, timedelta
+        if tier == "breaking":
+            delta = timedelta(days=7)
+        elif tier == "recente":
+            delta = timedelta(days=14)
+        else:
+            delta = timedelta(days=30)
         start = datetime.utcnow() - delta
         return start.strftime("%Y-%m-%dT%H:%M:%S.000Z")
 
