@@ -82,8 +82,15 @@ class AppConfig:
     # CORS
     cors_allowed_origins: str = ""
 
-    # Editorial competitor filtering (comma-separated brand names, set by editorial team)
-    competitor_brands: str = ""
+    # Editorial competitor filtering (comma-separated brand names)
+    # Default list covers major Brazilian media outlets; override via COMPETITOR_BRANDS env var
+    competitor_brands: str = (
+        "R7, G1, O Globo, Globo, Folha de S.Paulo, Folha, UOL, CNN Brasil, "
+        "Band, BandNews, SBT, Terra, iG, Metrópoles, Estadão, "
+        "Correio Braziliense, Gazeta do Povo, Jovem Pan, Valor Econômico, "
+        "Poder360, Veja, IstoÉ, Carta Capital, Record, InfoMoney, Época, "
+        "Portal do Zacarias, NSC Total, GZH, Diário do Nordeste"
+    )
 
     # Rate limits
     rate_limit_generate: float = 0.5
@@ -179,7 +186,7 @@ def load_config() -> AppConfig:
         publish_max_expansion=_float_env("PUBLISH_MAX_EXPANSION", 8.0),
         # CORS
         cors_allowed_origins=os.environ.get("CORS_ALLOWED_ORIGINS", ""),
-        competitor_brands=os.environ.get("COMPETITOR_BRANDS", ""),
+        competitor_brands=os.environ.get("COMPETITOR_BRANDS") or AppConfig.competitor_brands,
         # Rate limits
         rate_limit_generate=_float_env("RATE_LIMIT_GENERATE", 0.5),
         rate_limit_burst_generate=_int_env("RATE_LIMIT_BURST_GENERATE", 3),
