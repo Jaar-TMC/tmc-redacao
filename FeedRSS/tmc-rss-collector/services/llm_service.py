@@ -1411,18 +1411,29 @@ def _normalize_tag_portuguese(tag: str) -> str:
 
 def _build_competitor_instruction(competitor_brands: str) -> str:
     """Build competitor filtering instruction from comma-separated brand list."""
-    if not competitor_brands or not competitor_brands.strip():
-        return ""
-    brands = [b.strip() for b in competitor_brands.split(",") if b.strip()]
+    brands = []
+    if competitor_brands and competitor_brands.strip():
+        brands = [b.strip() for b in competitor_brands.split(",") if b.strip()]
     if not brands:
-        return ""
-    brand_list = ", ".join(brands)
-    return f"""
-## FILTRAGEM DE MARCAS CONCORRENTES (OBRIGATORIO)
-NAO mencione estes veiculos/marcas pelo nome: {brand_list}
-Em vez disso, use formulas neutras: "segundo apuracao", "de acordo com fontes", "conforme reportado", "segundo a imprensa".
+        # Generic instruction even without a specific brand list
+        return """
+## ATRIBUICAO DE FONTES (OBRIGATORIO)
+NUNCA mencione veiculos de imprensa, portais de noticias ou marcas de midia pelo nome no texto.
+Use SEMPRE formulas neutras: "segundo apuracao", "de acordo com fontes oficiais", "conforme reportado", "segundo a imprensa".
 Exemplo INCORRETO: "Segundo o Globo, o presidente..."
 Exemplo CORRETO: "Segundo a imprensa, o presidente..."
+"""
+    brand_list = ", ".join(brands)
+    return f"""
+## ATRIBUICAO DE FONTES (OBRIGATORIO)
+NUNCA mencione veiculos de imprensa, portais de noticias ou marcas de midia pelo nome no texto.
+Isto inclui, mas NAO se limita a: {brand_list}
+QUALQUER veiculo de midia deve ser substituido por formulas neutras.
+Use SEMPRE: "segundo apuracao", "de acordo com fontes oficiais", "conforme reportado", "segundo a imprensa", "de acordo com informacoes publicas".
+Exemplo INCORRETO: "Segundo o Globo, o presidente..."
+Exemplo INCORRETO: "De acordo com o Portal XYZ, a medida..."
+Exemplo CORRETO: "Segundo a imprensa, o presidente..."
+Exemplo CORRETO: "De acordo com fontes oficiais, a medida..."
 """
 
 
@@ -1518,8 +1529,7 @@ def get_system_prompt(
    - Use ## (H2) para subtitulos principais e ### (H3) para sub-secoes. NUNCA use # (H1) no corpo.
    - Destaque citações importantes
    - Mantenha fluidez entre parágrafos
-   - **CTA OBRIGATÓRIO**: NUNCA apos o 1o paragrafo. SEMPRE apos o 2o ou 3o paragrafo do corpo, insira em paragrafo proprio:
-     "Siga a TMC no WhatsApp e fique por dentro das últimas notícias do Brasil e do mundo."
+   - **NAO inclua CTAs, convites para redes sociais ou frases promocionais** (ex: "Siga a TMC no WhatsApp", "fique por dentro"). O corpo deve ser 100% editorial.
 
    - **TRADUCAO DE JARGAO (OBRIGATORIO)**: Sempre que um termo tecnico, juridico, economico ou politico for usado (ex: "delacao premiada", "superavit", "posicoes vendidas", "Estreito de Ormuz"), OBRIGATORIAMENTE faca uma traducao contextual rapida na mesma frase ou entre parenteses. Exemplo: "a delacao premiada (acordo em que o reu confessa e entrega comparsas em troca de pena menor)". NUNCA presuma que o leitor conhece jargao especializado.
 
@@ -1567,7 +1577,7 @@ def get_system_prompt(
      "titulo_curto": "Versão curta do título (max 70 caracteres)",
      "linha_fina": "Linha fina descritiva (max 120 caracteres)",
      "resumo": ["Ponto-chave 1 da matéria", "Ponto-chave 2", "Ponto-chave 3", "Ponto-chave 4"],
-     "conteudo": "Corpo completo da matéria com **negritos** para destaques e CTA após 2º/3º parágrafo...",
+     "conteudo": "Corpo completo da matéria com **negritos** para destaques...",
      "tags_sugeridas": ["Economia", "Política", "São Paulo"],
      "slug_sugerido": "palavras-chave-separadas-por-hifen"
    }}
@@ -1697,8 +1707,7 @@ Mantenha os vetos universais (sem preconceito, ataques pessoais, etc.)"""
    - Use ## (H2) para subtitulos principais e ### (H3) para sub-secoes. NUNCA use # (H1) no corpo.
    - Destaque citações importantes
    - Mantenha fluidez entre parágrafos
-   - **CTA OBRIGATÓRIO**: NUNCA apos o 1o paragrafo. SEMPRE apos o 2o ou 3o paragrafo do corpo, insira em paragrafo proprio:
-     "Siga a TMC no WhatsApp e fique por dentro das últimas notícias do Brasil e do mundo."
+   - **NAO inclua CTAs, convites para redes sociais ou frases promocionais** (ex: "Siga a TMC no WhatsApp", "fique por dentro"). O corpo deve ser 100% editorial.
 
    - **TRADUCAO DE JARGAO (OBRIGATORIO)**: Sempre que um termo tecnico, juridico, economico ou politico for usado (ex: "delacao premiada", "superavit", "posicoes vendidas", "Estreito de Ormuz"), OBRIGATORIAMENTE faca uma traducao contextual rapida na mesma frase ou entre parenteses. Exemplo: "a delacao premiada (acordo em que o reu confessa e entrega comparsas em troca de pena menor)". NUNCA presuma que o leitor conhece jargao especializado.
 
@@ -1743,7 +1752,7 @@ Mantenha os vetos universais (sem preconceito, ataques pessoais, etc.)"""
      "titulo_curto": "Versão curta do título (max 70 caracteres)",
      "linha_fina": "Linha fina descritiva (max 120 caracteres)",
      "resumo": ["Ponto-chave 1 da matéria", "Ponto-chave 2", "Ponto-chave 3", "Ponto-chave 4"],
-     "conteudo": "Corpo completo da matéria com **negritos** para destaques e CTA após 2º/3º parágrafo...",
+     "conteudo": "Corpo completo da matéria com **negritos** para destaques...",
      "tags_sugeridas": ["Economia", "Política", "São Paulo"],
      "slug_sugerido": "palavras-chave-separadas-por-hifen"
    }}
@@ -1911,7 +1920,6 @@ Inclua a atribuição de créditos apropriadamente.""")
   [ ] Slug sugerido com 3-6 palavras, sem acentos, minusculas?
   [ ] Todos os termos tecnicos/jargao tem traducao contextual na mesma frase?
   [ ] Ha pelo menos UMA frase "por que isso importa" conectando a noticia ao dia a dia do leitor?
-  [ ] CTA esta apos o 2o ou 3o paragrafo (NUNCA apos o 1o)?
   [ ] Anchor text dos links corresponde ao nome real da fonte/dominio?
   [ ] >>> CORPO TEM NO MINIMO {min_chars} CARACTERES? (conte antes de responder!) <<<"""
     else:
@@ -1927,7 +1935,6 @@ Inclua a atribuição de créditos apropriadamente.""")
   [ ] Minimo 3 atribuicoes de fonte e 2 verbos de reporte?
   [ ] Todos os termos tecnicos/jargao tem traducao contextual na mesma frase?
   [ ] Ha pelo menos UMA frase "por que isso importa" conectando a noticia ao dia a dia do leitor?
-  [ ] CTA esta apos o 2o ou 3o paragrafo (NUNCA apos o 1o)?
   [ ] Anchor text dos links corresponde ao nome real da fonte/dominio?
   [ ] >>> CORPO TEM NO MINIMO {min_chars} CARACTERES? (conte antes de responder!) <<<"""
 
