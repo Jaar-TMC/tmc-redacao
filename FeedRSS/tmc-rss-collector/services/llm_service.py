@@ -2170,19 +2170,19 @@ class LLMService:
                     task_type=task_type,
                 )
 
-        # Route Haiku models to Anthropic API directly when on Azure AI
-        # (Azure AI proxy may not have Haiku deployed)
+        # Route all models to Anthropic API directly when available
+        # Azure AI proxy may not have all model deployments (Haiku, Sonnet, etc.)
         use_endpoint = self.endpoint
         use_headers = None
         _anthropic_key = _get_anthropic_api_key()
-        if self.use_azure and "haiku" in effective_model and _anthropic_key:
+        if self.use_azure and _anthropic_key:
             use_endpoint = ANTHROPIC_ENDPOINT
             use_headers = {
                 "Content-Type": "application/json",
                 "x-api-key": _anthropic_key,
                 "anthropic-version": "2023-06-01",
             }
-            logger.info(f"{_cid}Routing {effective_model} to Anthropic API (not available on Azure AI)")
+            logger.info(f"{_cid}Routing {effective_model} to Anthropic API (fallback from Azure AI)")
 
         # Circuit breaker check
         if self._llm_circuit_open:
