@@ -118,10 +118,29 @@ const RevisarPage = () => {
     }
 
     // If we have real data from context, use it
-    if (fonte?.dados && fonte.dados.length > 0) {
-      const articles = fonte.dados;
-      const textoBaseContent = textoBase?.textoCompleto ||
-        articles.map(a => a.content || a.preview || a.title).join('\n\n');
+    // Support both array (feed) and object (tema, link, video, prompt) fonte.dados
+    const hasFonteDados = fonte?.dados && (
+      Array.isArray(fonte.dados) ? fonte.dados.length > 0 : Object.keys(fonte.dados).length > 0
+    );
+    if (hasFonteDados) {
+      const articles = Array.isArray(fonte.dados) ? fonte.dados : [];
+      // Build texto_base from multiple sources, preferring the richest content.
+      // blocos: curated topic text assembled by TextoBasePage (from AI extraction)
+      // rawArticleText: full article content from fonte.dados (original RSS content)
+      // textoCompleto: manual text editing mode (rarely used)
+      // The generation API requires >= 300 chars (MIN_SOURCE_CHARS).
+      // Use blocos when available; fall back to raw article content if blocos are
+      // too short (topic extraction summarizes, so extracted text can be < 300 chars
+      // even when the source article has 3000+ chars).
+      const blocosText = getTextoBaseParaGeracao();
+      const rawArticleText = articles.length > 0
+        ? articles.map(a => a.content || a.preview || a.title).join('\n\n')
+        : '';
+      let textoBaseContent = textoBase?.textoCompleto || blocosText || rawArticleText;
+      // Safety net: if assembled text is below minimum but raw content is longer, use raw
+      if (textoBaseContent.length < 300 && rawArticleText.length > textoBaseContent.length) {
+        textoBaseContent = rawArticleText;
+      }
 
       const wordCount = textoBaseContent.split(/\s+/).filter(Boolean).length;
 
@@ -129,9 +148,11 @@ const RevisarPage = () => {
         textoBase: {
           type: fonte.tipo === 'feed' ? 'Matérias do Feed' :
                 fonte.tipo === 'link' ? 'Link da Web' :
-                fonte.tipo === 'video' ? 'Transcrição de Vídeo' : 'Texto',
-          title: articles[0]?.title || 'Texto-base',
-          blocks: articles.length,
+                fonte.tipo === 'video' ? 'Transcrição de Vídeo' :
+                fonte.tipo === 'tema' ? 'Tema em Alta' :
+                fonte.tipo === 'transcription' ? 'Transcrição de Vídeo' : 'Texto',
+          title: articles[0]?.title || fonte.dados?.title || fonte.dados?.url || 'Texto-base',
+          blocks: articles.length || textoBase?.blocos?.length || 1,
           words: wordCount,
           content: textoBaseContent.substring(0, 500) + (textoBaseContent.length > 500 ? '...' : '')
         },
