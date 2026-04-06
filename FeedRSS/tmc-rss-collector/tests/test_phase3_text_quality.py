@@ -118,8 +118,12 @@ class TestBuildCompetitorInstruction:
         from services.llm_service import _build_competitor_instruction
         self.build = _build_competitor_instruction
 
-    def test_empty_brands_returns_empty(self):
-        assert self.build("") == ""
+    def test_empty_brands_returns_generic_instruction(self):
+        """Even with no specific brands, a generic attribution instruction is returned."""
+        result = self.build("")
+        assert len(result) > 50, "Should return generic instruction even without brands"
+        assert "NUNCA" in result, "Should contain NUNCA"
+        assert "VEICULO DE IMPRENSA" in result or "imprensa" in result.lower()
 
     def test_brands_generate_instruction(self):
         result = self.build("Globo,Band,Record")
@@ -158,11 +162,15 @@ class TestAntiCopiaConstant:
 class TestCompetitorBrandsConfig:
     """Tests for COMPETITOR_BRANDS env var loading."""
 
-    def test_default_empty(self):
+    def test_default_has_brands(self):
+        """Default competitor_brands now contains hardcoded list of 30 brands."""
         from services.config import AppConfig
         config = AppConfig()
         assert hasattr(config, "competitor_brands")
-        assert config.competitor_brands == ""
+        brands = [b.strip() for b in config.competitor_brands.split(",") if b.strip()]
+        assert len(brands) >= 25, f"Expected 25+ default brands, got {len(brands)}"
+        assert "R7" in brands
+        assert "Portal do Zacarias" in brands
 
 
 # ──────────────────────────────────────────────────────────────────
