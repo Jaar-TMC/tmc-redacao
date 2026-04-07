@@ -85,8 +85,6 @@ const CriarPostPage = () => {
   const sensitiveTopicsDetected = resultado?.sensitiveTopicsDetected || false;
   const sensitiveInstructions = resultado?.sensitiveInstructions || [];
   const schemaOrg = resultado?.schemaOrg || null;
-  const notaForced = resultado?.notaForced || false;
-  const notaDisclaimer = resultado?.notaDisclaimer || null;
   const _regenerated = resultado?.regenerated || false;
   const correlationId = resultado?.correlationId || null;
   const qualityLoopPassed = resultado?.qualityLoop?.quality_loop_passed ?? false;
@@ -1094,16 +1092,6 @@ const CriarPostPage = () => {
                   ))}
                 </ul>
               )}
-            </div>
-          </div>
-        )}
-
-        {/* v7.1: Nota forced notice */}
-        {notaForced && (
-          <div className="px-4 pb-1">
-            <div className="text-xs px-3 py-2 rounded border bg-blue-50 border-blue-200 text-blue-700 flex items-center gap-2">
-              <FileText size={14} />
-              <span>{notaDisclaimer || 'Material insuficiente - tipo forçado para nota curta'}</span>
             </div>
           </div>
         )}
