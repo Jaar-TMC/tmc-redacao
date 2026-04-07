@@ -52,6 +52,7 @@ const RevisarPage = () => {
   const [currentPhase, setCurrentPhase] = useState(0);
   const [generationError, setGenerationError] = useState(null);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
+  const [isFinishing, setIsFinishing] = useState(false);
   const phaseTimerRef = useRef(null);
   const elapsedTimerRef = useRef(null);
   const isGeneratingRef = useRef(false);
@@ -281,10 +282,13 @@ const RevisarPage = () => {
     setCurrentPhase(0);
     setGenerationError(null);
     setElapsedSeconds(0);
+    setIsFinishing(false);
 
     // Phase-aware progress simulation based on real pipeline timing
     let phase = 0;
     let phaseStart = Date.now();
+    let creepStartTime = null;
+    let creepBaseProgress = 95;
     const pipelineStart = Date.now();
 
     const startProgressSimulation = () => {
@@ -295,7 +299,20 @@ const RevisarPage = () => {
 
       // Phase progress timer (smooth 100ms updates)
       phaseTimerRef.current = setInterval(() => {
-        if (phase >= PHASES.length) return;
+        // Once all simulated phases have elapsed, switch to an asymptotic creep
+        // toward 99.5% so the user always sees motion while the backend finishes.
+        // The real 100% jump still happens only when the API responds.
+        if (phase >= PHASES.length) {
+          if (creepStartTime === null) {
+            creepStartTime = Date.now();
+            setIsFinishing(true);
+          }
+          const creepElapsed = Date.now() - creepStartTime;
+          // Asymptote: ~98% by 30s, ~99% by 60s, capped at 99.5%.
+          const creepProgress = creepBaseProgress + 4.5 * (1 - Math.exp(-creepElapsed / 20000));
+          setGenerationProgress(Math.min(creepProgress, 99.5));
+          return;
+        }
 
         const p = PHASES[phase];
         const prevTarget = phase > 0 ? PHASES[phase - 1].targetProgress : 0;
@@ -305,13 +322,19 @@ const RevisarPage = () => {
         const eased = 1 - Math.pow(1 - phaseFraction, 2);
         const progress = prevTarget + eased * (p.targetProgress - prevTarget);
 
-        setGenerationProgress(Math.min(progress, 95)); // Cap at 95% until API returns
+        setGenerationProgress(Math.min(progress, 95)); // Cap at 95% during simulated phases
 
         // Move to next phase when current phase duration elapsed
-        if (elapsed >= p.durationMs && phase < PHASES.length - 1) {
-          phase++;
-          phaseStart = Date.now();
-          setCurrentPhase(phase);
+        if (elapsed >= p.durationMs) {
+          if (phase < PHASES.length - 1) {
+            phase++;
+            phaseStart = Date.now();
+            setCurrentPhase(phase);
+          } else {
+            // All simulated phases done — advance into creep mode on next tick.
+            phase = PHASES.length;
+            creepBaseProgress = Math.min(progress, 95);
+          }
         }
       }, 100);
     };
@@ -348,6 +371,7 @@ const RevisarPage = () => {
       clearInterval(elapsedTimerRef.current);
 
       // Complete progress
+      setIsFinishing(false);
       setGenerationProgress(100);
       setCurrentPhase(PHASES.length); // All phases done
 
@@ -399,8 +423,18 @@ const RevisarPage = () => {
       clearInterval(phaseTimerRef.current);
       clearInterval(elapsedTimerRef.current);
       console.error('Error generating article:', error);
+      setIsFinishing(false);
       setIsGenerating(false);
-      setGenerationError(error.message || 'Erro ao gerar matéria. Tente novamente.');
+      // Network errors (gateway timeout, connection drop) get the friendly PT-BR
+      // message from api.js. HTTP errors get their own error message. Fallback for
+      // anything else.
+      if (error?.name === 'AbortError') {
+        setGenerationError('A geração excedeu o tempo limite de 5 minutos. Tente novamente.');
+      } else if (error?.isNetworkError) {
+        setGenerationError(error.message);
+      } else {
+        setGenerationError(error?.message || 'Erro ao gerar matéria. Tente novamente.');
+      }
     } finally {
       isGeneratingRef.current = false;
     }
@@ -536,6 +570,12 @@ const RevisarPage = () => {
           <p className="text-center text-xs text-gray-500">
             {Math.round(generationProgress)}% concluído
           </p>
+
+          {isFinishing && (
+            <p className="text-xs text-gray-500 mt-2 text-center animate-pulse">
+              Finalizando — isso pode levar até 1 minuto a mais...
+            </p>
+          )}
 
           <p className="text-center text-xs text-gray-500 mt-6">
             Não atualize ou saia da página durante a geração.

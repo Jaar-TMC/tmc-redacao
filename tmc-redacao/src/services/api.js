@@ -67,11 +67,12 @@ export function getAuthToken() {
  * Custom error class for API errors
  */
 class ApiError extends Error {
-  constructor(message, status, data = null) {
+  constructor(message, status, data = null, isNetworkError = false) {
     super(message);
     this.name = 'ApiError';
     this.status = status;
     this.data = data;
+    this.isNetworkError = isNetworkError;
   }
 }
 
@@ -196,6 +197,19 @@ async function fetchApi(endpoint, options = {}) {
         error.message = error.data.error || 'Operações de IA pausadas pelo administrador';
       }
       throw error;
+    }
+
+    // Browser-level network failures (gateway timeout, connection drop, DNS, CORS, etc.)
+    // surface as a TypeError whose message contains "fetch" — e.g.
+    // "TypeError: Failed to fetch" or "NetworkError when attempting to fetch resource".
+    // Flag these so the UI can show an actionable, PT-BR message.
+    if (error instanceof TypeError && /fetch/i.test(error.message || '')) {
+      throw new ApiError(
+        'Falha de conexão com o servidor. Pode ser uma queda de rede ou um tempo de processamento muito longo. Tente novamente em alguns instantes.',
+        0,
+        null,
+        true
+      );
     }
 
     // Network error or other issues
