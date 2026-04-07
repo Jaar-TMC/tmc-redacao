@@ -88,7 +88,7 @@ const TextoBasePrompt = ({
 
   // Handlers
   const handleSearch = useCallback(async () => {
-    if (prompt.length < 30) return;
+    if (prompt.trim().length === 0) return;
 
     setIsSearching(true);
     setError(null);
@@ -348,8 +348,8 @@ const TextoBasePrompt = ({
               className="w-full h-32 p-4 border border-light-gray rounded-lg resize-none text-sm text-dark-gray leading-relaxed focus:outline-none focus:ring-2 focus:ring-tmc-orange/50 focus:border-tmc-orange placeholder:text-medium-gray/60"
             />
             <div className="flex items-center justify-between mt-1.5">
-              <span className={`text-xs ${prompt.length < 30 ? 'text-amber-500' : 'text-medium-gray'}`}>
-                {prompt.length < 30 ? `Mínimo 30 caracteres (faltam ${30 - prompt.length})` : 'Pronto para pesquisar'}
+              <span className="text-xs text-medium-gray">
+                {prompt.trim().length === 0 ? 'Digite o tema para pesquisar' : 'Pronto para pesquisar'}
               </span>
               <span className={`text-xs ${prompt.length > 500 ? 'text-red-500' : 'text-medium-gray'}`}>
                 {prompt.length}/500
@@ -405,7 +405,7 @@ const TextoBasePrompt = ({
           {/* Search button */}
           <button
             onClick={handleSearch}
-            disabled={prompt.length < 30 || isSearching}
+            disabled={prompt.trim().length === 0 || isSearching}
             className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-tmc-orange text-white rounded-lg font-medium hover:bg-tmc-orange/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {isSearching ? (

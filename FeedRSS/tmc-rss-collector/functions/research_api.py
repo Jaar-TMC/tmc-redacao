@@ -56,7 +56,7 @@ _CATEGORY_ANGLES = {
 # ============================================================================
 
 class ResearchRequest(BaseModel):
-    prompt: str = Field(..., min_length=30, max_length=500)
+    prompt: str = Field(..., min_length=1, max_length=500)
     categoria: Optional[str] = None
     date_range_days: int = Field(default=7, ge=1, le=60)
     max_results: int = Field(default=10, ge=5, le=15)
@@ -282,7 +282,7 @@ async def research_topic_handler(req: func.HttpRequest) -> func.HttpResponse:
         except Exception as e:
             logger.warning(f"[{correlation_id}] Research request validation error: {e}")
             return create_error_response(
-                "Erro de validacao: prompt deve ter entre 30 e 500 caracteres", 400
+                "Erro de validacao: prompt deve ter entre 1 e 500 caracteres", 400
             )
 
         # Check Exa API key availability
