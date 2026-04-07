@@ -82,6 +82,11 @@ QUALITY_LOOP_NOVEL_ENTITY_THRESHOLD = float(os.environ.get("QUALITY_LOOP_NOVEL_E
 QUALITY_LOOP_UNVERIFIABLE_THRESHOLD = int(os.environ.get("QUALITY_LOOP_UNVERIFIABLE_THRESHOLD", "3"))
 QUALITY_LOOP_UNVERIFIABLE_RATIO = float(os.environ.get("QUALITY_LOOP_UNVERIFIABLE_RATIO", "0.40"))
 
+# Wall-clock budget guard for quality loop. Azure Functions Consumption plan
+# has a non-negotiable 230s HTTP gateway timeout. We require 60s of margin
+# for safety gates, schema, and audit trail after the loop completes.
+QUALITY_LOOP_BUDGET_SECONDS = 170
+
 # Enrichment cache (TTL 5 minutes, max 50 entries) - avoids redundant Exa calls on regen
 _enrichment_cache = TTLCache(maxsize=50, ttl=300)
 _enrichment_cache_lock = threading.Lock()
@@ -998,14 +1003,28 @@ async def generate_article_handler(req: func.HttpRequest) -> func.HttpResponse:
 
         # Skip quality loop for nota/servico — short, source-constrained formats
         # with minimal fabrication risk. Saves 30-90s per article.
-        # Also skip for prompt-based sources — the quality loop can add 2-4 extra
-        # LLM calls (120-240s), pushing total past Azure's 230s gateway timeout.
+        # Also skip for prompt-based and manual sources — the quality loop can add
+        # 2-4 extra LLM calls (120-240s), pushing total past Azure's 230s gateway
+        # timeout. For "manual" (criar do zero), the user pastes their own text so
+        # they ARE the source of truth — regeneration adds no editorial value.
         # Verification (Phase 3) still runs; safety gates still block bad articles.
         quality_loop_skip_types = ("nota", "servico")
         skip_quality_loop = (
             request_data.tipo_materia in quality_loop_skip_types
-            or request_data.source_type == "prompt"
+            or request_data.source_type in ("prompt", "manual")
         )
+
+        # Wall-clock budget guard: even if a source type would normally run the
+        # quality loop, abort if we're already too close to Azure's 230s gateway
+        # hard limit. Defense-in-depth against future pipeline regressions.
+        elapsed_seconds = time.time() - pipeline_start
+        if not skip_quality_loop and elapsed_seconds >= QUALITY_LOOP_BUDGET_SECONDS:
+            logger.warning(
+                f"[{correlation_id}] Skipping quality loop: pipeline already at "
+                f"{elapsed_seconds:.1f}s, insufficient budget under Azure 230s "
+                f"gateway limit (threshold={QUALITY_LOOP_BUDGET_SECONDS}s)"
+            )
+            skip_quality_loop = True
 
         if (QUALITY_LOOP_ENABLED
                 and is_fact_check_enabled()
