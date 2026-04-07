@@ -104,7 +104,10 @@ def with_cors(handler):
             response = await handler(req)
         except Exception as e:
             logger.exception(f"Unhandled error in {handler.__name__}: {e}")
-            error_body = json.dumps({"error": "Internal server error"})
+            # PT-BR friendly message — frontend's friendlyErrorMessage prefers
+            # serverMessage over its status-code map, so we must NOT leak English
+            # here or users see "Internal server error" raw in the red banner.
+            error_body = json.dumps({"error": "Erro inesperado no servidor. Tente novamente em instantes."})
             response = func.HttpResponse(error_body, status_code=500, mimetype="application/json")
 
         try:
@@ -122,8 +125,14 @@ def check_rate_limit(endpoint_name: str):
     from services.rate_limiter import RateLimiter
     retry_after = RateLimiter.get().check(endpoint_name)
     if retry_after is not None:
+        # PT-BR friendly message — frontend's friendlyErrorMessage prefers
+        # serverMessage over its status-code map, so this string is what the
+        # user actually sees in the red banner.
         return func.HttpResponse(
-            json.dumps({"error": "Rate limit exceeded", "retry_after_seconds": round(retry_after, 1)}),
+            json.dumps({
+                "error": f"Muitas requisições. Aguarde {int(retry_after) + 1} segundos e tente novamente.",
+                "retry_after_seconds": round(retry_after, 1),
+            }),
             status_code=429,
             headers={"Retry-After": str(int(retry_after) + 1)},
             mimetype="application/json",
