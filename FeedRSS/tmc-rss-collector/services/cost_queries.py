@@ -89,10 +89,10 @@ def insert_api_usage_log(log_data: dict) -> bool:
                 return False
 
         try:
-            loop = asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()
             loop.run_in_executor(None, _do_insert)
         except RuntimeError:
-            # No event loop (sync context) — run directly
+            # No running event loop (sync context) — run directly
             _do_insert()
         return True
     except Exception:
@@ -228,11 +228,15 @@ def get_cost_overview(period: str = '30d', start_date_str: str = None, end_date_
 
             avg_cost_per_article = round(generation_cost / articles_generated, 4) if articles_generated > 0 else 0
 
-            # Monthly projection (based on daily average in period)
-            days_in_period = max((end_date - start_date).days, 1)
+            # Monthly projection (based on daily average in period).
+            # +1 because SQL uses DATEADD(day,1,end_date) making both endpoints inclusive.
+            days_in_period = max((end_date - start_date).days + 1, 1)
             daily_avg = total_cost / days_in_period
             projected_monthly = round(daily_avg * 30, 2)
 
+            # Use 'custom' when caller supplied explicit date range so the
+            # frontend doesn't mislabel the card with the default period name.
+            effective_period = 'custom' if (start_date_str and end_date_str) else period
             result = {
                 'total_cost': round(total_cost, 2),
                 'delta_percent': delta_percent,
@@ -247,7 +251,7 @@ def get_cost_overview(period: str = '30d', start_date_str: str = None, end_date_
                     'exa': round(exa_cost, 4),
                     'embeddings': round(embedding_cost, 4),
                 },
-                'period': period,
+                'period': effective_period,
                 'start_date': str(start_date),
                 'end_date': str(end_date),
             }
@@ -382,7 +386,7 @@ def get_cost_by_user(start_date, end_date) -> dict:
                 cost = float(row[6] or 0)
                 articles = row[3] or 0
 
-                if uid == 'system' or uid is None:
+                if uid == 'system' or uid is None or uid == SYSTEM_UUID:
                     system_cost += cost
                     continue
 
@@ -490,12 +494,12 @@ def get_cost_trends(granularity: str, start_date, end_date) -> dict:
             """,
             'week': """
                 SELECT
-                    CONVERT(VARCHAR(10), DATEADD(DAY, 1-DATEPART(WEEKDAY, created_at), created_at), 120) as period,
+                    CONVERT(VARCHAR(10), DATEADD(wk, DATEDIFF(wk, '19000101', created_at), '19000101'), 120) as period,
                     ISNULL(SUM(ISNULL(input_cost_usd, 0) + ISNULL(output_cost_usd, 0)), 0) as llm_cost
                 FROM llm_usage_log
                 WHERE created_at >= %s AND created_at < DATEADD(day, 1, %s)
                   AND status = 'success'
-                GROUP BY CONVERT(VARCHAR(10), DATEADD(DAY, 1-DATEPART(WEEKDAY, created_at), created_at), 120)
+                GROUP BY CONVERT(VARCHAR(10), DATEADD(wk, DATEDIFF(wk, '19000101', created_at), '19000101'), 120)
                 ORDER BY period
             """,
             'month': """
@@ -535,13 +539,13 @@ def get_cost_trends(granularity: str, start_date, end_date) -> dict:
             """,
             'week': """
                 SELECT
-                    CONVERT(VARCHAR(10), DATEADD(DAY, 1-DATEPART(WEEKDAY, created_at), created_at), 120) as period,
+                    CONVERT(VARCHAR(10), DATEADD(wk, DATEDIFF(wk, '19000101', created_at), '19000101'), 120) as period,
                     provider,
                     ISNULL(SUM(cost_usd), 0) as api_cost
                 FROM api_usage_log
                 WHERE created_at >= %s AND created_at < DATEADD(day, 1, %s)
                   AND status = 'success'
-                GROUP BY CONVERT(VARCHAR(10), DATEADD(DAY, 1-DATEPART(WEEKDAY, created_at), created_at), 120), provider
+                GROUP BY CONVERT(VARCHAR(10), DATEADD(wk, DATEDIFF(wk, '19000101', created_at), '19000101'), 120), provider
                 ORDER BY period
             """,
             'month': """
@@ -785,8 +789,8 @@ async def aggregate_daily_costs(target_date: date) -> dict:
                    AND target.provider = source.provider
                    AND target.action_type = source.action_type
                 WHEN MATCHED THEN UPDATE SET
-                    call_count = target.call_count + source.call_count,
-                    total_cost_usd = target.total_cost_usd + source.total_cost_usd
+                    call_count = source.call_count,
+                    total_cost_usd = source.total_cost_usd
                 WHEN NOT MATCHED THEN INSERT
                     (date, provider, action_type, call_count, total_input_tokens,
                      total_output_tokens, total_cost_usd, avg_latency_ms)
@@ -865,8 +869,8 @@ async def aggregate_daily_costs(target_date: date) -> dict:
                    AND target.user_id = source.user_id
                    AND target.source_id = source.source_id
                 WHEN MATCHED THEN UPDATE SET
-                    call_count = target.call_count + source.call_count,
-                    total_cost_usd = target.total_cost_usd + source.total_cost_usd
+                    call_count = source.call_count,
+                    total_cost_usd = source.total_cost_usd
                 WHEN NOT MATCHED THEN INSERT
                     (date, provider, model, task_type, action_type, user_id, source_id,
                      call_count, total_input_tokens, total_output_tokens, total_cost_usd, avg_latency_ms)

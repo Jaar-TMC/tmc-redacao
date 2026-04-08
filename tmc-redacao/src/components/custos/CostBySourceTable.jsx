@@ -4,9 +4,10 @@ import { Rss, AlertCircle, RefreshCw, ChevronUp, ChevronDown } from 'lucide-reac
 import Skeleton from '../ui/Skeleton';
 
 // Pure helper — hoisted out of the component to avoid re-creating on every render
+// Green: up to median (inclusive), Yellow: median..2x median, Red: above 2x median
 function getEfficiencyBg(costPerArticle, medianCost) {
   if (!medianCost || costPerArticle <= 0) return 'bg-success';
-  if (costPerArticle < medianCost * 1.5) return 'bg-success';
+  if (costPerArticle <= medianCost) return 'bg-success';
   if (costPerArticle < medianCost * 2) return 'bg-warning';
   return 'bg-error';
 }

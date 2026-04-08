@@ -8,7 +8,7 @@ import Skeleton from '../ui/Skeleton';
 // Lazy-load recharts — it's ~150 KB parsed JS and not needed until the chart section renders
 const RechartsLine = lazy(() =>
   import('recharts').then(m => ({
-    default: ({ data, tickFormatter, tooltipContent }) => {
+    default: ({ data, tickFormatter, TooltipComponent }) => {
       const { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } = m;
       return (
         <ResponsiveContainer width="100%" height={250}>
@@ -16,7 +16,7 @@ const RechartsLine = lazy(() =>
             <CartesianGrid strokeDasharray="3 3" stroke="#E0E0E0" />
             <XAxis dataKey="date" tickFormatter={tickFormatter} tick={{ fontSize: 12 }} />
             <YAxis tickFormatter={v => `$${v.toFixed(2)}`} tick={{ fontSize: 12 }} />
-            <Tooltip content={tooltipContent} />
+            <Tooltip content={TooltipComponent} />
             <Line type="monotone" dataKey="total" stroke="#E87722" strokeWidth={2} name="Custo Total" dot={false} />
           </LineChart>
         </ResponsiveContainer>
@@ -27,7 +27,7 @@ const RechartsLine = lazy(() =>
 
 const RechartsArea = lazy(() =>
   import('recharts').then(m => ({
-    default: ({ data, height, tickFormatter, tooltipContent }) => {
+    default: ({ data, height, tickFormatter, TooltipComponent }) => {
       const { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } = m;
       return (
         <ResponsiveContainer width="100%" height={height}>
@@ -35,7 +35,7 @@ const RechartsArea = lazy(() =>
             <CartesianGrid strokeDasharray="3 3" stroke="#E0E0E0" />
             <XAxis dataKey="date" tickFormatter={tickFormatter} tick={{ fontSize: 12 }} />
             <YAxis tickFormatter={v => `$${v.toFixed(4)}`} tick={{ fontSize: 12 }} />
-            <Tooltip content={tooltipContent} />
+            <Tooltip content={TooltipComponent} />
             <Area stackId="1" dataKey="embeddings" fill="#2D5A3D" stroke="#2D5A3D" fillOpacity={0.6} name="Embeddings" />
             <Area stackId="1" dataKey="exa" fill="#1A4D2E" stroke="#1A4D2E" fillOpacity={0.6} name="Exa (Pesquisa)" />
           </AreaChart>
@@ -70,7 +70,7 @@ const formatDatePtBR = (dateStr, granularity) => {
   }
 };
 
-const CustomTooltip = memo(({ active, payload, label, nonLlmOnly }) => {
+const CustomTooltip = memo(({ active, payload, label }) => {
   if (!active || !payload || payload.length === 0) return null;
   const data = payload[0]?.payload;
   if (!data) return null;
@@ -78,12 +78,8 @@ const CustomTooltip = memo(({ active, payload, label, nonLlmOnly }) => {
   return (
     <div className="bg-white border border-light-gray rounded-lg shadow-lg p-3 text-sm">
       <p className="font-semibold text-dark-gray mb-1">{label}</p>
-      {!nonLlmOnly && (
-        <p className="text-tmc-orange">Total: ${data.total?.toFixed(4)}</p>
-      )}
-      {!nonLlmOnly && (
-        <p style={{ color: '#E87722' }}>LLM: ${data.llm?.toFixed(4)}</p>
-      )}
+      <p className="text-tmc-orange">Total: ${data.total?.toFixed(4)}</p>
+      <p style={{ color: '#E87722' }}>LLM: ${data.llm?.toFixed(4)}</p>
       <p style={{ color: '#1A4D2E' }}>Exa: ${data.exa?.toFixed(4)}</p>
       <p style={{ color: '#2D5A3D' }}>Embeddings: ${data.embeddings?.toFixed(6)}</p>
     </div>
@@ -95,7 +91,28 @@ CustomTooltip.propTypes = {
   active: PropTypes.bool,
   payload: PropTypes.array,
   label: PropTypes.string,
-  nonLlmOnly: PropTypes.bool,
+};
+
+// Separate component for non-LLM tooltip (Exa + Embeddings only)
+const CustomTooltipNonLlm = memo(({ active, payload, label }) => {
+  if (!active || !payload || payload.length === 0) return null;
+  const data = payload[0]?.payload;
+  if (!data) return null;
+
+  return (
+    <div className="bg-white border border-light-gray rounded-lg shadow-lg p-3 text-sm">
+      <p className="font-semibold text-dark-gray mb-1">{label}</p>
+      <p style={{ color: '#1A4D2E' }}>Exa: ${data.exa?.toFixed(4)}</p>
+      <p style={{ color: '#2D5A3D' }}>Embeddings: ${data.embeddings?.toFixed(6)}</p>
+    </div>
+  );
+});
+CustomTooltipNonLlm.displayName = 'CustomTooltipNonLlm';
+
+CustomTooltipNonLlm.propTypes = {
+  active: PropTypes.bool,
+  payload: PropTypes.array,
+  label: PropTypes.string,
 };
 
 const CostTrendsChart = ({ data, granularity, isLoading, error, onRetry }) => {
@@ -161,7 +178,7 @@ const CostTrendsChart = ({ data, granularity, isLoading, error, onRetry }) => {
             <RechartsLine
               data={data}
               tickFormatter={tickFormatter}
-              tooltipContent={<CustomTooltip />}
+              TooltipComponent={CustomTooltip}
             />
           </Suspense>
 
@@ -174,7 +191,7 @@ const CostTrendsChart = ({ data, granularity, isLoading, error, onRetry }) => {
               data={data}
               height={150}
               tickFormatter={tickFormatter}
-              tooltipContent={<CustomTooltip nonLlmOnly />}
+              TooltipComponent={CustomTooltipNonLlm}
             />
           </Suspense>
         </>
@@ -186,7 +203,7 @@ const CostTrendsChart = ({ data, granularity, isLoading, error, onRetry }) => {
             data={data}
             height={300}
             tickFormatter={tickFormatter}
-            tooltipContent={<CustomTooltip nonLlmOnly />}
+            TooltipComponent={CustomTooltipNonLlm}
           />
         </Suspense>
       )}

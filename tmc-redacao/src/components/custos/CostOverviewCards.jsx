@@ -175,7 +175,6 @@ const CostOverviewCards = ({ data, trends, isLoading, error, onRetry }) => {
         icon={TrendingUp}
         label="PROJEÇÃO MENSAL"
         value={formatCurrency(data.projected_monthly)}
-        subtitle="Baseado nos últimos 7 dias"
         sparklineData={sparklineData}
         sparklineKey="total"
         providerSplit={data.provider_split}
@@ -201,6 +200,7 @@ CostOverviewCards.propTypes = {
     }),
   }),
   trends: PropTypes.arrayOf(PropTypes.object),
+  period: PropTypes.string,
   isLoading: PropTypes.bool.isRequired,
   error: PropTypes.string,
   onRetry: PropTypes.func.isRequired,

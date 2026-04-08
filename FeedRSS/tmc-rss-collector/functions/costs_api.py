@@ -43,6 +43,12 @@ async def costs_overview_handler(req: func.HttpRequest) -> func.HttpResponse:
 
         from services.cost_queries import get_cost_overview
         if start_date and end_date:
+            try:
+                from datetime import date as _date
+                _date.fromisoformat(start_date)
+                _date.fromisoformat(end_date)
+            except ValueError:
+                return create_error_response("Datas invalidas. Use formato YYYY-MM-DD.", 400)
             data = get_cost_overview(period, start_date_str=start_date, end_date_str=end_date)
         else:
             if period not in ('today', '7d', '30d', '90d', 'year'):

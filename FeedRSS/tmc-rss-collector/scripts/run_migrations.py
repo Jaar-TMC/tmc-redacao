@@ -50,6 +50,7 @@ def main():
         "021_fulltext_search.sql",
         "022_cost_performance_indexes.sql",
         "023_performance_indexes.sql",
+        "024_llm_usage_cost_covering_index.sql",
     ]
 
     for mfile in migration_files:

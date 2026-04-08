@@ -224,6 +224,8 @@ const CustosPage = () => {
     };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
+  const dismissStatusMessage = useCallback(() => setStatusMessage(prev => ({ ...prev, isVisible: false })), []);
+
   // Memoized per-section retry callbacks — stable references prevent child re-renders
   const retryOverview = useCallback(() => retrySection('overview'), [retrySection]);
   const retryTrends = useCallback(() => retrySection('trends'), [retrySection]);
@@ -371,7 +373,7 @@ const CustosPage = () => {
         type={statusMessage.type}
         message={statusMessage.message}
         isVisible={statusMessage.isVisible}
-        onDismiss={() => setStatusMessage(prev => ({ ...prev, isVisible: false }))}
+        onDismiss={dismissStatusMessage}
       />
 
       {/* Sections */}
