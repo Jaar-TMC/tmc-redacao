@@ -110,7 +110,14 @@ async def costs_breakdown_handler(req: func.HttpRequest) -> func.HttpResponse:
         start_date = req.params.get('start_date')
         end_date = req.params.get('end_date')
 
-        if not start_date or not end_date:
+        if start_date and end_date:
+            from datetime import date as _date
+            try:
+                _date.fromisoformat(start_date)
+                _date.fromisoformat(end_date)
+            except ValueError:
+                return create_error_response("Datas invalidas. Use o formato YYYY-MM-DD", 400)
+        else:
             from services.cost_queries import period_to_dates
             s, e = period_to_dates(period)
             start_date = start_date or str(s)
@@ -134,7 +141,14 @@ async def costs_by_user_handler(req: func.HttpRequest) -> func.HttpResponse:
         start_date = req.params.get('start_date')
         end_date = req.params.get('end_date')
 
-        if not start_date or not end_date:
+        if start_date and end_date:
+            from datetime import date as _date
+            try:
+                _date.fromisoformat(start_date)
+                _date.fromisoformat(end_date)
+            except ValueError:
+                return create_error_response("Datas invalidas. Use o formato YYYY-MM-DD", 400)
+        else:
             from services.cost_queries import period_to_dates
             s, e = period_to_dates(period)
             start_date = start_date or str(s)
@@ -158,7 +172,14 @@ async def costs_by_source_handler(req: func.HttpRequest) -> func.HttpResponse:
         start_date = req.params.get('start_date')
         end_date = req.params.get('end_date')
 
-        if not start_date or not end_date:
+        if start_date and end_date:
+            from datetime import date as _date
+            try:
+                _date.fromisoformat(start_date)
+                _date.fromisoformat(end_date)
+            except ValueError:
+                return create_error_response("Datas invalidas. Use o formato YYYY-MM-DD", 400)
+        else:
             from services.cost_queries import period_to_dates
             s, e = period_to_dates(period)
             start_date = start_date or str(s)
