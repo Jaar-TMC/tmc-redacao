@@ -7,13 +7,37 @@ Imports get_db() and uses db.get_connection() for raw SQL queries.
 
 import asyncio
 import logging
+import time
 from datetime import datetime, timedelta, date
-from typing import Optional
+from typing import Optional, Any
 
 logger = logging.getLogger(__name__)
 
 # Sentinel UUID for system operations (no user/source attribution)
 SYSTEM_UUID = '00000000-0000-0000-0000-000000000000'
+
+# ---------------------------------------------------------------------------
+# In-memory TTL cache — persists across Function invocations within the same
+# worker process (keeps Azure Functions warm). Invalidated on cold start.
+# ---------------------------------------------------------------------------
+_cost_cache: dict[str, tuple[Any, float]] = {}
+_TTL_SHORT = 300    # 5 min — period-bound queries (overview, trends, breakdown, by-user, by-source)
+_TTL_LONG  = 600    # 10 min — source estimate (static, not period-bound)
+
+
+def _cache_get(key: str) -> Any:
+    entry = _cost_cache.get(key)
+    if entry is None:
+        return None
+    value, expires_at = entry
+    if time.monotonic() > expires_at:
+        del _cost_cache[key]
+        return None
+    return value
+
+
+def _cache_set(key: str, value: Any, ttl: int = _TTL_SHORT) -> None:
+    _cost_cache[key] = (value, time.monotonic() + ttl)
 
 
 def insert_api_usage_log(log_data: dict) -> bool:
@@ -110,6 +134,10 @@ def get_cost_overview(period: str = '30d', start_date_str: str = None, end_date_
     Returns totals by provider with delta vs previous period.
     If start_date_str and end_date_str are provided, they override the period.
     """
+    _ck = f'overview:{period}:{start_date_str}:{end_date_str}'
+    cached = _cache_get(_ck)
+    if cached is not None:
+        return cached
     try:
         from services.database import get_db
         db = get_db()
@@ -205,7 +233,7 @@ def get_cost_overview(period: str = '30d', start_date_str: str = None, end_date_
             daily_avg = total_cost / days_in_period
             projected_monthly = round(daily_avg * 30, 2)
 
-            return {
+            result = {
                 'total_cost': round(total_cost, 2),
                 'delta_percent': delta_percent,
                 'total_calls': llm_calls,
@@ -223,6 +251,8 @@ def get_cost_overview(period: str = '30d', start_date_str: str = None, end_date_
                 'start_date': str(start_date),
                 'end_date': str(end_date),
             }
+            _cache_set(_ck, result)
+            return result
     except Exception as e:
         logger.error(f"Error getting cost overview: {e}")
         return {
@@ -236,6 +266,10 @@ def get_cost_overview(period: str = '30d', start_date_str: str = None, end_date_
 
 def get_cost_by_action(start_date, end_date) -> dict:
     """Breakdown by action_type with call counts and costs."""
+    _ck = f'breakdown:{start_date}:{end_date}'
+    cached = _cache_get(_ck)
+    if cached is not None:
+        return cached
     try:
         from services.database import get_db
         db = get_db()
@@ -303,10 +337,9 @@ def get_cost_by_action(start_date, end_date) -> dict:
 
             items.sort(key=lambda x: x['total_cost'], reverse=True)
 
-            return {
-                'items': items,
-                'total_cost': round(grand_total, 2),
-            }
+            result = {'items': items, 'total_cost': round(grand_total, 2)}
+            _cache_set(_ck, result)
+            return result
     except Exception as e:
         logger.error(f"Error getting cost by action: {e}")
         return {'items': [], 'total_cost': 0}
@@ -314,6 +347,10 @@ def get_cost_by_action(start_date, end_date) -> dict:
 
 def get_cost_by_user(start_date, end_date) -> dict:
     """Per-user cost breakdown, JOINed with users table."""
+    _ck = f'by_user:{start_date}:{end_date}'
+    cached = _cache_get(_ck)
+    if cached is not None:
+        return cached
     try:
         from services.database import get_db
         db = get_db()
@@ -360,10 +397,9 @@ def get_cost_by_user(start_date, end_date) -> dict:
                     'cost_per_article': round(cost / articles, 4) if articles > 0 else 0,
                 })
 
-            return {
-                'items': items,
-                'system_cost': round(system_cost, 2),
-            }
+            result = {'items': items, 'system_cost': round(system_cost, 2)}
+            _cache_set(_ck, result)
+            return result
     except Exception as e:
         logger.error(f"Error getting cost by user: {e}")
         return {'items': [], 'system_cost': 0}
@@ -371,6 +407,10 @@ def get_cost_by_user(start_date, end_date) -> dict:
 
 def get_cost_by_source(start_date, end_date) -> dict:
     """Per-source cost breakdown, JOINed with sources table."""
+    _ck = f'by_source:{start_date}:{end_date}'
+    cached = _cache_get(_ck)
+    if cached is not None:
+        return cached
     try:
         from services.database import get_db
         db = get_db()
@@ -407,7 +447,9 @@ def get_cost_by_source(start_date, end_date) -> dict:
                     'cost_per_article': round(cost / articles, 6) if articles > 0 else 0,
                 })
 
-            return {'items': items}
+            result = {'items': items}
+            _cache_set(_ck, result)
+            return result
     except Exception as e:
         logger.error(f"Error getting cost by source: {e}")
         return {'items': []}
@@ -415,6 +457,10 @@ def get_cost_by_source(start_date, end_date) -> dict:
 
 def get_cost_trends(granularity: str, start_date, end_date) -> dict:
     """Time series cost data at given granularity."""
+    _ck = f'trends:{granularity}:{start_date}:{end_date}'
+    cached = _cache_get(_ck)
+    if cached is not None:
+        return cached
     try:
         from services.database import get_db
         db = get_db()
@@ -562,10 +608,9 @@ def get_cost_trends(granularity: str, start_date, end_date) -> dict:
                 entry['total'] = round(entry['llm'] + entry['exa'] + entry['embeddings'], 4)
                 data.append(entry)
 
-            return {
-                'granularity': granularity,
-                'data': data,
-            }
+            result = {'granularity': granularity, 'data': data}
+            _cache_set(_ck, result)
+            return result
     except Exception as e:
         logger.error(f"Error getting cost trends: {e}")
         return {'granularity': granularity, 'data': []}
@@ -573,6 +618,9 @@ def get_cost_trends(granularity: str, start_date, end_date) -> dict:
 
 def get_source_cost_estimate() -> dict:
     """Average cost per active source for what-if calculator."""
+    cached = _cache_get('source_estimate')
+    if cached is not None:
+        return cached
     try:
         from services.database import get_db
         db = get_db()
@@ -644,7 +692,7 @@ def get_source_cost_estimate() -> dict:
                 active_sources * avg_articles_per_source_per_day * avg_cost_per_article_pipeline, 2
             )
 
-            return {
+            result = {
                 'avg_articles_per_source_per_day': avg_articles_per_source_per_day,
                 'avg_cost_per_article_pipeline': avg_cost_per_article_pipeline,
                 'avg_cost_per_generated_article': avg_cost_per_generated_article,
@@ -652,6 +700,8 @@ def get_source_cost_estimate() -> dict:
                 'active_sources': active_sources,
                 'total_daily_pipeline_cost': total_daily_pipeline_cost,
             }
+            _cache_set('source_estimate', result, ttl=_TTL_LONG)
+            return result
     except Exception as e:
         logger.error(f"Error getting source cost estimate: {e}")
         return {
