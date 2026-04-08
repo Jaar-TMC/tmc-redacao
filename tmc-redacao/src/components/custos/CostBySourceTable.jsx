@@ -1,20 +1,28 @@
-import { memo, useState, useMemo } from 'react';
+import { memo, useState, useMemo, useCallback } from 'react';
 import PropTypes from 'prop-types';
 import { Rss, AlertCircle, RefreshCw, ChevronUp, ChevronDown } from 'lucide-react';
 import Skeleton from '../ui/Skeleton';
+
+// Pure helper — hoisted out of the component to avoid re-creating on every render
+function getEfficiencyBg(costPerArticle, medianCost) {
+  if (!medianCost || costPerArticle <= 0) return 'bg-success';
+  if (costPerArticle < medianCost * 1.5) return 'bg-success';
+  if (costPerArticle < medianCost * 2) return 'bg-warning';
+  return 'bg-error';
+}
 
 const CostBySourceTable = ({ data, isLoading, error, onRetry }) => {
   const [sortField, setSortField] = useState('total_cost');
   const [sortDirection, setSortDirection] = useState('desc');
 
-  const handleSort = (field) => {
+  const handleSort = useCallback((field) => {
     if (sortField === field) {
       setSortDirection(d => d === 'asc' ? 'desc' : 'asc');
     } else {
       setSortField(field);
       setSortDirection('desc');
     }
-  };
+  }, [sortField]);
 
   const sorted = useMemo(() => {
     if (!data?.items) return [];
@@ -33,14 +41,6 @@ const CostBySourceTable = ({ data, isLoading, error, onRetry }) => {
     const mid = Math.floor(costs.length / 2);
     return costs.length % 2 === 0 ? (costs[mid - 1] + costs[mid]) / 2 : costs[mid];
   }, [sorted]);
-
-  const getEfficiencyBg = (costPerArticle) => {
-    if (!medianCost || costPerArticle <= 0) return 'bg-success';
-    if (costPerArticle < medianCost) return 'bg-success';
-    if (costPerArticle < medianCost * 1.5) return 'bg-success';
-    if (costPerArticle < medianCost * 2) return 'bg-warning';
-    return 'bg-error';
-  };
 
   if (isLoading) return (
     <div className="bg-white rounded-xl border border-light-gray p-6 space-y-3" role="status" aria-live="polite">
@@ -118,7 +118,7 @@ const CostBySourceTable = ({ data, isLoading, error, onRetry }) => {
                 <td className="px-6 py-4 text-sm font-semibold text-dark-gray">${source.total_cost.toFixed(4)}</td>
                 <td className="px-6 py-4 text-sm">
                   <span className="inline-flex items-center gap-1.5">
-                    <span className={`w-2 h-2 rounded-full inline-block ${getEfficiencyBg(source.cost_per_article)}`} aria-hidden="true" />
+                    <span className={`w-2 h-2 rounded-full inline-block ${getEfficiencyBg(source.cost_per_article, medianCost)}`} aria-hidden="true" />
                     ${source.cost_per_article.toFixed(4)}
                   </span>
                 </td>

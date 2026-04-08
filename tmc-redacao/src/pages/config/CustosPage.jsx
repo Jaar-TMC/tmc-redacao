@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { Download, AlertCircle, Calendar } from 'lucide-react';
 import TabButton from '../../components/ui/TabButton';
 import StatusMessage from '../../components/ui/StatusMessage';
@@ -78,8 +78,8 @@ function periodToDateRange(period, customStart, customEnd) {
 }
 
 const CustosPage = () => {
-  const [period, setPeriod] = useState('30d');
-  const [customStart, setCustomStart] = useState(() => toDateString(new Date(Date.now() - 30 * 86400000)));
+  const [period, setPeriod] = useState('7d');
+  const [customStart, setCustomStart] = useState(() => toDateString(new Date(Date.now() - 7 * 86400000)));
   const [customEnd, setCustomEnd] = useState(() => toDateString(new Date()));
   const [overview, setOverview] = useState(null);
   const [trends, setTrends] = useState(null);
@@ -91,12 +91,14 @@ const CustosPage = () => {
 
   const [loadingStates, setLoadingStates] = useState({
     overview: true, trends: true, breakdown: true,
-    byUser: true, bySource: true, sourceEstimate: true,
+    byUser: true, bySource: true,
   });
   const [errors, setErrors] = useState({
     overview: null, trends: null, breakdown: null,
-    byUser: null, bySource: null, sourceEstimate: null,
+    byUser: null, bySource: null,
   });
+  const [sourceEstimateLoading, setSourceEstimateLoading] = useState(true);
+  const [sourceEstimateError, setSourceEstimateError] = useState(null);
   const [lastFetchTime, setLastFetchTime] = useState(null);
   const [statusMessage, setStatusMessage] = useState({ type: 'success', message: '', isVisible: false });
 
@@ -118,14 +120,14 @@ const CustosPage = () => {
     const isCustom = currentPeriod === 'custom';
     const periodParam = isCustom ? undefined : currentPeriod;
 
-    // Set all loading
+    // Set loading for period-bound sections only — sourceEstimate is fetched independently
     setLoadingStates({
       overview: true, trends: true, breakdown: true,
-      byUser: true, bySource: true, sourceEstimate: true,
+      byUser: true, bySource: true,
     });
     setErrors({
       overview: null, trends: null, breakdown: null,
-      byUser: null, bySource: null, sourceEstimate: null,
+      byUser: null, bySource: null,
     });
 
     const results = await Promise.allSettled([
@@ -134,14 +136,13 @@ const CustosPage = () => {
       getCostBreakdown({ start: startDate, end: endDate, period: periodParam }, { signal }),
       getCostByUser({ start: startDate, end: endDate, period: periodParam }, { signal }),
       getCostBySource({ start: startDate, end: endDate, period: periodParam }, { signal }),
-      getSourceEstimate({ signal }),
     ]);
 
     // Don't update state if this request was aborted
     if (signal.aborted) return;
 
-    const keys = ['overview', 'trends', 'breakdown', 'byUser', 'bySource', 'sourceEstimate'];
-    const setters = [setOverview, setTrends, setBreakdown, setByUser, setBySource, setSourceEstimate];
+    const keys = ['overview', 'trends', 'breakdown', 'byUser', 'bySource'];
+    const setters = [setOverview, setTrends, setBreakdown, setByUser, setBySource];
     const newLoadingStates = {};
     const newErrors = {};
 
@@ -190,9 +191,8 @@ const CustosPage = () => {
       breakdown: () => getCostBreakdown({ start: startDate, end: endDate, period: periodParam }),
       byUser: () => getCostByUser({ start: startDate, end: endDate, period: periodParam }),
       bySource: () => getCostBySource({ start: startDate, end: endDate, period: periodParam }),
-      sourceEstimate: () => getSourceEstimate(),
     };
-    const setterMap = { overview: setOverview, trends: setTrends, breakdown: setBreakdown, byUser: setByUser, bySource: setBySource, sourceEstimate: setSourceEstimate };
+    const setterMap = { overview: setOverview, trends: setTrends, breakdown: setBreakdown, byUser: setByUser, bySource: setBySource };
     const fetchFn = fetchMap[key];
     const setter = setterMap[key];
     if (!fetchFn || !setter) return;
@@ -205,15 +205,34 @@ const CustosPage = () => {
       .finally(() => { setLoadingStates(prev => ({ ...prev, [key]: false })); });
   }, [period, customStart, customEnd]);
 
-  // Initial fetch on mount
+  const retrySourceEstimate = useCallback(() => {
+    setSourceEstimateLoading(true);
+    setSourceEstimateError(null);
+    getSourceEstimate()
+      .then(data => { setSourceEstimate(data); setSourceEstimateError(null); })
+      .catch(err => { setSourceEstimateError(err?.message || 'Erro ao carregar dados'); })
+      .finally(() => setSourceEstimateLoading(false));
+  }, []);
+
+  // Initial fetch on mount — sourceEstimate is static, fetched once independently
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional: initial data load on mount
-    fetchAllData(period);
+    fetchAllData(period); // eslint-disable-line react-hooks/set-state-in-effect -- intentional: initial data load on mount
+    retrySourceEstimate(); // eslint-disable-line react-hooks/set-state-in-effect -- intentional: initial data load on mount
     return () => {
       if (abortControllerRef.current) abortControllerRef.current.abort();
       clearTimeout(periodDebounceRef.current);
     };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Memoized per-section retry callbacks — stable references prevent child re-renders
+  const retryOverview = useCallback(() => retrySection('overview'), [retrySection]);
+  const retryTrends = useCallback(() => retrySection('trends'), [retrySection]);
+  const retryBreakdown = useCallback(() => retrySection('breakdown'), [retrySection]);
+  const retryByUser = useCallback(() => retrySection('byUser'), [retrySection]);
+  const retryBySource = useCallback(() => retrySection('bySource'), [retrySection]);
+
+  // Stable derived value — avoids new reference on every render
+  const trendsData = useMemo(() => trends?.data, [trends]);
 
   const handleExportCSV = useCallback(() => {
     try {
@@ -358,46 +377,46 @@ const CustosPage = () => {
       {/* Sections */}
       <CostOverviewCards
         data={overview}
-        trends={trends?.data}
+        trends={trendsData}
         isLoading={loadingStates.overview}
         error={errors.overview}
-        onRetry={() => retrySection('overview')}
+        onRetry={retryOverview}
       />
 
       <CostTrendsChart
-        data={trends?.data}
+        data={trendsData}
         granularity={granularity}
         isLoading={loadingStates.trends}
         error={errors.trends}
-        onRetry={() => retrySection('trends')}
+        onRetry={retryTrends}
       />
 
       <CostBreakdownTable
         data={breakdown}
         isLoading={loadingStates.breakdown}
         error={errors.breakdown}
-        onRetry={() => retrySection('breakdown')}
+        onRetry={retryBreakdown}
       />
 
       <CostByUserTable
         data={byUser}
         isLoading={loadingStates.byUser}
         error={errors.byUser}
-        onRetry={() => retrySection('byUser')}
+        onRetry={retryByUser}
       />
 
       <CostBySourceTable
         data={bySource}
         isLoading={loadingStates.bySource}
         error={errors.bySource}
-        onRetry={() => retrySection('bySource')}
+        onRetry={retryBySource}
       />
 
       <WhatIfCalculator
         sourceEstimate={sourceEstimate}
-        isLoading={loadingStates.sourceEstimate}
-        error={errors.sourceEstimate}
-        onRetry={() => retrySection('sourceEstimate')}
+        isLoading={sourceEstimateLoading}
+        error={sourceEstimateError}
+        onRetry={retrySourceEstimate}
       />
     </div>
   );

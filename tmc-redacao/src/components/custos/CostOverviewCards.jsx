@@ -1,8 +1,23 @@
-import { memo } from 'react';
+import { memo, lazy, Suspense } from 'react';
 import PropTypes from 'prop-types';
 import { DollarSign, Activity, FileText, TrendingUp, AlertCircle, RefreshCw } from 'lucide-react';
-import { LineChart, Line, ResponsiveContainer } from 'recharts';
 import Skeleton from '../ui/Skeleton';
+
+// Lazy-load recharts for sparklines — avoids blocking the overview cards initial render
+const RechartsSparkline = lazy(() =>
+  import('recharts').then(m => ({
+    default: ({ data, dataKey }) => {
+      const { LineChart, Line, ResponsiveContainer } = m;
+      return (
+        <ResponsiveContainer width="100%" height={30}>
+          <LineChart data={data}>
+            <Line type="monotone" dataKey={dataKey} stroke="#E87722" strokeWidth={1.5} dot={false} />
+          </LineChart>
+        </ResponsiveContainer>
+      );
+    },
+  }))
+);
 
 const ProviderBar = memo(({ split }) => {
   if (!split) return null;
@@ -33,11 +48,9 @@ const Sparkline = memo(({ data, dataKey }) => {
   if (!data || data.length < 2) return null;
   return (
     <div className="mt-2" aria-hidden="true">
-      <ResponsiveContainer width="100%" height={30}>
-        <LineChart data={data}>
-          <Line type="monotone" dataKey={dataKey} stroke="#E87722" strokeWidth={1.5} dot={false} />
-        </LineChart>
-      </ResponsiveContainer>
+      <Suspense fallback={<div className="h-[30px]" />}>
+        <RechartsSparkline data={data} dataKey={dataKey} />
+      </Suspense>
     </div>
   );
 });

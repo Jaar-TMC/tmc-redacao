@@ -39,7 +39,7 @@ async def costs_overview_handler(req: func.HttpRequest) -> func.HttpResponse:
     try:
         start_date = req.params.get('start_date')
         end_date = req.params.get('end_date')
-        period = req.params.get('period', '30d')
+        period = req.params.get('period', '7d')
 
         from services.cost_queries import get_cost_overview
         if start_date and end_date:
@@ -60,7 +60,7 @@ async def costs_trends_handler(req: func.HttpRequest) -> func.HttpResponse:
     Params: granularity (hour|day|week|month), start_date, end_date
     """
     try:
-        period = req.params.get('period', '30d')
+        period = req.params.get('period', '7d')
         granularity = req.params.get('granularity')
         start_date = req.params.get('start_date')
         end_date = req.params.get('end_date')
@@ -100,7 +100,7 @@ async def costs_breakdown_handler(req: func.HttpRequest) -> func.HttpResponse:
     Params: period (or start_date+end_date), group_by (action|task|model)
     """
     try:
-        period = req.params.get('period', '30d')
+        period = req.params.get('period', '7d')
         start_date = req.params.get('start_date')
         end_date = req.params.get('end_date')
 
@@ -124,7 +124,7 @@ async def costs_by_user_handler(req: func.HttpRequest) -> func.HttpResponse:
     Params: period (or start_date+end_date)
     """
     try:
-        period = req.params.get('period', '30d')
+        period = req.params.get('period', '7d')
         start_date = req.params.get('start_date')
         end_date = req.params.get('end_date')
 
@@ -148,7 +148,7 @@ async def costs_by_source_handler(req: func.HttpRequest) -> func.HttpResponse:
     Params: period (or start_date+end_date)
     """
     try:
-        period = req.params.get('period', '30d')
+        period = req.params.get('period', '7d')
         start_date = req.params.get('start_date')
         end_date = req.params.get('end_date')
 

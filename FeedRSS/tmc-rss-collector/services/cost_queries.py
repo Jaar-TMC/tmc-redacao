@@ -141,31 +141,27 @@ def get_cost_overview(period: str = '30d', start_date_str: str = None, end_date_
             sonnet_calls = row[2] or 0
             haiku_calls = row[3] or 0
 
-            # Current period Exa costs
+            # Current period Exa + embedding costs — single query, grouped by provider
             cursor.execute("""
-                SELECT COUNT(*) as call_count,
+                SELECT provider,
                        ISNULL(SUM(cost_usd), 0) as total_cost
                 FROM api_usage_log
                 WHERE created_at >= %s AND created_at < DATEADD(day, 1, %s)
-                  AND provider = 'exa' AND status = 'success'
+                  AND provider IN ('exa', 'azure_openai_embedding')
+                  AND status = 'success'
+                GROUP BY provider
             """, (str(start_date), str(end_date)))
-            row = cursor.fetchone()
-            exa_cost = float(row[1] or 0)
-
-            # Current period embedding costs
-            cursor.execute("""
-                SELECT COUNT(*) as call_count,
-                       ISNULL(SUM(cost_usd), 0) as total_cost
-                FROM api_usage_log
-                WHERE created_at >= %s AND created_at < DATEADD(day, 1, %s)
-                  AND provider = 'azure_openai_embedding' AND status = 'success'
-            """, (str(start_date), str(end_date)))
-            row = cursor.fetchone()
-            embedding_cost = float(row[1] or 0)
+            exa_cost = 0.0
+            embedding_cost = 0.0
+            for api_row in cursor.fetchall():
+                if api_row[0] == 'exa':
+                    exa_cost = float(api_row[1] or 0)
+                elif api_row[0] == 'azure_openai_embedding':
+                    embedding_cost = float(api_row[1] or 0)
 
             total_cost = llm_cost + exa_cost + embedding_cost
 
-            # Previous period total for delta
+            # Previous period LLM cost for delta
             cursor.execute("""
                 SELECT ISNULL(SUM(ISNULL(input_cost_usd, 0) + ISNULL(output_cost_usd, 0)), 0)
                 FROM llm_usage_log
@@ -174,10 +170,12 @@ def get_cost_overview(period: str = '30d', start_date_str: str = None, end_date_
             """, (str(prev_start), str(prev_end)))
             prev_llm_cost = float(cursor.fetchone()[0] or 0)
 
+            # Previous period API cost — single pass for all providers
             cursor.execute("""
                 SELECT ISNULL(SUM(cost_usd), 0)
                 FROM api_usage_log
                 WHERE created_at >= %s AND created_at < DATEADD(day, 1, %s)
+                  AND provider IN ('exa', 'azure_openai_embedding')
                   AND status = 'success'
             """, (str(prev_start), str(prev_end)))
             prev_api_cost = float(cursor.fetchone()[0] or 0)
@@ -245,7 +243,7 @@ def get_cost_by_action(start_date, end_date) -> dict:
         with db.get_connection() as conn:
             cursor = conn.cursor()
 
-            # LLM costs by action
+            # LLM costs by action — keyed dict for O(1) merge with API rows
             cursor.execute("""
                 SELECT
                     ISNULL(action_type, 'unknown') as action,
@@ -257,18 +255,19 @@ def get_cost_by_action(start_date, end_date) -> dict:
                 GROUP BY action_type
             """, (str(start_date), str(end_date)))
 
-            items = []
+            action_map = {}
             grand_total = 0.0
             for row in cursor.fetchall():
+                action = row[0] or 'unknown'
                 cost = float(row[2] or 0)
-                items.append({
-                    'action': row[0] or 'unknown',
+                action_map[action] = {
+                    'action': action,
                     'call_count': row[1] or 0,
-                    'total_cost': round(cost, 4),
-                })
+                    'total_cost': cost,
+                }
                 grand_total += cost
 
-            # API costs by action
+            # API costs by action — O(1) merge via dict lookup
             cursor.execute("""
                 SELECT
                     ISNULL(action_type, 'unknown') as action,
@@ -281,24 +280,26 @@ def get_cost_by_action(start_date, end_date) -> dict:
             """, (str(start_date), str(end_date)))
 
             for row in cursor.fetchall():
+                action = row[0] or 'unknown'
                 cost = float(row[2] or 0)
-                # Merge with existing action or add new
-                existing = next((i for i in items if i['action'] == (row[0] or 'unknown')), None)
-                if existing:
-                    existing['call_count'] += row[1] or 0
-                    existing['total_cost'] = round(existing['total_cost'] + cost, 4)
+                if action in action_map:
+                    action_map[action]['call_count'] += row[1] or 0
+                    action_map[action]['total_cost'] += cost
                 else:
-                    items.append({
-                        'action': row[0] or 'unknown',
+                    action_map[action] = {
+                        'action': action,
                         'call_count': row[1] or 0,
-                        'total_cost': round(cost, 4),
-                    })
+                        'total_cost': cost,
+                    }
                 grand_total += cost
 
-            # Calculate avg and pct
-            for item in items:
+            # Calculate avg, pct, and round costs in a single pass
+            items = []
+            for item in action_map.values():
+                item['total_cost'] = round(item['total_cost'], 4)
                 item['avg_cost'] = round(item['total_cost'] / item['call_count'], 6) if item['call_count'] > 0 else 0
                 item['pct_of_total'] = round((item['total_cost'] / grand_total * 100), 1) if grand_total > 0 else 0
+                items.append(item)
 
             items.sort(key=lambda x: x['total_cost'], reverse=True)
 
@@ -321,7 +322,7 @@ def get_cost_by_user(start_date, end_date) -> dict:
             cursor = conn.cursor()
 
             cursor.execute("""
-                SELECT
+                SELECT TOP 100
                     ISNULL(CAST(l.user_id AS VARCHAR(36)), 'system') as uid,
                     ISNULL(u.name, 'Sistema (Automático)') as user_name,
                     u.email as user_email,
@@ -378,14 +379,14 @@ def get_cost_by_source(start_date, end_date) -> dict:
             cursor = conn.cursor()
 
             cursor.execute("""
-                SELECT
+                SELECT TOP 100
                     CAST(l.source_id AS VARCHAR(36)) as sid,
                     ISNULL(s.name, 'Desconhecida') as source_name,
                     s.category,
                     COUNT(*) as articles_collected,
                     ISNULL(SUM(ISNULL(l.input_cost_usd, 0) + ISNULL(l.output_cost_usd, 0)), 0) as total_cost
                 FROM llm_usage_log l
-                LEFT JOIN sources s ON CAST(l.source_id AS VARCHAR(36)) = CAST(s.id AS VARCHAR(36))
+                LEFT JOIN sources s ON l.source_id = s.id
                 WHERE l.created_at >= %s AND l.created_at < DATEADD(day, 1, %s)
                   AND l.status = 'success'
                   AND l.source_id IS NOT NULL
@@ -580,17 +581,21 @@ def get_source_cost_estimate() -> dict:
             cursor = conn.cursor()
 
             # Active sources count
-            cursor.execute("SELECT COUNT(*) FROM sources WHERE active = 1")
+            cursor.execute("SELECT COUNT(*) FROM sources WHERE active = 1 AND is_deleted = 0")
             active_sources = cursor.fetchone()[0] or 0
 
-            # Avg articles collected per source per day (last 7 days)
+            # Avg articles collected per source per day (last 7 days).
+            # TOP 2000 on the inner scan caps the number of rows read before grouping,
+            # preventing a full table scan on large collected_articles tables.
             cursor.execute("""
-                SELECT
-                    CAST(AVG(CAST(daily_count AS FLOAT)) AS FLOAT)
+                SELECT CAST(AVG(CAST(daily_count AS FLOAT)) AS FLOAT)
                 FROM (
                     SELECT source_id, CONVERT(DATE, published_at) as d, COUNT(*) as daily_count
-                    FROM collected_articles
-                    WHERE published_at >= DATEADD(day, -7, GETUTCDATE())
+                    FROM (SELECT TOP 2000 source_id, published_at
+                          FROM collected_articles
+                          WHERE published_at >= DATEADD(day, -7, GETUTCDATE())
+                            AND is_deleted = 0
+                          ORDER BY published_at DESC) recent
                     GROUP BY source_id, CONVERT(DATE, published_at)
                 ) sub
             """)
@@ -606,11 +611,12 @@ def get_source_cost_estimate() -> dict:
             """)
             avg_cost_per_article_pipeline = round(float(cursor.fetchone()[0] or 0.002), 6)
 
-            # Avg cost per generated article
+            # Avg cost per generated article — single aggregate with HAVING, avoids nested subquery
             cursor.execute("""
-                SELECT AVG(total_cost)
+                SELECT AVG(per_article_cost)
                 FROM (
-                    SELECT correlation_id, SUM(ISNULL(input_cost_usd, 0) + ISNULL(output_cost_usd, 0)) as total_cost
+                    SELECT TOP 500
+                        SUM(ISNULL(input_cost_usd, 0) + ISNULL(output_cost_usd, 0)) as per_article_cost
                     FROM llm_usage_log
                     WHERE action_type = 'generate_article'
                       AND created_at >= DATEADD(day, -7, GETUTCDATE())
@@ -621,8 +627,7 @@ def get_source_cost_estimate() -> dict:
             """)
             avg_cost_per_generated_article = round(float(cursor.fetchone()[0] or 0.18), 4)
 
-            # Avg generated articles per source (last 7 days)
-            total_generated = 0
+            # Distinct generated articles (last 7 days) — reuse same connection
             cursor.execute("""
                 SELECT COUNT(DISTINCT correlation_id)
                 FROM llm_usage_log

@@ -1,14 +1,54 @@
-import { memo, useState, useCallback } from 'react';
+import { memo, useState, useCallback, lazy, Suspense } from 'react';
 import PropTypes from 'prop-types';
 import { DollarSign, AlertCircle, RefreshCw } from 'lucide-react';
-import {
-  LineChart, Line, AreaChart, Area,
-  XAxis, YAxis, CartesianGrid, Tooltip,
-  ResponsiveContainer,
-} from 'recharts';
 import TabButton from '../ui/TabButton';
 import EmptyState from '../ui/EmptyState';
 import Skeleton from '../ui/Skeleton';
+
+// Lazy-load recharts — it's ~150 KB parsed JS and not needed until the chart section renders
+const RechartsLine = lazy(() =>
+  import('recharts').then(m => ({
+    default: ({ data, tickFormatter, tooltipContent }) => {
+      const { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } = m;
+      return (
+        <ResponsiveContainer width="100%" height={250}>
+          <LineChart data={data}>
+            <CartesianGrid strokeDasharray="3 3" stroke="#E0E0E0" />
+            <XAxis dataKey="date" tickFormatter={tickFormatter} tick={{ fontSize: 12 }} />
+            <YAxis tickFormatter={v => `$${v.toFixed(2)}`} tick={{ fontSize: 12 }} />
+            <Tooltip content={tooltipContent} />
+            <Line type="monotone" dataKey="total" stroke="#E87722" strokeWidth={2} name="Custo Total" dot={false} />
+          </LineChart>
+        </ResponsiveContainer>
+      );
+    },
+  }))
+);
+
+const RechartsArea = lazy(() =>
+  import('recharts').then(m => ({
+    default: ({ data, height, tickFormatter, tooltipContent }) => {
+      const { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } = m;
+      return (
+        <ResponsiveContainer width="100%" height={height}>
+          <AreaChart data={data}>
+            <CartesianGrid strokeDasharray="3 3" stroke="#E0E0E0" />
+            <XAxis dataKey="date" tickFormatter={tickFormatter} tick={{ fontSize: 12 }} />
+            <YAxis tickFormatter={v => `$${v.toFixed(4)}`} tick={{ fontSize: 12 }} />
+            <Tooltip content={tooltipContent} />
+            <Area stackId="1" dataKey="embeddings" fill="#2D5A3D" stroke="#2D5A3D" fillOpacity={0.6} name="Embeddings" />
+            <Area stackId="1" dataKey="exa" fill="#1A4D2E" stroke="#1A4D2E" fillOpacity={0.6} name="Exa (Pesquisa)" />
+          </AreaChart>
+        </ResponsiveContainer>
+      );
+    },
+  }))
+);
+
+const ChartSkeleton = ({ height }) => (
+  <div className="animate-pulse bg-off-white rounded" style={{ height }} aria-hidden="true" />
+);
+ChartSkeleton.propTypes = { height: PropTypes.number.isRequired };
 
 const formatDatePtBR = (dateStr, granularity) => {
   if (!dateStr) return '';
@@ -117,44 +157,38 @@ const CostTrendsChart = ({ data, granularity, isLoading, error, onRetry }) => {
 
       {chartMode === 'all' && (
         <>
-          <ResponsiveContainer width="100%" height={250}>
-            <LineChart data={data}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#E0E0E0" />
-              <XAxis dataKey="date" tickFormatter={tickFormatter} tick={{ fontSize: 12 }} />
-              <YAxis tickFormatter={v => `$${v.toFixed(2)}`} tick={{ fontSize: 12 }} />
-              <Tooltip content={<CustomTooltip />} />
-              <Line type="monotone" dataKey="total" stroke="#E87722" strokeWidth={2} name="Custo Total" dot={false} />
-            </LineChart>
-          </ResponsiveContainer>
+          <Suspense fallback={<ChartSkeleton height={250} />}>
+            <RechartsLine
+              data={data}
+              tickFormatter={tickFormatter}
+              tooltipContent={<CustomTooltip />}
+            />
+          </Suspense>
 
           <p className="text-xs text-medium-gray mt-4 mb-2 font-medium">
             Custos Exa + Embeddings (escala própria)
           </p>
 
-          <ResponsiveContainer width="100%" height={150}>
-            <AreaChart data={data}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#E0E0E0" />
-              <XAxis dataKey="date" tickFormatter={tickFormatter} tick={{ fontSize: 12 }} />
-              <YAxis tickFormatter={v => `$${v.toFixed(4)}`} tick={{ fontSize: 12 }} />
-              <Tooltip content={<CustomTooltip nonLlmOnly />} />
-              <Area stackId="1" dataKey="embeddings" fill="#2D5A3D" stroke="#2D5A3D" fillOpacity={0.6} name="Embeddings" />
-              <Area stackId="1" dataKey="exa" fill="#1A4D2E" stroke="#1A4D2E" fillOpacity={0.6} name="Exa (Pesquisa)" />
-            </AreaChart>
-          </ResponsiveContainer>
+          <Suspense fallback={<ChartSkeleton height={150} />}>
+            <RechartsArea
+              data={data}
+              height={150}
+              tickFormatter={tickFormatter}
+              tooltipContent={<CustomTooltip nonLlmOnly />}
+            />
+          </Suspense>
         </>
       )}
 
       {chartMode === 'non-llm' && (
-        <ResponsiveContainer width="100%" height={300}>
-          <AreaChart data={data}>
-            <CartesianGrid strokeDasharray="3 3" stroke="#E0E0E0" />
-            <XAxis dataKey="date" tickFormatter={tickFormatter} tick={{ fontSize: 12 }} />
-            <YAxis tickFormatter={v => `$${v.toFixed(4)}`} tick={{ fontSize: 12 }} />
-            <Tooltip content={<CustomTooltip nonLlmOnly />} />
-            <Area stackId="1" dataKey="embeddings" fill="#2D5A3D" stroke="#2D5A3D" fillOpacity={0.6} name="Embeddings" />
-            <Area stackId="1" dataKey="exa" fill="#1A4D2E" stroke="#1A4D2E" fillOpacity={0.6} name="Exa (Pesquisa)" />
-          </AreaChart>
-        </ResponsiveContainer>
+        <Suspense fallback={<ChartSkeleton height={300} />}>
+          <RechartsArea
+            data={data}
+            height={300}
+            tickFormatter={tickFormatter}
+            tooltipContent={<CustomTooltip nonLlmOnly />}
+          />
+        </Suspense>
       )}
     </div>
   );

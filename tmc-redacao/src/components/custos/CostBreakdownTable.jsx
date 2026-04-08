@@ -1,4 +1,4 @@
-import { memo, useState, useMemo } from 'react';
+import { memo, useState, useMemo, useCallback } from 'react';
 import PropTypes from 'prop-types';
 import {
   Sparkles, Edit2, Shield, SearchCheck, ListTree, Merge, Tag,
@@ -38,14 +38,14 @@ const CostBreakdownTable = ({ data, isLoading, error, onRetry }) => {
   const [sortField, setSortField] = useState('total_cost');
   const [sortDirection, setSortDirection] = useState('desc');
 
-  const handleSort = (field) => {
+  const handleSort = useCallback((field) => {
     if (sortField === field) {
       setSortDirection(d => d === 'asc' ? 'desc' : 'asc');
     } else {
       setSortField(field);
       setSortDirection('desc');
     }
-  };
+  }, [sortField]);
 
   const sorted = useMemo(() => {
     if (!data?.items) return [];

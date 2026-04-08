@@ -1,4 +1,4 @@
-import { memo, useState, useMemo } from 'react';
+import { memo, useState, useMemo, useCallback } from 'react';
 import PropTypes from 'prop-types';
 import { User, Cpu, AlertTriangle, AlertCircle, RefreshCw, Search, ChevronUp, ChevronDown } from 'lucide-react';
 import Skeleton from '../ui/Skeleton';
@@ -8,14 +8,14 @@ const CostByUserTable = ({ data, isLoading, error, onRetry }) => {
   const [sortField, setSortField] = useState('total_cost');
   const [sortDirection, setSortDirection] = useState('desc');
 
-  const handleSort = (field) => {
+  const handleSort = useCallback((field) => {
     if (sortField === field) {
       setSortDirection(d => d === 'asc' ? 'desc' : 'asc');
     } else {
       setSortField(field);
       setSortDirection('desc');
     }
-  };
+  }, [sortField]);
 
   const filtered = useMemo(() => {
     if (!data?.items) return [];
