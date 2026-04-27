@@ -33,6 +33,6 @@ export async function deactivateUser(userId) {
 export async function resetPassword(userId, newPassword) {
   return fetchApi(`/auth/users/${userId}/reset-password`, {
     method: 'POST',
-    body: JSON.stringify({ password: newPassword }),
+    body: JSON.stringify({ new_password: newPassword }),
   });
 }
